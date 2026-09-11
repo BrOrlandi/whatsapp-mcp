@@ -52,8 +52,11 @@ services:
   evolution-go:
     image: evoapicloud/evolution-go:0.7.2
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${EVOLUTION_PORT:-4000}:4000"
+    expose:
+      - "4000"
+    networks:
+      - default
+      - dokploy-network
     environment:
       SERVER_PORT: "4000"
       CLIENT_NAME: evolution
@@ -112,8 +115,11 @@ services:
       RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-message}
       DATABASE_URL: postgres://${MCP_DB_USER}:${MCP_DB_PASSWORD}@postgres-mcp:5432/${MCP_DB_NAME:-whatsapp_mcp}?sslmode=disable
       FRESHNESS_WINDOW: ${FRESHNESS_WINDOW:-5m}
-    ports:
-      - "127.0.0.1:${MCP_HEALTH_PORT:-8080}:8080"
+    expose:
+      - "8080"
+    networks:
+      - default
+      - dokploy-network
     depends_on:
       postgres-mcp: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
@@ -131,3 +137,7 @@ volumes:
   rabbitmq_data:
   minio_data:
   postgres_mcp_data:
+
+networks:
+  dokploy-network:
+    external: true
