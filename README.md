@@ -72,6 +72,12 @@ curl -fsS https://whatsapp-mcp.example.com/healthz
 
 If the Dokploy domain configuration is corrected to generate `web-secure`, remove the temporary file-provider routes and redeploy the Compose stack. Do not report success based only on container health: the public Swagger, MCP health endpoint, valid TLS certificate, first-access setup, and authenticated dashboard must all be verified.
 
+The project identity is an original green message-and-node mark, kept in `internal/brand/logo.svg` and embedded into the setup, login, and dashboard pages without an external CDN. The same asset is used here:
+
+![WhatsApp MCP logo](internal/brand/logo.svg)
+
+The visual system preserves the WhatsApp-inspired green palette while keeping this project independent and unofficial. The UI supports light and dark system themes, responsive layouts, keyboard focus states, and an explicit degraded state when Evolution is disconnected.
+
 ## Development checks
 
 ```sh
