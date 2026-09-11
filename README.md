@@ -2,6 +2,8 @@
 
 This repository contains the first production slice of a small Go gateway between Evolution Go, RabbitMQ, PostgreSQL, and MCP clients. It currently ingests the Evolution `message` queue, persists raw events and searchable message text idempotently, exposes health endpoints, and serves two read-only MCP tools over stdio.
 
+The same HTTP server provides a Portuguese control panel at `http://127.0.0.1:8080/`. On first access, create the single administrator and then choose at most one Evolution instance. Passwords are bcrypt-hashed in PostgreSQL; sessions use signed, HttpOnly, SameSite cookies with concurrency-safe server-side state. A process restart intentionally invalidates active sessions.
+
 ## Start the stack
 
 Requirements: Docker Engine with Compose v2. Copy the example environment and replace every placeholder with a distinct randomly generated secret:
@@ -30,6 +32,7 @@ Evolution APIs have changed between releases. This slice deliberately polls the 
 - `GET /healthz` is process liveness and returns HTTP 200 while the gateway can answer requests.
 - `GET /readyz` returns HTTP 200 only when Evolution, RabbitMQ, and PostgreSQL are connected and a persisted event is newer than `FRESHNESS_WINDOW`; otherwise it returns HTTP 503.
 - Both responses include `evolution_connected`, `last_event_at`, `rabbit_connected`, `database_connected`, and `stale`. When stale, they also include the warning `message freshness is not trustworthy; results may be incomplete`.
+- Authenticated `GET /api/selected-instance` reports the persisted selection and one of `api_unavailable`, `no_instance`, `disconnected`, `connecting`, or `connected`.
 
 No recent event is distinguishable from a quiet account only by reconciliation with Evolution. This first slice therefore fails closed: startup remains stale until an event is persisted, disconnecting Evolution immediately makes the index stale, and `search_messages` refuses results while stale. Increase `FRESHNESS_WINDOW` only if that tradeoff is acceptable.
 

@@ -34,6 +34,11 @@ func main() {
 	state.SetDatabase(true)
 
 	evolutionClient := evolution.New(cfg.EvolutionURL, cfg.EvolutionAPIKey, cfg.EvolutionTimeout)
+	sessionKey, err := httpapi.NewSessionKey()
+	if err != nil {
+		logger.Error("generate session key", "error", err)
+		os.Exit(1)
+	}
 	go pollEvolution(ctx, evolutionClient, state, cfg.StatusPollInterval, logger)
 	go pollDatabase(ctx, db, state)
 	consumer := &rabbit.Consumer{URL: cfg.RabbitURL, Queue: cfg.RabbitQueue, Store: db, SetConnected: state.SetRabbit, OnPersisted: state.MarkEvent, Logger: logger}
@@ -48,7 +53,8 @@ func main() {
 		}
 	}()
 
-	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.Handler(state, cfg.FreshnessWindow), ReadHeaderTimeout: 5 * time.Second}
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, sessionKey, cfg.EvolutionURL)
+	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

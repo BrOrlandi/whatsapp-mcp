@@ -40,3 +40,17 @@ func TestStatusRejectsUnknownState(t *testing.T) {
 		t.Fatalf("connected=%v state=%q err=%v", connected, state, err)
 	}
 }
+
+func TestFetchInstancesUsesAPIKeyAndDecodesInstances(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/instance/fetchInstances" || r.Header.Get("apikey") != "secret" {
+			t.Fatalf("request path=%q apikey=%q", r.URL.Path, r.Header.Get("apikey"))
+		}
+		_, _ = w.Write([]byte(`[{"id":"abc","name":"Pessoal","ownerJid":"5511999999999@s.whatsapp.net","connectionStatus":"open"},{"instance":{"instanceName":"Trabalho","instanceId":"def","state":"connecting"}}]`))
+	}))
+	defer server.Close()
+	instances, err := New(server.URL, "secret", time.Second).FetchInstances(context.Background())
+	if err != nil || len(instances) != 2 || instances[0].Number != "5511999999999" || instances[0].Status != StatusConnected || instances[1].Status != StatusConnecting {
+		t.Fatalf("instances=%+v err=%v", instances, err)
+	}
+}

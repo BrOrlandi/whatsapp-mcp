@@ -15,6 +15,14 @@ func Handler(state *health.State, freshness time.Duration) http.Handler {
 	return mux
 }
 
+func FullHandler(state *health.State, freshness time.Duration, web http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeHealth(w, state.Snapshot(), freshness, true) })
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) { writeHealth(w, state.Snapshot(), freshness, false) })
+	mux.Handle("/", web)
+	return mux
+}
+
 func writeHealth(w http.ResponseWriter, snapshot health.Snapshot, freshness time.Duration, live bool) {
 	stale := snapshot.Stale(freshness)
 	body := map[string]any{"evolution_connected": snapshot.EvolutionConnected, "last_event_at": snapshot.LastEventAt, "rabbit_connected": snapshot.RabbitConnected, "database_connected": snapshot.DatabaseConnected, "stale": stale}

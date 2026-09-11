@@ -32,6 +32,46 @@ type Message struct {
 	SentAt     time.Time `json:"sent_at"`
 }
 
+var ErrAdminExists = errors.New("admin already exists")
+
+func (s *Store) Admin(ctx context.Context) (string, string, error) {
+	var username, hash string
+	err := s.DB.QueryRowContext(ctx, `SELECT username,password_hash FROM control_panel_admin WHERE singleton=TRUE`).Scan(&username, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	return username, hash, err
+}
+
+func (s *Store) CreateAdmin(ctx context.Context, username, hash string) error {
+	result, err := s.DB.ExecContext(ctx, `INSERT INTO control_panel_admin(singleton,username,password_hash) VALUES(TRUE,$1,$2) ON CONFLICT(singleton) DO NOTHING`, username, hash)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return ErrAdminExists
+	}
+	return nil
+}
+
+func (s *Store) SelectedInstance(ctx context.Context) (string, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `SELECT selected_instance_id FROM control_panel_settings WHERE singleton=TRUE`).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+func (s *Store) SelectInstance(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO control_panel_settings(singleton,selected_instance_id) VALUES(TRUE,$1) ON CONFLICT(singleton) DO UPDATE SET selected_instance_id=EXCLUDED.selected_instance_id,updated_at=now()`, id)
+	return err
+}
+
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	if dsn == "" {
 		return nil, errors.New("DATABASE_URL is required")
@@ -101,7 +141,7 @@ func (s *Store) SearchMessages(ctx context.Context, query string, limit int) ([]
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT instance_id,message_id,chat_jid,sender_name,from_me,text,sent_at FROM messages WHERE search_vector @@ websearch_to_tsquery('simple',$1) ORDER BY sent_at DESC NULLS LAST LIMIT $2`, query, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.instance_id,m.message_id,m.chat_jid,m.sender_name,m.from_me,m.text,m.sent_at FROM messages m JOIN control_panel_settings s ON s.singleton=TRUE AND s.selected_instance_id=m.instance_id WHERE m.search_vector @@ websearch_to_tsquery('simple',$1) ORDER BY m.sent_at DESC NULLS LAST LIMIT $2`, query, limit)
 	if err != nil {
 		return nil, err
 	}
