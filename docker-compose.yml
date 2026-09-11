@@ -115,6 +115,7 @@ services:
     environment:
       LISTEN_ADDR: :8080
       EVOLUTION_URL: http://evolution-go:4000
+      EVOLUTION_PUBLIC_URL: https://evolution-go.example.com
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-5s}
       STATUS_POLL_INTERVAL: ${STATUS_POLL_INTERVAL:-15s}

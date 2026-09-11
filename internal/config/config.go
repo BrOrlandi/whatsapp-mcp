@@ -9,6 +9,7 @@ import (
 type Config struct {
 	ListenAddr         string
 	EvolutionURL       string
+	EvolutionPublicURL string
 	EvolutionAPIKey    string
 	EvolutionTimeout   time.Duration
 	RabbitURL          string
@@ -22,6 +23,7 @@ func Load() Config {
 	return Config{
 		ListenAddr:         env("LISTEN_ADDR", ":8080"),
 		EvolutionURL:       env("EVOLUTION_URL", "http://evolution-go:4000"),
+		EvolutionPublicURL: env("EVOLUTION_PUBLIC_URL", "https://evolution-go.example.com"),
 		EvolutionAPIKey:    os.Getenv("EVOLUTION_API_KEY"),
 		EvolutionTimeout:   duration("EVOLUTION_TIMEOUT", 5*time.Second),
 		RabbitURL:          env("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/"),

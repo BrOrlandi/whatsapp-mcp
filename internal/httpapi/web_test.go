@@ -87,6 +87,15 @@ func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 		t.Fatalf("login ended at %s", r.Request.URL.Path)
 	}
 	r.Body.Close()
+	page, err := client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if !strings.Contains(string(body), "http://evolution:4000/manager/login") {
+		t.Fatalf("manager link missing: %s", body)
+	}
 }
 
 func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {

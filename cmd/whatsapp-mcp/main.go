@@ -53,7 +53,7 @@ func main() {
 		}
 	}()
 
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, sessionKey, cfg.EvolutionURL)
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, sessionKey, cfg.EvolutionPublicURL)
 	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
