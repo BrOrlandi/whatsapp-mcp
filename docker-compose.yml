@@ -57,6 +57,13 @@ services:
     networks:
       - default
       - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.evolution-go.rule=Host(`evolution-go.example.com`)
+      - traefik.http.routers.evolution-go.entrypoints=websecure
+      - traefik.http.routers.evolution-go.tls.certresolver=letsencrypt
+      - traefik.http.services.evolution-go.loadbalancer.server.port=4000
     environment:
       SERVER_PORT: "4000"
       CLIENT_NAME: evolution
@@ -120,6 +127,13 @@ services:
     networks:
       - default
       - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.whatsapp-mcp.rule=Host(`whatsapp-mcp.example.com`)
+      - traefik.http.routers.whatsapp-mcp.entrypoints=websecure
+      - traefik.http.routers.whatsapp-mcp.tls.certresolver=letsencrypt
+      - traefik.http.services.whatsapp-mcp.loadbalancer.server.port=8080
     depends_on:
       postgres-mcp: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
