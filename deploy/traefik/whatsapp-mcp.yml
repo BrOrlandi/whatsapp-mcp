@@ -1,0 +1,28 @@
+# Temporary compatibility routes for Dokploy's generated `websecure` labels.
+# Install on the Dokploy host under /etc/dokploy/traefik/dynamic/.
+# The file provider watches this directory and reloads it automatically.
+http:
+  routers:
+    whatsapp-mcp-public:
+      rule: "Host(`whatsapp-mcp.example.com`)"
+      entryPoints:
+        - web-secure
+      service: whatsapp-mcp-public
+      tls:
+        certResolver: letsencrypt
+    evolution-go-public:
+      rule: "Host(`evolution-go.example.com`)"
+      entryPoints:
+        - web-secure
+      service: evolution-go-public
+      tls:
+        certResolver: letsencrypt
+  services:
+    whatsapp-mcp-public:
+      loadBalancer:
+        servers:
+          - url: "http://whatsapp-mcp:8080"
+    evolution-go-public:
+      loadBalancer:
+        servers:
+          - url: "http://evolution-go:4000"
