@@ -199,6 +199,7 @@ func TestDashboardShowsManagerLinkAndInstanceStates(t *testing.T) {
 	}
 	listed := login(fakeEvolution{instances: instances}, "one")
 	mustContain(t, listed, "populated dashboard", manager,
+		"Painel do MCP", "Health do MCP", "Readiness do MCP", "Swagger da Evolution Go", "Instância selecionada (autenticado)",
 		"Conectada", "Conectando", "Desconectada", "Em uso pelo MCP",
 		`value="one" checked`, "Remover seleção", "5511999999999")
 }

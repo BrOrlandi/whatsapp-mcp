@@ -377,6 +377,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .pill--current{background:var(--ok-bg);color:var(--ok)}
 .pill--current::before{display:none}
 .empty{margin:18px 0 0;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
+.link-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:20px 0}.link-grid a{display:flex;align-items:center;min-height:44px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft);font-weight:600;text-decoration:none}.link-grid a:hover{border-color:var(--brand-strong);background:var(--surface)}
 .empty__title{font-weight:600;color:var(--text)}
 code{background:var(--surface-soft);border:1px solid var(--border);padding:2px 6px;border-radius:6px;font-size:.88em;overflow-wrap:anywhere}
 pre{overflow:auto;background:#0c241e;color:#e8fff7;padding:16px;border-radius:var(--radius-sm);font-size:.88rem;line-height:1.5}
@@ -456,6 +457,6 @@ pre code{background:none;border:0;padding:0;color:inherit}
     "whatsapp": { "command": "/caminho/absoluto/whatsapp-mcp" }
   }
 }</code></pre>
-<p>O servidor HTTP em <code>:8080</code> oferece este painel, <code>/healthz</code>, <code>/readyz</code> e o endpoint autenticado <code>/api/selected-instance</code>. MCP por HTTP não está habilitado.</p>
+<div class="link-grid"><a href="/" target="_blank" rel="noopener noreferrer">Painel do MCP</a><a href="/healthz" target="_blank" rel="noopener noreferrer">Health do MCP</a><a href="/readyz" target="_blank" rel="noopener noreferrer">Readiness do MCP</a><a href="/api/selected-instance" target="_blank" rel="noopener noreferrer">Instância selecionada (autenticado)</a><a href="{{.BaseURL}}/swagger/index.html" target="_blank" rel="noopener noreferrer">Swagger da Evolution Go</a><a href="{{.BaseURL}}/manager/login" target="_blank" rel="noopener noreferrer">Manager da Evolution Go</a></div><p class="muted">O painel MCP está publicado neste domínio. A porta interna do servidor é <code>:8080</code>; ela não precisa ser acessada diretamente. O transporte MCP continua sendo via stdio.</p>
 </section>
 </main></body></html>{{end}}`
