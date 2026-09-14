@@ -35,7 +35,7 @@ func New(baseURL, apiKey string, timeout time.Duration) *Client {
 }
 
 func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
-	endpoint, err := url.JoinPath(c.baseURL, "/instance/fetchInstances")
+	endpoint, err := url.JoinPath(c.baseURL, "/instance/all")
 	if err != nil {
 		return nil, err
 	}
@@ -52,30 +52,32 @@ func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("Evolution instances returned HTTP %d", resp.StatusCode)
 	}
-	var raw []struct {
-		ID               string `json:"id"`
-		Name             string `json:"name"`
-		InstanceName     string `json:"instanceName"`
-		InstanceID       string `json:"instanceId"`
-		OwnerJID         string `json:"ownerJid"`
-		State            string `json:"state"`
-		ConnectionStatus string `json:"connectionStatus"`
-		Instance         struct {
+	var envelope struct {
+		Data []struct {
 			ID               string `json:"id"`
-			InstanceID       string `json:"instanceId"`
 			Name             string `json:"name"`
 			InstanceName     string `json:"instanceName"`
+			InstanceID       string `json:"instanceId"`
 			OwnerJID         string `json:"ownerJid"`
 			State            string `json:"state"`
-			Status           string `json:"status"`
 			ConnectionStatus string `json:"connectionStatus"`
-		} `json:"instance"`
+			Instance         struct {
+				ID               string `json:"id"`
+				InstanceID       string `json:"instanceId"`
+				Name             string `json:"name"`
+				InstanceName     string `json:"instanceName"`
+				OwnerJID         string `json:"ownerJid"`
+				State            string `json:"state"`
+				Status           string `json:"status"`
+				ConnectionStatus string `json:"connectionStatus"`
+			} `json:"instance"`
+		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		return nil, fmt.Errorf("decode Evolution instances: %w", err)
 	}
-	result := make([]Instance, 0, len(raw))
-	for _, item := range raw {
+	result := make([]Instance, 0, len(envelope.Data))
+	for _, item := range envelope.Data {
 		id := first(item.ID, item.InstanceID, item.Instance.ID, item.Instance.InstanceID, item.Name, item.InstanceName, item.Instance.Name, item.Instance.InstanceName)
 		name := first(item.Name, item.InstanceName, item.Instance.Name, item.Instance.InstanceName, id)
 		jid := first(item.OwnerJID, item.Instance.OwnerJID)
