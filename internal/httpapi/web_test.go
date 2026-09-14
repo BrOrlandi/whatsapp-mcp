@@ -191,6 +191,9 @@ func TestDashboardShowsManagerLinkAndInstanceStates(t *testing.T) {
 	if strings.Contains(down, `name="instance_id"`) {
 		t.Error("unavailable dashboard must not offer a selection form")
 	}
+	if strings.Contains(down, "Configure o WhatsApp MCP já instalado") {
+		t.Error("unavailable dashboard must not show the Claude MCP prompt")
+	}
 
 	instances := []evolution.Instance{
 		{ID: "one", Name: "Suporte", Number: "5511999999999", Status: evolution.StatusConnected},
@@ -198,8 +201,7 @@ func TestDashboardShowsManagerLinkAndInstanceStates(t *testing.T) {
 		{ID: "three", Name: "Antiga", Status: evolution.StatusDisconnected},
 	}
 	listed := login(fakeEvolution{instances: instances}, "one")
-	mustContain(t, listed, "populated dashboard", manager,
-		"Painel do MCP", "Health do MCP", "Readiness do MCP", "Swagger da Evolution Go", "Instância selecionada (autenticado)",
+	mustContain(t, listed, "populated dashboard", "Configurar o MCP no Claude", "Configure o WhatsApp MCP já instalado", "Painel do MCP", "Health do MCP", "Readiness do MCP", "Swagger da Evolution Go", "Instância selecionada (autenticado)",
 		"Conectada", "Conectando", "Desconectada", "Em uso pelo MCP",
 		`value="one" checked`, "Remover seleção", "5511999999999")
 }

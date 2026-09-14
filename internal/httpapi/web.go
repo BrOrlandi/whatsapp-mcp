@@ -202,6 +202,7 @@ type dashboardData struct {
 	BaseURL, Selected, Notice string
 	Instances                 []evolution.Instance
 	Unavailable               bool
+	Ready                     bool
 }
 
 func (a *webApp) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +215,17 @@ func (a *webApp) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		d.Notice = "A API Evolution está indisponível no momento."
 	} else if len(instances) == 0 {
-		d.Notice = "Nenhuma instância encontrada. Crie uma no Evolution Manager, conecte o QR code e volte a esta página."
+		d.Notice = "Nenhuma instância encontrada. Entre no Evolution Go para criar e conectar o WhatsApp."
+	} else {
+		for _, instance := range instances {
+			if instance.ID == selected && instance.Status == evolution.StatusConnected {
+				d.Ready = true
+				break
+			}
+		}
+		if !d.Ready && selected != "" {
+			d.Notice = "A instância selecionada ainda não está conectada. Entre no Evolution Go, conecte o WhatsApp e recarregue esta página."
+		}
 	}
 	a.render(w, "dashboard", d)
 }
@@ -423,7 +434,7 @@ pre code{background:none;border:0;padding:0;color:inherit}
 
 <section class="card" aria-labelledby="instancia">
 <div class="card__head"><h2 id="instancia">Instância do WhatsApp</h2>
-<a class="btn btn--ghost" href="{{.BaseURL}}/manager/login" target="_blank" rel="noopener noreferrer">Abrir o Evolution Manager<span class="sr-only"> (abre em uma nova aba)</span></a></div>
+<a class="btn btn--ghost" href="{{.BaseURL}}/manager/login">Abrir o Evolution Manager</a></div>
 <p class="muted">Conecte o QR code no Evolution Manager e volte aqui para escolher qual instância o MCP deve usar.</p>
 
 {{if .Unavailable}}<p class="alert" role="alert">{{.Notice}} Verifique <code>EVOLUTION_URL</code> e <code>EVOLUTION_API_KEY</code> e recarregue a página.</p>
@@ -449,14 +460,31 @@ pre code{background:none;border:0;padding:0;color:inherit}
 </section>
 
 <section class="card" aria-labelledby="configuracao">
-<h2 id="configuracao">Configuração</h2>
-<p>Evolution Go: <code>{{.BaseURL}}</code>. A autenticação usa o cabeçalho <code>apikey</code> configurado por <code>EVOLUTION_API_KEY</code>; o valor secreto nunca aparece neste painel.</p>
-<p>Este binário mantém o transporte MCP via stdio. Configure seu cliente para executar o caminho absoluto do binário e forneça <code>DATABASE_URL</code>, <code>RABBITMQ_URL</code>, <code>EVOLUTION_URL</code> e <code>EVOLUTION_API_KEY</code> no ambiente seguro do cliente.</p>
-<pre><code>{
-  "mcpServers": {
-    "whatsapp": { "command": "/caminho/absoluto/whatsapp-mcp" }
-  }
-}</code></pre>
-<div class="link-grid"><a href="/" target="_blank" rel="noopener noreferrer">Painel do MCP</a><a href="/healthz" target="_blank" rel="noopener noreferrer">Health do MCP</a><a href="/readyz" target="_blank" rel="noopener noreferrer">Readiness do MCP</a><a href="/api/selected-instance" target="_blank" rel="noopener noreferrer">Instância selecionada (autenticado)</a><a href="{{.BaseURL}}/swagger/index.html" target="_blank" rel="noopener noreferrer">Swagger da Evolution Go</a><a href="{{.BaseURL}}/manager/login" target="_blank" rel="noopener noreferrer">Manager da Evolution Go</a></div><p class="muted">O painel MCP está publicado neste domínio. A porta interna do servidor é <code>:8080</code>; ela não precisa ser acessada diretamente. O transporte MCP continua sendo via stdio.</p>
+{{if .Ready}}
+<h2 id="configuracao">Configurar o MCP no Claude</h2>
+<p>O WhatsApp está conectado e a instância selecionada está pronta. Copie o prompt abaixo e cole no Claude para configurar o uso do MCP.</p>
+<pre><code>Configure o WhatsApp MCP já instalado neste ambiente para uso no Claude.
+
+A instância do WhatsApp já está configurada, conectada e selecionada no painel.
+Não crie outra instância, não solicite QR Code e não abra o Evolution Manager.
+
+Use o transporte MCP stdio e preserve a configuração segura existente.
+Não peça, revele ou imprima API keys, senhas, tokens ou connection strings.
+
+Depois de configurar, teste as ferramentas do WhatsApp MCP e confirme:
+- que o servidor MCP iniciou corretamente;
+- que a instância selecionada foi encontrada;
+- que o estado do WhatsApp está conectado;
+- que uma consulta de status foi executada com sucesso.
+
+Se o MCP não puder ser configurado, informe o erro técnico exato e os arquivos/comandos necessários, sem sugerir alterar EVOLUTION_URL ou EVOLUTION_API_KEY sem evidência.</code></pre>
+<p class="muted">O MCP é configurado localmente via stdio. Este painel web serve para acompanhar a instância e a conexão.</p>
+{{else}}
+<h2 id="configuracao">Prepare o WhatsApp antes de configurar o MCP</h2>
+<p>O prompt de configuração do Claude ficará disponível quando houver uma instância selecionada e conectada.</p>
+<div class="empty"><p class="empty__title">Instância ainda não pronta</p><p class="muted">{{.Notice}}</p><div class="actions"><a class="btn" href="{{.BaseURL}}/manager/login">Abrir o Evolution Go</a></div></div>
+<p class="muted">No Evolution Go, crie ou conecte a instância do WhatsApp. Depois volte ao painel, selecione a instância conectada e recarregue esta página.</p>
+{{end}}
+<div class="link-grid"><a href="/">Painel do MCP</a><a href="/healthz">Health do MCP</a><a href="/readyz">Readiness do MCP</a><a href="/api/selected-instance">Instância selecionada (autenticado)</a><a href="{{.BaseURL}}/swagger/index.html">Swagger da Evolution Go</a></div>
 </section>
 </main></body></html>{{end}}`
