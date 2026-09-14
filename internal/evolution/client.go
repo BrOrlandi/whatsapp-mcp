@@ -88,7 +88,7 @@ func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
 		number, _, _ := strings.Cut(jid, "@")
 		state := first(item.ConnectionStatus, item.State, item.Instance.ConnectionStatus, item.Instance.State, item.Instance.Status)
 		status := normalizeStatus(state)
-		if state == "" && (item.Connected || item.Instance.Connected) {
+		if item.Connected || item.Instance.Connected {
 			status = StatusConnected
 		}
 		result = append(result, Instance{ID: id, Name: name, Number: number, Status: status})
