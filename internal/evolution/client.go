@@ -59,6 +59,8 @@ func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
 			InstanceName     string `json:"instanceName"`
 			InstanceID       string `json:"instanceId"`
 			OwnerJID         string `json:"ownerJid"`
+			JID              string `json:"jid"`
+			Connected        bool   `json:"connected"`
 			State            string `json:"state"`
 			ConnectionStatus string `json:"connectionStatus"`
 			Instance         struct {
@@ -67,6 +69,8 @@ func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
 				Name             string `json:"name"`
 				InstanceName     string `json:"instanceName"`
 				OwnerJID         string `json:"ownerJid"`
+				JID              string `json:"jid"`
+				Connected        bool   `json:"connected"`
 				State            string `json:"state"`
 				Status           string `json:"status"`
 				ConnectionStatus string `json:"connectionStatus"`
@@ -80,10 +84,14 @@ func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
 	for _, item := range envelope.Data {
 		id := first(item.ID, item.InstanceID, item.Instance.ID, item.Instance.InstanceID, item.Name, item.InstanceName, item.Instance.Name, item.Instance.InstanceName)
 		name := first(item.Name, item.InstanceName, item.Instance.Name, item.Instance.InstanceName, id)
-		jid := first(item.OwnerJID, item.Instance.OwnerJID)
+		jid := first(item.OwnerJID, item.JID, item.Instance.OwnerJID, item.Instance.JID)
 		number, _, _ := strings.Cut(jid, "@")
 		state := first(item.ConnectionStatus, item.State, item.Instance.ConnectionStatus, item.Instance.State, item.Instance.Status)
-		result = append(result, Instance{ID: id, Name: name, Number: number, Status: normalizeStatus(state)})
+		status := normalizeStatus(state)
+		if state == "" && (item.Connected || item.Instance.Connected) {
+			status = StatusConnected
+		}
+		result = append(result, Instance{ID: id, Name: name, Number: number, Status: status})
 	}
 	return result, nil
 }

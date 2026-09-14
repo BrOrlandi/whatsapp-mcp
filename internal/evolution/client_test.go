@@ -46,7 +46,7 @@ func TestFetchInstancesUsesAPIKeyAndDecodesInstances(t *testing.T) {
 		if r.URL.Path != "/instance/all" || r.Header.Get("apikey") != "secret" {
 			t.Fatalf("request path=%q apikey=%q", r.URL.Path, r.Header.Get("apikey"))
 		}
-		_, _ = w.Write([]byte(`{"message":"success","data":[{"id":"abc","name":"Pessoal","ownerJid":"5511999999999@s.whatsapp.net","connectionStatus":"open"},{"instance":{"instanceName":"Trabalho","instanceId":"def","state":"connecting"}}]}`))
+		_, _ = w.Write([]byte(`{"message":"success","data":[{"id":"abc","name":"Pessoal","jid":"5511999999999@s.whatsapp.net","connected":true},{"instance":{"instanceName":"Trabalho","instanceId":"def","state":"connecting"}}]}`))
 	}))
 	defer server.Close()
 	instances, err := New(server.URL, "secret", time.Second).FetchInstances(context.Background())
