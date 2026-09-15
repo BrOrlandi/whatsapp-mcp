@@ -1,208 +1,231 @@
-# WhatsApp MCP gateway
+<p align="center">
+  <img src="internal/brand/logo.svg" alt="" width="88" height="88">
+</p>
 
-A small Go gateway that puts WhatsApp behind an authenticated MCP endpoint. Evolution Go, RabbitMQ and PostgreSQL are internal dependencies of this backend; an MCP client needs none of them.
+<h1 align="center">WhatsApp MCP</h1>
 
-A client needs exactly one thing: an API key. The key identifies the account and the WhatsApp instance it is authorised for, so there is no user, no password and no instance name to configure.
+<p align="center">
+  <strong>Connect your WhatsApp to your AI agents over MCP.</strong><br>
+  A self-hosted Go gateway that puts a WhatsApp account behind one authenticated MCP endpoint.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-0b6b5d"></a>
+  <img alt="Go" src="https://img.shields.io/badge/go-1.23-00ADD8">
+  <img alt="Self-hosted" src="https://img.shields.io/badge/deploy-docker%20compose-2496ED">
+</p>
+
+---
+
+Ask Claude to read a conversation, search a year of messages, send a file, run a
+poll — against your own WhatsApp, on your own server. Evolution Go, RabbitMQ and
+PostgreSQL run behind it; the MCP client needs none of them.
+
+A client needs exactly one thing: an API key. The key identifies the account and
+the WhatsApp instance it is authorised for, so there is no user, no password and
+no instance name to configure.
 
 ```json
 {
   "mcpServers": {
     "whatsapp": {
       "type": "http",
-      "url": "https://whatsapp-mcp.example.com/mcp",
+      "url": "https://whatsapp.example.com/mcp",
       "headers": { "Authorization": "Bearer wamcp-…" }
     }
   }
 }
 ```
 
-Keys are issued and revoked in the control panel, which also prints this block filled in. Keep the key in the client's credential store, never in a prompt or a versioned file.
+Keys are issued and revoked in the control panel, which prints that block
+already filled in. Keep the key in the client's credential store, never in a
+prompt or a versioned file.
 
-The same HTTP server provides a Portuguese control panel at `http://127.0.0.1:8080/`, split by task: **Conectar** hands a client everything it needs, **Instâncias** owns the WhatsApp account lifecycle, and **Estado** is the diagnostic view. Creating a key or an instance happens in a dialog, and destructive actions ask first. Evolution Go has no public surface and its manager is never needed.
+## What it can do
 
-**Conectar** is a three-step checklist that tracks itself: a key exists or it does not, and a key that has been used proves a client authenticated with it. While the second step waits, the page polls and closes it the moment a client makes its first call. Generating a key shows the secret once alongside the `claude mcp add` command, the JSON block for file-configured clients, and a prompt to verify the connection — all filled in. Passwords are bcrypt-hashed in PostgreSQL; sessions use signed, HttpOnly, SameSite cookies with concurrency-safe server-side state. A process restart intentionally invalidates active sessions.
+21 tools across four groups — read, send, act, operate:
 
-The panel mints a per-instance Evolution token, stores it in PostgreSQL and uses it for every per-instance call, because Evolution resolves the target instance from the key on the request and accepts no instance parameter. That token is an internal secret: it is never displayed and never reaches an MCP client. An instance created outside the panel has no token here, so the panel marks it and refuses to operate it.
+- **Read the index**: list conversations, read a period, full-text search,
+  request history older than what has been ingested.
+- **Send**: text, media from a URL, a location, a contact card, a poll — each
+  reporting whether WhatsApp actually delivered it, not just whether the API
+  accepted it.
+- **Act on a message**: delete (two-step, because revoking reaches other
+  people's phones), edit, react, archive/pin/mute a conversation.
+- **Ask about the account**: contacts, groups, profile pictures, which numbers
+  are on WhatsApp, and the gateway's own health and index coverage.
 
-## Start the stack
+The full list with arguments lives at `/documentacao` in the panel, read from
+the MCP server's own definitions — and in [docs/mcp-tools.md](docs/mcp-tools.md)
+with the reasoning behind the tricky ones.
 
-Requirements: Docker Engine with Compose v2. Copy the example environment and replace every placeholder with a distinct randomly generated secret:
+## The control panel
 
-```sh
-cp .env.example .env
-docker compose config
-docker compose up --build -d
-docker compose ps
-curl http://127.0.0.1:8080/healthz
-curl -i http://127.0.0.1:8080/readyz
-```
+The same HTTP server serves a Portuguese control panel, split by task:
+**Conectar** hands a client everything it needs, **Instâncias** owns the
+WhatsApp account lifecycle, **Estado** is the diagnostic view. Creating
+something happens in a dialog, and destructive actions ask first.
 
-The Compose stack uses pinned images and persistent named volumes for Evolution Go, both PostgreSQL databases, RabbitMQ, and MinIO. Management ports bind to loopback only. PostgreSQL migrations run automatically when `whatsapp-mcp` starts.
-
-Evolution Go requires its own activation/license flow on first use. Review Evolution Go's LICENSE, NOTICE, and trademark conditions before redistribution.
-
-## Pair with QR
-
-Open the control panel, create an instance by name, and the panel takes it from there: it registers the instance with Evolution, subscribes it to the `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` and `CONNECTION` event queues, starts the client and shows the QR code. Scan it from WhatsApp under **Linked devices → Link a device**. The pairing page refreshes itself, so a scanned code moves forward on its own; codes expire quickly and the page can mint another.
-
-Subscribing at connect time is what makes Evolution publish at all — its RabbitMQ producer drops every event unless the connect call sets `rabbitmqEnable`. Do not paste API keys or QR payloads into chat, issue trackers, or logs.
-
-Evolution Go resolves the target instance from the `apikey` header, so per-instance routes carry the instance token and only administrative routes (`/instance/create`, `/instance/all`, `/instance/delete/{id}`) carry the global key. `docs/evolution/endpoint-map.md` maps the API this project depends on, against the `swagger.yaml` versioned next to it.
+<p align="center">
+  <img src="docs/assets/panel-conectar.png" alt="The Conectar page of the control panel" width="720">
+</p>
 
 ## Architecture
 
-Evolution Go exposes no route to list conversations or read message history — the `/chat/findChats` and `/chat/findMessages` routes of Evolution API v2 do not exist in it. That decides the shape of this gateway:
+```mermaid
+flowchart TD
+    WA(["WhatsApp"])
+    EVO["Evolution Go<br/>session · REST · QR pairing"]
+    MQ[("RabbitMQ<br/>durable quorum queues")]
+    GW["whatsapp-mcp<br/>ingestion · index · MCP tools · panel"]
+    DB[("PostgreSQL<br/>the message index")]
+    CLIENT(["MCP client<br/>Claude, Cursor, …"])
 
-- **PostgreSQL is the only source of conversations and history.** Evolution publishes every event to RabbitMQ, this gateway consumes it and indexes it. The index covers exactly what has been ingested, which is why every reading tool reports `history_since`.
-- **Evolution answers for everything live**: the address book, the groups, sending, and the instance lifecycle.
-- **One service layer, two façades.** The MCP tools and the panel share the same code; the tools call it directly rather than looping back through HTTP.
-
-`docs/evolution/endpoint-map.md` maps the API this depends on, against the `swagger.yaml` versioned beside it. `docs/remote-mcp-auth-pending.md` records the decisions and what is still open; `docs/backlog.md` and the repository issues track what comes next.
-
-## MCP tools
-
-| Tool | Source | Purpose |
-|---|---|---|
-| `whatsapp_status` | gateway | session state, queues, index coverage, problems |
-| `list_chats` | index | conversations, most recently active first |
-| `get_chat_messages` | index | one conversation over a period |
-| `search_messages` | index | full-text search, optionally scoped |
-| `list_contacts` | Evolution | address book |
-| `list_groups` | Evolution | groups the account belongs to |
-| `get_group` | Evolution | one group with its participants |
-| `send_text_message` | Evolution | send text |
-| `send_media_message` | Evolution | send image, video, audio or document from a URL |
-| `download_media` | Evolution | decode the media of an indexed message |
-| `sync_history` | index + Evolution | request messages older than the index holds, from the start or from a given moment |
-| `delete_message` | index + Evolution | revoke one of the account's own messages for everyone |
-| `edit_message` | index + Evolution | replace the text of one of the account's own messages |
-| `react_to_message` | index + Evolution | react with an emoji, or clear the reaction |
-| `check_numbers` | Evolution | which numbers have a WhatsApp account, and the JID to use |
-| `get_profile_picture` | Evolution | URL of a contact's or group's picture |
-| `send_location` | Evolution | send a point on the map |
-| `send_contact` | Evolution | share a contact card |
-| `send_poll` | Evolution | send a poll |
-| `get_poll_results` | Evolution | read a poll's tally |
-| `organise_chat` | Evolution | archive, pin or mute a conversation, and undo each |
-
-Summarising is not a tool: `get_chat_messages` returns the period and the client summarises it, which avoids an LLM credential and a per-call cost in the backend.
-
-Forwarding is not a tool either, because WhatsApp exposes no forwarding route. Resending the content with `send_text_message` or `send_media_message` is what "forward" means here, and the tool names say so rather than implying otherwise.
-
-`sync_history` returns immediately. WhatsApp answers asynchronously: it returns the messages immediately *before* one the account already knows, they arrive on the history queue, and each call pages further back. An instance with nothing indexed has no anchor to page from.
-
-### Gaps
-
-A hole in the index reads exactly like quiet days, and that is the failure worth guarding against: "he sent nothing" and "we failed to ingest what he sent" are the same empty answer. A window in which *no* conversation produced a single message is the shape an outage leaves, so the index reports those windows in its coverage, and `get_chat_messages` marks an empty period that falls inside one as unknown rather than empty. One quiet conversation is never a gap, and the threshold clears a night: the largest ordinary windows in this account run six to eight hours and start between two and four in the morning.
-
-`sync_history` can also be pointed at a moment. Given `before`, it anchors on the first message indexed *after* that moment in each conversation and pages backwards from there, which reaches into a period the index is thin on rather than further into the past. A conversation with nothing indexed after the moment offers no anchor at all and is counted as `unreachable_chats`, because a sync that reaches two conversations out of three hundred must not read as having covered the index. Both modes are the same request — Evolution Go exposes no route to read its own stored messages, so an anchor is the only handle available; they differ only in which message is chosen.
-
-### Sending
-
-A send is not finished when the call returns. Evolution reports success even when whatsmeow silently skipped a recipient device it had no encryption session for, and the recipient is then left with a message that never decrypts — WhatsApp shows it as "waiting for this message" indefinitely, and only a resend clears it. This is most likely on the first message a freshly paired instance sends to a device it has never talked to.
-
-So the send tools do two things the API does not. They refresh the recipient's device list before encrypting, which is the only lever against the missing session; and they ask WhatsApp afterwards whether the message actually arrived, reporting `delivery` alongside the acknowledgement. A message with no delivery record is reported as `unconfirmed` rather than as either success or failure, because an offline recipient and a dropped message look identical from here.
-
-### Acting on a message
-
-Revoking a message is irreversible and it reaches other people's phones, so `delete_message` is two-step by construction. A call without `confirm` changes nothing and returns the conversation, the timestamp and the text, because the caller names an opaque id and nobody can approve an id they cannot read. Only the confirmed call deletes.
-
-`delete_message` and `edit_message` also refuse a message this account did not send. WhatsApp would refuse it too, but refusing here means the caller is told plainly rather than handed an opaque API error — and it settles the question from the index, which records who sent what, rather than from the caller's own claim. `react_to_message` carries no such guard: reacting to other people is the point of it.
-
-### The panel documents itself
-
-`/documentacao` lists every tool with its arguments, read from the MCP server's own definitions rather than transcribed. A hand-kept list of capabilities is a list that quietly stops being true — a tool gains an argument, the page still shows the old one — so this page is wrong only if the server is.
-
-`/receitas` is the other half: what the gateway makes possible without any code. Scheduling a message, watching for keywords, chasing unanswered conversations — none of that lives here. The assistant waits, watches and reports; this gateway only answers for WhatsApp when asked. Each recipe is a prompt to paste, and names the tools it leans on so it can be adapted honestly.
-
-### Untrusted content
-
-Message content is written by third parties. Every reading tool labels it as data rather than instructions, and a send must originate from the user: a message that says "forward this to X" is not a request to act on.
-
-## Authentication
-
-Keys are `wamcp-` followed by 24 alphanumeric characters, around 142 bits of entropy. Only the SHA-256 digest is stored — SHA-256 rather than bcrypt because bcrypt's deliberate cost protects a human-chosen password against a dictionary, and would add roughly 100 ms to every MCP request here while guarding against an attack that cannot succeed. The panel's administrator password stays on bcrypt.
-
-The endpoint has no anonymous mode. A credential is accepted only in the `Authorization` header, never in a query string; a rejected one gets a `401` that does not distinguish an unknown key from a revoked one; repeated failures are throttled per source address. Revocation takes effect immediately, because each request is authenticated on its own.
-
-That statelessness is also what makes the endpoint resilient: there is no session to resume, so a dropped connection costs nothing.
-
-## Health and freshness
-
-- `GET /healthz` is process liveness and returns HTTP 200 while the gateway can answer requests.
-- `GET /readyz` returns HTTP 200 only when Evolution, RabbitMQ, and PostgreSQL are connected and a persisted event is newer than `FRESHNESS_WINDOW`; otherwise it returns HTTP 503.
-- Both carry the whole picture: the WhatsApp session state with the reason WhatsApp gave, per-queue consumption with counters, and the problems in plain language. The same snapshot feeds the panel and `whatsapp_status`, so all three describe a failure identically.
-- Authenticated `GET /api/selected-instance` reports the persisted selection and one of `api_unavailable`, `no_instance`, `disconnected`, `connecting`, or `connected`.
-
-A quiet account and a broken pipeline look alike from age alone, so the tools report rather than refuse: a degraded gateway still answers, with the problems and the index coverage attached. Refusing would hide the messages that *are* indexed and leave the caller unable to tell which situation they are in.
-
-Session state comes from Evolution's connection events. The readiness poll is reconciliation after a restart, and it may confirm a live session but never overwrite a specific failure with a vague one: `logged_out` tells the operator to scan a new QR code, `disconnected` tells them to wait.
-
-RabbitMQ uses durable quorum queues and manual acknowledgements. The gateway consumes every queue the subscribed events create — `message`, `sendmessage`, `historysync` and the six connection queues — because a queue Evolution declares and nobody reads grows without bound. Valid events are acknowledged only after the PostgreSQL transaction commits. Duplicate deliveries are harmless through event/message uniqueness constraints. Transient database failures are explicitly requeued and retried after reconnect; malformed JSON is rejected without requeue to prevent a poison-message loop. Inspect RabbitMQ logs/metrics for rejected deliveries and add a broker policy/DLX if malformed payload retention is required operationally.
-
-## Local development
-
-`just` drives everything. `just` on its own lists the recipes.
-
-There are three ways to run it, from least to most setup:
-
-```sh
-just preview      # the panel alone, fake data, no dependencies at all
-just tunnel       # in one terminal: SSH tunnel to the server's Evolution
-just dev-remote   # in another: the gateway against that Evolution
-just up && just dev   # the whole stack locally, with a WhatsApp of your own to pair
+    WA <-->|"multi-device link (whatsmeow)"| EVO
+    EVO -->|"every event"| MQ
+    MQ -->|"consume, then commit"| GW
+    EVO <-->|"REST: live reads, sending, lifecycle"| GW
+    GW <--> DB
+    CLIENT -->|"POST /mcp · Bearer API key"| GW
 ```
 
-**`just preview`** serves the control panel against fabricated data on port 8090. It talks to nothing, so it is the fastest way to work on layout and wording.
+| Component | Role |
+|---|---|
+| **`whatsapp-mcp`** | This repository. The MCP endpoint, the control panel, the ingestion loop and the message index. The only service with a public address. |
+| **[Evolution Go](https://github.com/EvolutionAPI/evolution-go)** | Holds the WhatsApp session through [whatsmeow](https://github.com/tulir/whatsmeow), answers live reads and sends, publishes every event. Apache-2.0 with brand-protection conditions; **requires activation** before it answers. |
+| **RabbitMQ** | Carries events from Evolution to the gateway. Durable quorum queues, manual acknowledgements. |
+| **PostgreSQL** ×2 | One holds the message index, the keys and the instance registry; the other is Evolution's own. |
+| **MinIO** | Where Evolution stores media. |
 
-**`just dev-remote`** runs the gateway locally against the Evolution on the server. Live reads and sending work; ingestion does not, and that is expected — the server's Evolution publishes to the server's queue, not to yours, so the local index stays empty. Evolution has no published port and no public domain, so `just tunnel` asks the host for the container's address on the Docker bridge and forwards to it.
+The shape is forced by one fact: Evolution Go exposes no route to list
+conversations or read message history. So PostgreSQL is the only source of
+history, it covers exactly what has been ingested, and every reading tool
+reports `history_since` rather than pretending otherwise.
+[docs/architecture.md](docs/architecture.md) has the rest.
 
-**`just up && just dev`** runs everything locally and needs a WhatsApp account to pair. It is the only mode where ingestion, history sync and the message index actually work.
+## Install
 
-`just check` runs what has to pass before a commit: format, vet, tests, race, build, compose validation.
+### One command, on a fresh VM
 
-`POST /mcp` is the supported transport. A stdio transport exists for debugging a local build and is off unless `MCP_STDIO=true`; it has no credential, so it acts on the instance the panel selected.
-
-Running the binary directly needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and `EVOLUTION_API_KEY`. These are backend configuration: an MCP client never sees them.
-
-Do not pass message text into shell commands. Evolution is an unofficial WhatsApp integration and may be logged out, disrupted by protocol changes, or subject to account restrictions. Use a test account first and comply with WhatsApp policies and applicable privacy and retention law.
-
-## Retention
-
-The database grows without limit. Cleanup is deliberately deferred until there is real volume to size a ceiling against, and the rule is already fixed: delete messages, never conversations. Message text and raw event payloads are stored unencrypted in PostgreSQL. See issue #4.
-
-## Dokploy public domains
-
-Only `whatsapp-mcp` is published. Evolution Go, RabbitMQ, MinIO and both PostgreSQL instances stay on the project's internal network: `dokploy-network` is shared by every Dokploy project, so anything attached to it is reachable by any other project's containers without passing through Traefik or TLS.
-
-In this Dokploy installation, Traefik's secure entrypoint is named `web-secure`; Dokploy-generated Compose domains may currently emit the incompatible `websecure` name and return a 404 before the request reaches the container.
-
-Before changing production, compare a working Compose project with `domain.byComposeId`, `compose.loadServices`, and `compose.getConvertedCompose`. The compatibility file `deploy/traefik/whatsapp-mcp.yml` contains the working file-provider route for the public host and the exact internal service port. It must be installed on the Dokploy host by an authorized operator:
+Create a Linux VM anywhere — Lightsail, Vultr, DigitalOcean, Hetzner — with
+ports 80 and 443 open, then:
 
 ```sh
-sudo install -m 0644 deploy/traefik/whatsapp-mcp.yml /etc/dokploy/traefik/dynamic/whatsapp-mcp.yml
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh | sudo bash
 ```
 
-The file provider watches that directory, so no Traefik restart should be necessary. Verify the file was loaded and the routers use `web-secure`, then test:
+The installer puts Docker on the machine if it is missing, generates every
+secret, derives a hostname from the VM's own public IPv4 through
+[sslip.io](https://sslip.io), gets a Let’s Encrypt certificate for it, starts
+the stack behind Traefik, and prints the URL and a temporary administrator
+password:
+
+```
+URL:
+  https://a83f12c9.18-228-123-45.sslip.io
+
+Administrator:
+  admin
+
+Temporary password:
+  XXXXXXXXXXXXXXXX
+```
+
+No domain to buy, no DNS record to create. The panel refuses to do anything
+else until that temporary password is replaced, and re-running the installer
+is safe: secrets, the hostname and your data are left alone.
+
+Afterwards `whatsapp-mcp status`, `logs`, `restart` and `update` manage the
+installation, which lives in `/opt/whatsapp-mcp`.
+
+**Requirements:** Ubuntu 24.04 LTS (the Debian family works; 24.04 is what is
+tested), x86-64 or arm64, ~2 GB of RAM, and 80/443 reachable from the internet
+so Let’s Encrypt can answer its challenge.
+
+### By hand, with Docker Compose
 
 ```sh
-curl -fsS https://whatsapp-mcp.example.com/healthz
+git clone https://github.com/BrOrlandi/whatsapp-mcp.git
+cd whatsapp-mcp
+cp .env.example .env
 ```
 
-If the Dokploy domain configuration is corrected to generate `web-secure`, remove the temporary file-provider routes and redeploy the Compose stack. Do not report success based only on container health: the MCP health endpoint, valid TLS certificate, first-access setup, and authenticated dashboard must all be verified.
-
-The project identity is an original green message-and-node mark, kept in `internal/brand/logo.svg` and embedded into the setup, login, and dashboard pages without an external CDN. The same asset is used here:
-
-![WhatsApp MCP logo](internal/brand/logo.svg)
-
-The visual system preserves the WhatsApp-inspired green palette while keeping this project independent and unofficial. The UI supports light and dark system themes, responsive layouts, keyboard focus states, and an explicit degraded state when Evolution is disconnected.
-
-## Development checks
+Replace every `change-me-long-random-value` in `.env` with a *distinct* random
+value, and set `PUBLIC_URL` to the address clients will use. Then:
 
 ```sh
-gofmt -w cmd internal
-go test ./...
-go vet ./...
-go build ./cmd/whatsapp-mcp
-docker compose config
+docker compose config        # fails loudly if .env is incomplete
+docker compose up --build -d
+curl http://127.0.0.1:8080/healthz
 ```
+
+That publishes the panel on `127.0.0.1:8080` and nothing else. Put TLS in
+front of it yourself, or use `deploy/docker-compose.public.yml` to get the
+same Traefik the installer sets up.
+
+### Either way
+
+**Activate Evolution Go.** It requires a licence to operate and answers 503
+until activated — follow the flow in the
+[Evolution Go repository](https://github.com/EvolutionAPI/evolution-go).
+
+**Open the panel.** The first sign-in sets your password. Create an instance,
+scan the QR code from **Linked devices → Link a device**, then generate a key
+in **Conectar** and paste the block it gives you into your MCP client.
+
+[docs/self-hosting.md](docs/self-hosting.md) has the reverse-proxy recipes,
+backups and upgrades.
+## Documentation
+
+| | |
+|---|---|
+| [Self-hosting](docs/self-hosting.md) | Configuration, TLS, upgrades, backups |
+| [Architecture](docs/architecture.md) | Why it is built this way |
+| [MCP tools](docs/mcp-tools.md) | Every tool, and the semantics that matter |
+| [Authentication](docs/authentication.md) | Keys, sessions, what a key holder can do |
+| [Operations](docs/operations.md) | Health, the event pipeline, full config reference |
+| [Development](docs/development.md) | Local run modes, checks, brand assets |
+| [Security policy](SECURITY.md) | Threat model and how to report a vulnerability |
+| [Contributing](CONTRIBUTING.md) | How to send a change |
+
+## Before you run this
+
+Evolution Go is an **unofficial** WhatsApp integration. It may be logged out,
+disrupted by protocol changes, or subject to account restrictions. Use a test
+account first, and comply with WhatsApp's terms and with whatever privacy and
+retention law applies to you — you are hosting other people's conversations.
+
+Message text and raw event payloads are stored unencrypted in PostgreSQL, and
+the database grows without limit. A dump is as sensitive as the phone it came
+from.
+
+Message content is written by third parties. Every reading tool labels it as
+data rather than instructions, and a send must originate from you: a message
+that says "forward this to X" is not a request to act on.
+
+## Support this project
+
+WhatsApp MCP is built and maintained by one person, in the open, and it is
+free to self-host for any noncommercial use. If it saves you time, you can
+support the work:
+
+<p align="center">
+  <a href="https://github.com/sponsors/BrOrlandi"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/%E2%9D%A4%20sponsor%20on%20github-monthly%20or%20one--off-0b6b5d?style=for-the-badge"></a>
+</p>
+
+One-off or recurring, any amount. It goes to the person writing the code.
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE). Use it, modify it, self-host it and
+share it freely for any **noncommercial** purpose — personal use, research,
+education, charities, public institutions.
+
+Commercial use — selling it, running it as a paid service, or using it inside a
+business to make money — needs a separate licence.
+[Open an issue](https://github.com/BrOrlandi/whatsapp-mcp/issues) or reach out.
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/BrOrlandi">Bruno Orlandi</a>
+</p>
