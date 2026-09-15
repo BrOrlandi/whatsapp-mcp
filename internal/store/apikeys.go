@@ -40,14 +40,23 @@ type APIKey struct {
 // NewAPIKey mints a credential and returns both the secret, shown once, and the
 // digest stored in its place.
 func NewAPIKey() (secret, digest, prefix string, err error) {
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
-		return "", "", "", err
-	}
 	var builder strings.Builder
 	builder.WriteString(KeyPrefix)
-	for _, b := range raw {
-		builder.WriteByte(keyAlphabet[int(b)%len(keyAlphabet)])
+	// Rejection sampling rather than a modulo: 256 is not a multiple of 62, so
+	// folding a byte with % would make the first eight letters of the alphabet
+	// slightly likelier than the rest. The bias is small, but the claim of 142
+	// bits should be exactly true rather than nearly true, and discarding the
+	// few bytes at the top of the range costs nothing.
+	const limit = 256 - (256 % len(keyAlphabet))
+	buffer := make([]byte, 1)
+	for builder.Len() < len(KeyPrefix)+24 {
+		if _, err := rand.Read(buffer); err != nil {
+			return "", "", "", err
+		}
+		if int(buffer[0]) >= limit {
+			continue
+		}
+		builder.WriteByte(keyAlphabet[int(buffer[0])%len(keyAlphabet)])
 	}
 	secret = builder.String()
 	return secret, HashAPIKey(secret), secret[:len(KeyPrefix)+6], nil

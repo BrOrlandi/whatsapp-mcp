@@ -32,6 +32,7 @@ type fakeRepo struct {
 	nextID               int64
 	oldest               store.Message
 	oldestErr            error
+	mustChange           bool
 }
 
 func newRepo() *fakeRepo {
@@ -53,6 +54,17 @@ func (f *fakeRepo) CreateAdmin(_ context.Context, u, h string) error {
 		return ErrAdminExists
 	}
 	f.user, f.hash = u, h
+	return nil
+}
+func (f *fakeRepo) AdminMustChangePassword(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mustChange, nil
+}
+func (f *fakeRepo) SetAdminPassword(_ context.Context, h string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hash, f.mustChange = h, false
 	return nil
 }
 func (f *fakeRepo) SelectedInstance(context.Context) (string, error) {
@@ -985,5 +997,84 @@ func TestProgressEndpointReportsTheChecklistAndNothingElse(t *testing.T) {
 	anonymous.Body.Close()
 	if anonymous.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("anonymous status = %d", anonymous.StatusCode)
+	}
+}
+
+// The tab icon is embedded and served by the panel itself, before anyone has
+// logged in: a browser asks for it on the login page, and an icon behind the
+// session cookie would just 302 into the login form forever.
+func TestPanelServesItsOwnIcons(t *testing.T) {
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	defer ts.Close()
+	for path, wantType := range map[string]string{
+		"/favicon.svg":          "image/svg+xml",
+		"/favicon.ico":          "image/x-icon",
+		"/apple-touch-icon.png": "image/png",
+	} {
+		r, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d", path, r.StatusCode)
+		}
+		if got := r.Header.Get("Content-Type"); got != wantType {
+			t.Fatalf("%s: content type = %q, want %q", path, got, wantType)
+		}
+		if len(body) == 0 {
+			t.Fatalf("%s: empty body", path)
+		}
+	}
+	// The pages must point at them, or the browser falls back to guessing.
+	page := fetch(t, ts.Client(), ts.URL+"/login")
+	mustContain(t, page, "login", `rel="icon" href="/favicon.svg"`, `rel="apple-touch-icon"`)
+}
+
+// An installer invents the first password and prints it to a terminal, where it
+// survives in scrollback and shell history. Until it is replaced, the panel must
+// answer nothing else: a leaked bootstrap password should buy an attacker a
+// password form, not a WhatsApp session.
+func TestBootstrapPasswordMustBeReplacedBeforeAnythingElse(t *testing.T) {
+	repo := newRepo()
+	repo.mustChange = true
+	evo := &fakeEvolution{}
+	ts, client := signedIn(t, repo, evo)
+
+	for _, path := range []string{"/", "/instancias", "/estado", "/documentacao"} {
+		r, err := client.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.Request.URL.Path != "/senha" {
+			t.Fatalf("%s landed on %s, want /senha", path, r.Request.URL.Path)
+		}
+	}
+
+	// The current password is required even though the session already proves
+	// who this is, so a session left open cannot lock the owner out.
+	wrong := url.Values{"current_password": {"not the password"}, "password": {"uma senha nova"}, "confirm_password": {"uma senha nova"}}
+	r, err := client.PostForm(ts.URL+"/senha", wrong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a wrong current password returned %d", r.StatusCode)
+	}
+
+	right := url.Values{"current_password": {"senha segura 123"}, "password": {"uma senha nova"}, "confirm_password": {"uma senha nova"}}
+	r, err = client.PostForm(ts.URL+"/senha", right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.Request.URL.Path != "/" {
+		t.Fatalf("after the change the panel landed on %s", r.Request.URL.Path)
+	}
+	if repo.mustChange {
+		t.Fatal("the rotation flag survived the change")
 	}
 }

@@ -596,6 +596,9 @@ func (s *Server) sendMedia(ctx context.Context, session Session, args arguments)
 	default:
 		return toolError("type must be one of image, video, audio or document")
 	}
+	if err := checkMediaURL(args.URL); err != nil {
+		return toolError("%s", err.Error())
+	}
 	s.warm(ctx, session, args.To)
 	sent, err := s.live.SendMedia(ctx, session.Token, args.To, args.Type, args.URL, args.Caption, args.Filename)
 	if err != nil {

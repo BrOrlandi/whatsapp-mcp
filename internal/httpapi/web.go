@@ -23,6 +23,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/brand"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/ratelimit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
@@ -39,6 +40,8 @@ var ErrAdminExists = errors.New("admin already exists")
 type ControlStore interface {
 	Admin(context.Context) (string, string, error)
 	CreateAdmin(context.Context, string, string) error
+	AdminMustChangePassword(context.Context) (bool, error)
+	SetAdminPassword(context.Context, string) error
 	SelectedInstance(context.Context) (string, error)
 	SelectInstance(context.Context, string) error
 	Coverage(context.Context, string) (store.Coverage, error)
@@ -119,10 +122,21 @@ type webApp struct {
 	publicURL string
 	sessions  *sessions
 	templates *template.Template
+	// logins throttles password guessing. The administrator password is the
+	// weakest credential the gateway holds — a person chose it — and it opens
+	// the panel that owns the WhatsApp session, so the login form needs the same
+	// per-address lockout the MCP endpoint already has. bcrypt slows one guess
+	// down; only a lockout stops a campaign of them.
+	logins *ratelimit.Attempts
 }
 
+const (
+	loginFailures = 8
+	loginLockout  = 5 * time.Minute
+)
+
 func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL string) http.Handler {
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages))}
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -130,6 +144,8 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("GET /login", a.loginPage)
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
+	mux.HandleFunc("GET /senha", a.passwordPage)
+	mux.HandleFunc("POST /senha", a.changePassword)
 	mux.HandleFunc("GET /instancias", a.instances)
 	mux.HandleFunc("POST /instancias", a.createInstance)
 	mux.HandleFunc("POST /instancias/selecionar", a.selectInstance)
@@ -145,6 +161,9 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /chaves", a.createKey)
 	mux.HandleFunc("POST /chaves/revogar", a.revokeKey)
 	mux.Handle("GET /assets/", assetHandler())
+	for path, ico := range iconRoutes() {
+		mux.HandleFunc(path, iconHandler(ico))
+	}
 	mux.HandleFunc("GET /api/selected-instance", a.selectedJSON)
 	mux.HandleFunc("GET /api/progresso", a.progress)
 	return securityHeaders(mux)
@@ -154,8 +173,13 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// data: is required for img-src because the pairing QR code arrives from
 		// Evolution as an inline data URI; no other source is allowed.
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:")
+		// frame-ancestors and form-action are the two that matter for a panel
+		// whose buttons revoke keys and unlink a phone: nothing may frame it,
+		// and no injected markup may aim a form at another origin. base-uri
+		// stops a stray <base> from re-pointing every relative URL on the page.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
@@ -185,11 +209,71 @@ func (a *webApp) authenticated(r *http.Request) bool {
 	return err == nil && a.sessions.valid(c.Value)
 }
 func (a *webApp) require(w http.ResponseWriter, r *http.Request) bool {
-	if a.authenticated(r) {
-		return true
+	if !a.authenticated(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return false
 	}
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
-	return false
+	// An installer-generated password was printed to a terminal and may be in a
+	// shell history, a screenshot or a support thread. Until it is replaced the
+	// panel does nothing else, so a password that leaked in transit buys an
+	// attacker a password form rather than a WhatsApp session.
+	if must, err := a.store.AdminMustChangePassword(r.Context()); err == nil && must {
+		http.Redirect(w, r, "/senha", http.StatusSeeOther)
+		return false
+	}
+	return true
+}
+
+func (a *webApp) passwordPage(w http.ResponseWriter, r *http.Request) {
+	if !a.authenticated(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	a.render(w, "senha", layout{Title: "Defina uma senha"})
+}
+
+func (a *webApp) changePassword(w http.ResponseWriter, r *http.Request) {
+	if !a.authenticated(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	_, hash, err := a.admin(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	current := r.FormValue("current_password")
+	next := r.FormValue("password")
+	// The current password is asked for even though the session already proves
+	// who this is: a session left open on a shared machine should not be enough
+	// to lock the owner out of their own panel.
+	if !auth.CheckPassword(hash, current) {
+		w.WriteHeader(http.StatusUnauthorized)
+		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "A senha atual não confere."})
+		return
+	}
+	if len(next) < 10 || len([]byte(next)) > 72 {
+		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "Use uma senha com pelo menos 10 caracteres."})
+		return
+	}
+	if next != r.FormValue("confirm_password") {
+		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "As duas senhas não são iguais."})
+		return
+	}
+	if auth.CheckPassword(hash, next) {
+		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "Escolha uma senha diferente da atual."})
+		return
+	}
+	newHash, err := auth.HashPassword(next)
+	if err != nil {
+		http.Error(w, "Erro interno", http.StatusInternalServerError)
+		return
+	}
+	if err := a.store.SetAdminPassword(r.Context(), newHash); err != nil {
+		http.Error(w, "Erro interno", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // render builds the page in memory before writing it. Rendering straight to the
@@ -248,11 +332,20 @@ func (a *webApp) login(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", 303)
 		return
 	}
+	source := ratelimit.ClientIP(r)
+	if !a.logins.Allow(source) {
+		w.Header().Set("Retry-After", "300")
+		w.WriteHeader(http.StatusTooManyRequests)
+		a.render(w, "login", layout{Title: "Entrar", Error: "Tentativas demais. Espere alguns minutos e tente de novo."})
+		return
+	}
 	if !hmac.Equal([]byte(u), []byte(strings.TrimSpace(r.FormValue("username")))) || !auth.CheckPassword(h, r.FormValue("password")) {
+		a.logins.Fail(source)
 		w.WriteHeader(401)
 		a.render(w, "login", layout{Title: "Entrar", Error: "Usuário ou senha inválidos."})
 		return
 	}
+	a.logins.Succeed(source)
 	a.setSession(w, r)
 	http.Redirect(w, r, "/", 303)
 }
@@ -720,6 +813,10 @@ func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {
 // inlined as template.HTML; every other value stays contextually escaped.
 var templateFuncs = template.FuncMap{
 	"logo":          brand.LogoSVG,
+	"author":        func() string { return brand.Author },
+	"authorURL":     func() string { return brand.AuthorURL },
+	"repositoryURL": func() string { return brand.RepositoryURL },
+	"supportURL":    func() string { return brand.SupportURL },
 	"statusLabel":   statusLabel,
 	"statusTone":    statusTone,
 	"sessionLabel":  sessionLabel,

@@ -11,13 +11,12 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/mcp"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/ratelimit"
 )
 
 // Authenticator resolves a presented credential to the instance it authorises.
@@ -41,7 +40,7 @@ type handler struct {
 	server *mcp.Server
 	auth   Authenticator
 	logger *slog.Logger
-	limit  *attempts
+	limit  *ratelimit.Attempts
 }
 
 // New builds the MCP HTTP handler. Mount it at the endpoint the client is
@@ -50,7 +49,7 @@ func New(server *mcp.Server, auth Authenticator, logger *slog.Logger) http.Handl
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &handler{server: server, auth: auth, logger: logger, limit: newAttempts()}
+	return &handler{server: server, auth: auth, logger: logger, limit: ratelimit.New(maxFailures, lockout)}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,18 +67,18 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, r, "missing credential")
 		return
 	}
-	if !h.limit.allow(clientIP(r)) {
+	if !h.limit.Allow(clientIP(r)) {
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "too many failed attempts; try again later")
 		return
 	}
 	instanceID, err := h.auth.Authenticate(r.Context(), secret)
 	if err != nil {
-		h.limit.fail(clientIP(r))
+		h.limit.Fail(clientIP(r))
 		h.deny(w, r, "rejected credential")
 		return
 	}
-	h.limit.succeed(clientIP(r))
+	h.limit.Succeed(clientIP(r))
 
 	session, err := h.server.Resolve(r.Context(), instanceID)
 	if err != nil {
@@ -137,76 +136,12 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": message})
 }
 
-func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		if first, _, found := strings.Cut(forwarded, ","); found {
-			return strings.TrimSpace(first)
-		}
-		return strings.TrimSpace(forwarded)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-// attempts throttles credential guessing per source address. A high-entropy key
-// cannot realistically be guessed, but an unthrottled endpoint still invites
-// the attempt and fills the logs with it.
-type attempts struct {
-	mu      sync.Mutex
-	entries map[string]*entry
-}
-
-type entry struct {
-	failures int
-	until    time.Time
-}
+// clientIP attributes a request to an address. X-Forwarded-For is believed only
+// when the request arrived from a proxy on a private network — see the
+// ratelimit package for why.
+func clientIP(r *http.Request) string { return ratelimit.ClientIP(r) }
 
 const (
 	maxFailures = 10
 	lockout     = time.Minute
 )
-
-func newAttempts() *attempts { return &attempts{entries: map[string]*entry{}} }
-
-func (a *attempts) allow(ip string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	record, ok := a.entries[ip]
-	if !ok {
-		return true
-	}
-	if time.Now().After(record.until) {
-		delete(a.entries, ip)
-		return true
-	}
-	return record.failures < maxFailures
-}
-
-func (a *attempts) fail(ip string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	record, ok := a.entries[ip]
-	if !ok || time.Now().After(record.until) {
-		record = &entry{}
-		a.entries[ip] = record
-	}
-	record.failures++
-	record.until = time.Now().Add(lockout)
-	// Bound the table so a spray across many addresses cannot grow it forever.
-	if len(a.entries) > 10000 {
-		for key, value := range a.entries {
-			if time.Now().After(value.until) {
-				delete(a.entries, key)
-			}
-		}
-	}
-}
-
-func (a *attempts) succeed(ip string) {
-	a.mu.Lock()
-	delete(a.entries, ip)
-	a.mu.Unlock()
-}
