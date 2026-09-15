@@ -1,1 +1,4 @@
-github: [BrOrlandi]
+# The "Sponsor" button GitHub shows on the repository. Stripe rather than
+# GitHub Sponsors, which is not set up on this account — a button that goes
+# nowhere is worse than no button.
+custom: ["https://donate.stripe.com/8x200jdhA6c1d375jF9Ve06"]
