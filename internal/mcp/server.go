@@ -1,51 +1,125 @@
+// Package mcp implements the MCP server: the tool surface, the session that
+// binds every call to one authorised WhatsApp instance, and the JSON-RPC
+// plumbing shared by the stdio and HTTP transports.
 package mcp
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
+	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
-type Searcher interface {
-	SearchMessages(context.Context, string, int) ([]store.Message, error)
-}
-
-// Index reports what the message index holds, so a tool can say "not indexed"
-// instead of letting the caller conclude "does not exist".
+// Index is the message history, which lives in PostgreSQL because Evolution Go
+// exposes no route to list conversations or read past messages.
 type Index interface {
 	SelectedInstance(context.Context) (string, error)
 	ManagedInstances(context.Context) (map[string]string, error)
+	InstanceToken(context.Context, string) (string, error)
 	Coverage(context.Context, string) (store.Coverage, error)
+	ListChats(context.Context, string, string, int) ([]store.Chat, error)
+	Messages(context.Context, string, store.MessageQuery) ([]store.Message, error)
+	OldestMessage(context.Context, string, string) (store.Message, error)
+	RawMessage(context.Context, string, string) ([]byte, error)
+}
+
+// Live is the part of WhatsApp that Evolution answers for: the address book,
+// the groups, and everything that changes the world.
+type Live interface {
+	Contacts(context.Context, string) ([]evolution.Contact, error)
+	Groups(context.Context, string) ([]evolution.Group, error)
+	Group(context.Context, string, string) (evolution.Group, error)
+	SendText(context.Context, string, string, string) (evolution.SentMessage, error)
+	SendMedia(context.Context, string, string, string, string, string, string) (evolution.SentMessage, error)
+	DownloadMedia(context.Context, string, json.RawMessage) (evolution.Media, error)
+	RequestHistory(context.Context, string, evolution.Anchor, int) error
+}
+
+// Session is the authorised instance a call runs against. It is resolved from
+// the credential, never from a tool argument, so a client cannot reach an
+// instance its key was not issued for.
+type Session struct {
+	InstanceID   string
+	InstanceName string
+	Token        string
 }
 
 type Server struct {
-	search    Searcher
 	index     Index
+	live      Live
 	state     *health.State
 	freshness time.Duration
 }
+
+func New(index Index, live Live, state *health.State, freshness time.Duration) *Server {
+	return &Server{index: index, live: live, state: state, freshness: freshness}
+}
+
+// sessionKey carries the authorised instance through the context, which keeps
+// the JSON-RPC layer free of transport-specific plumbing.
+type sessionKey struct{}
+
+// WithSession binds a request context to an authorised instance.
+func WithSession(ctx context.Context, session Session) context.Context {
+	return context.WithValue(ctx, sessionKey{}, session)
+}
+
+// Session resolves the instance for this call. A transport that authenticated a
+// credential has already put one in the context; stdio, which is a local
+// development transport with no credential, falls back to the instance the
+// panel selected.
+func (s *Server) Session(ctx context.Context) (Session, error) {
+	if session, ok := ctx.Value(sessionKey{}).(Session); ok && session.InstanceID != "" {
+		return session, nil
+	}
+	selected, err := s.index.SelectedInstance(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	if selected == "" {
+		return Session{}, errors.New("no WhatsApp instance is selected in the control panel")
+	}
+	return s.resolve(ctx, selected)
+}
+
+// resolve fills in the instance name and the Evolution token. The token is an
+// internal secret and never leaves the process.
+func (s *Server) resolve(ctx context.Context, instanceID string) (Session, error) {
+	session := Session{InstanceID: instanceID}
+	token, err := s.index.InstanceToken(ctx, instanceID)
+	if err != nil {
+		return session, fmt.Errorf("this gateway holds no credentials for instance %s", instanceID)
+	}
+	session.Token = token
+	if managed, err := s.index.ManagedInstances(ctx); err == nil {
+		session.InstanceName = managed[instanceID]
+	}
+	return session, nil
+}
+
+// Resolve builds the session for an authenticated instance. Transports call it
+// after verifying a credential.
+func (s *Server) Resolve(ctx context.Context, instanceID string) (Session, error) {
+	return s.resolve(ctx, instanceID)
+}
+
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params"`
 }
-type callParams struct {
-	Name      string `json:"name"`
-	Arguments struct {
-		Query string `json:"query"`
-		Limit int    `json:"limit"`
-	} `json:"arguments"`
-}
 
-func New(search Searcher, index Index, state *health.State, freshness time.Duration) *Server {
-	return &Server{search: search, index: index, state: state, freshness: freshness}
+type callParams struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 func (s *Server) Handle(ctx context.Context, line []byte) []byte {
@@ -55,15 +129,17 @@ func (s *Server) Handle(ctx context.Context, line []byte) []byte {
 	}
 	switch req.Method {
 	case "initialize":
-		return encode(req.ID, map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "whatsapp-mcp", "version": "0.1.0"}}, nil)
-	case "notifications/initialized":
+		return encode(req.ID, map[string]any{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"serverInfo":      map[string]any{"name": "whatsapp-mcp", "version": "0.2.0"},
+		}, nil)
+	case "notifications/initialized", "notifications/cancelled":
 		return nil
+	case "ping":
+		return encode(req.ID, map[string]any{}, nil)
 	case "tools/list":
-		tools := []any{
-			map[string]any{"name": "whatsapp_status", "description": "Report the WhatsApp session state, the ingestion queues, the index coverage and any problem that needs attention", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}},
-			map[string]any{"name": "search_messages", "description": "Search indexed WhatsApp messages. Always answers, and reports how far back the index goes so an absent result is not mistaken for an absent conversation", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100}}, "required": []string{"query"}}},
-		}
-		return encode(req.ID, map[string]any{"tools": tools}, nil)
+		return encode(req.ID, map[string]any{"tools": toolDefinitions()}, nil)
 	case "tools/call":
 		var params callParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -75,109 +151,23 @@ func (s *Server) Handle(ctx context.Context, line []byte) []byte {
 	}
 }
 
-// status is the single picture both tools report from: what WhatsApp says, what
-// the gateway is doing, and how much history the index actually covers.
-func (s *Server) status(ctx context.Context) map[string]any {
-	snapshot := s.state.Snapshot()
-	stale := snapshot.Stale(s.freshness)
-	status := map[string]any{
-		"whatsapp": snapshot.WhatsApp,
-		"gateway": map[string]any{
-			"evolution_reachable": snapshot.EvolutionConnected,
-			"queue_connected":     snapshot.RabbitConnected,
-			"database_connected":  snapshot.DatabaseConnected,
-		},
-		"queues":          snapshot.Queues,
-		"last_event_at":   snapshot.LastEventAt,
-		"last_message_at": snapshot.LastMessageAt,
-		"stale":           stale,
-		"ready":           snapshot.Ready(s.freshness),
-	}
-	if !snapshot.LastHistoryAt.IsZero() {
-		status["last_history_sync_at"] = snapshot.LastHistoryAt
-	}
-	if problems := snapshot.Problems(); len(problems) > 0 {
-		status["problems"] = problems
-	}
-	if stale {
-		status["warning"] = health.FreshnessWarning
-	}
-	instance, coverage := s.coverage(ctx)
-	if instance != nil {
-		status["instance"] = instance
-	}
-	if coverage != nil {
-		status["index"] = coverage
-	}
-	return status
-}
-
-// coverage describes the selected instance and what the index holds for it.
-// Both are best effort: a status report must still answer when the database is
-// the thing that is broken.
-func (s *Server) coverage(ctx context.Context) (map[string]any, map[string]any) {
-	if s.index == nil {
-		return nil, nil
-	}
-	selected, err := s.index.SelectedInstance(ctx)
-	if err != nil || selected == "" {
-		return nil, nil
-	}
-	instance := map[string]any{"id": selected}
-	if managed, err := s.index.ManagedInstances(ctx); err == nil {
-		if name := managed[selected]; name != "" {
-			instance["name"] = name
-		}
-	}
-	stats, err := s.index.Coverage(ctx, selected)
-	if err != nil {
-		return instance, nil
-	}
-	index := map[string]any{"messages": stats.Messages}
-	if !stats.OldestAt.IsZero() {
-		index["history_since"] = stats.OldestAt
-	}
-	if !stats.NewestAt.IsZero() {
-		index["newest_message_at"] = stats.NewestAt
-	}
-	return instance, index
-}
-
-func (s *Server) call(ctx context.Context, params callParams) map[string]any {
-	status := s.status(ctx)
-	if params.Name == "whatsapp_status" {
-		return textResult(status, false)
-	}
-	if params.Name != "search_messages" {
-		return textResult(map[string]any{"error": "unknown tool"}, true)
-	}
-	messages, err := s.search.SearchMessages(ctx, params.Arguments.Query, params.Arguments.Limit)
-	if err != nil {
-		return textResult(map[string]any{"error": err.Error(), "status": status}, true)
-	}
-	// The search answers even when the pipeline is degraded. Refusing would hide
-	// the messages that are indexed; reporting the coverage lets the caller judge
-	// whether an empty result means "nothing was said" or "nothing was indexed".
-	result := map[string]any{"messages": messages, "count": len(messages)}
-	if index, ok := status["index"]; ok {
-		result["index"] = index
-	}
-	if problems, ok := status["problems"]; ok {
-		result["problems"] = problems
-		result["warning"] = health.FreshnessWarning
-	} else if status["stale"] == true {
-		result["warning"] = health.FreshnessWarning
-	}
-	return textResult(result, false)
-}
-
 func textResult(value any, isError bool) map[string]any {
-	body, _ := json.Marshal(value)
+	body, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		body = []byte(`{"error":"failed to encode the tool result"}`)
+		isError = true
+	}
 	return map[string]any{"content": []any{map[string]any{"type": "text", "text": string(body)}}, "isError": isError}
 }
+
+func toolError(format string, args ...any) map[string]any {
+	return textResult(map[string]any{"error": fmt.Sprintf(format, args...)}, true)
+}
+
 func rpcError(code int, message string) map[string]any {
 	return map[string]any{"code": code, "message": message}
 }
+
 func encode(id json.RawMessage, result any, err any) []byte {
 	response := map[string]any{"jsonrpc": "2.0", "id": id}
 	if err != nil {
@@ -189,6 +179,8 @@ func encode(id json.RawMessage, result any, err any) []byte {
 	return body
 }
 
+// Serve runs the newline-delimited stdio transport, which exists for local
+// development. The supported path is the authenticated HTTP endpoint.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)

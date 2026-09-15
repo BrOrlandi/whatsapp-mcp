@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -40,6 +41,10 @@ type ControlStore interface {
 	SelectedInstance(context.Context) (string, error)
 	SelectInstance(context.Context, string) error
 	Coverage(context.Context, string) (store.Coverage, error)
+	CreateAPIKey(context.Context, string, string, string, string) error
+	ListAPIKeys(context.Context) ([]store.APIKey, error)
+	RevokeAPIKey(context.Context, int64) error
+	OldestMessage(context.Context, string, string) (store.Message, error)
 	SaveInstance(context.Context, string, string, string) error
 	InstanceToken(context.Context, string) (string, error)
 	ForgetInstance(context.Context, string) error
@@ -57,6 +62,7 @@ type EvolutionAPI interface {
 	DisconnectInstance(context.Context, string) error
 	LogoutInstance(context.Context, string) error
 	QRCode(context.Context, string) (evolution.QRCode, error)
+	RequestHistory(context.Context, string, evolution.Anchor, int) error
 }
 
 type sessions struct {
@@ -109,12 +115,13 @@ type webApp struct {
 	store     ControlStore
 	evolution EvolutionAPI
 	status    StatusReader
+	publicURL string
 	sessions  *sessions
 	templates *template.Template
 }
 
-func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte) http.Handler {
-	a := &webApp{store: store, evolution: client, status: status, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages))}
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL string) http.Handler {
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages))}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.dashboard)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -129,6 +136,9 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /instances/disconnect", a.disconnectInstance)
 	mux.HandleFunc("POST /instances/logout", a.logoutInstance)
 	mux.HandleFunc("POST /instances/delete", a.deleteInstance)
+	mux.HandleFunc("POST /instances/history", a.syncHistory)
+	mux.HandleFunc("POST /keys", a.createKey)
+	mux.HandleFunc("POST /keys/revoke", a.revokeKey)
 	mux.HandleFunc("GET /api/selected-instance", a.selectedJSON)
 	return securityHeaders(mux)
 }
@@ -174,11 +184,19 @@ func (a *webApp) require(w http.ResponseWriter, r *http.Request) bool {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 	return false
 }
+
+// render builds the page in memory before writing it. Rendering straight to the
+// response would emit a half-built page followed by an error banner whenever
+// anything failed mid-template, and would turn a client that hung up into a
+// bogus 500 written over a response already in flight.
 func (a *webApp) render(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.templates.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, "Erro ao renderizar página", 500)
+	var page bytes.Buffer
+	if err := a.templates.ExecuteTemplate(&page, name, data); err != nil {
+		http.Error(w, "Erro ao renderizar página", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = page.WriteTo(w)
 }
 func (a *webApp) setupPage(w http.ResponseWriter, r *http.Request) {
 	if _, _, err := a.admin(r); err == nil {
@@ -260,6 +278,9 @@ type dashboardData struct {
 	NeedsPairing            bool
 	SelectedName            string
 	Status                  *statusView
+	Keys                    []store.APIKey
+	NewKey                  string
+	Endpoint                string
 }
 
 // statusView is the operational picture the panel shows: what WhatsApp reports,
@@ -297,7 +318,8 @@ func (a *webApp) dashboardState(r *http.Request) dashboardData {
 	selected, _ := a.store.SelectedInstance(r.Context())
 	managed, _ := a.store.ManagedInstances(r.Context())
 	instances, err := a.evolution.FetchInstances(r.Context())
-	d := dashboardData{Selected: selected, Unavailable: err != nil, Status: a.statusView(r, selected)}
+	d := dashboardData{Selected: selected, Unavailable: err != nil, Status: a.statusView(r, selected), Endpoint: a.publicURL + "/mcp"}
+	d.Keys, _ = a.store.ListAPIKeys(r.Context())
 	if err != nil {
 		d.Notice = "A API Evolution está indisponível no momento. Tente novamente em instantes."
 		return d
@@ -745,6 +767,12 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .queues{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
 .queue{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
 .queue__name{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem}
+.secret{margin:18px 0;padding:16px;border:1px solid var(--ok);border-radius:var(--radius-sm);background:var(--ok-bg)}
+.secret__title{margin:0 0 8px;font-weight:700;color:var(--ok)}
+.keys{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.key{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
+.key__name{font-weight:600}
+.key__prefix{display:block;font-weight:400;font-size:.82rem;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .qrcode{display:block;margin:0 auto;width:256px;height:256px;max-width:100%;background:#fff;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border)}
 code{background:var(--surface-soft);border:1px solid var(--border);padding:2px 6px;border-radius:6px;font-size:.88em;overflow-wrap:anywhere}
 pre{overflow:auto;background:#0c241e;color:#e8fff7;padding:16px;border-radius:var(--radius-sm);font-size:.88rem;line-height:1.5}
@@ -873,21 +901,65 @@ pre code{background:none;border:0;padding:0;color:inherit}
 
 <section class="card" aria-labelledby="configuracao">
 {{if .Ready}}
-<h2 id="configuracao">Configurar o MCP no Claude</h2>
-<p>O WhatsApp está conectado na instância <strong>{{.SelectedName}}</strong> e pronto para uso.</p>
-<pre><code>Configure o WhatsApp MCP remoto no Claude.
+<h2 id="configuracao">Conectar o Claude a este MCP</h2>
+<p>O WhatsApp está conectado na instância <strong>{{.SelectedName}}</strong>. Gere uma chave de API e use a configuração abaixo. A chave é a única informação que o cliente precisa: ela já identifica a conta e a instância.</p>
 
-A instância do WhatsApp já está criada, conectada e selecionada no painel.
-Não crie outra instância e não solicite QR Code.
+{{with .NewKey}}
+<div class="secret">
+<p class="secret__title">Sua nova chave — copie agora</p>
+<pre><code>{{.}}</code></pre>
+<p class="muted">Ela não será exibida novamente. Guarde no gerenciador de credenciais do cliente, nunca em um prompt ou arquivo versionado.</p>
+</div>
+<h3 class="subhead">Configuração do cliente</h3>
+<pre><code>{
+  "mcpServers": {
+    "whatsapp": {
+      "type": "http",
+      "url": "{{$.Endpoint}}",
+      "headers": {
+        "Authorization": "Bearer {{.}}"
+      }
+    }
+  }
+}</code></pre>
+<p class="muted">No Claude Code: <code>claude mcp add --transport http whatsapp {{$.Endpoint}} --header "Authorization: Bearer SUA_CHAVE"</code></p>
+{{else}}
+<h3 class="subhead">Configuração do cliente</h3>
+<pre><code>{
+  "mcpServers": {
+    "whatsapp": {
+      "type": "http",
+      "url": "{{.Endpoint}}",
+      "headers": {
+        "Authorization": "Bearer SUA_CHAVE"
+      }
+    }
+  }
+}</code></pre>
+{{end}}
 
-Use somente a URL do serviço e a credencial fornecida pelo painel.
-Não peça, revele ou imprima senhas, tokens ou connection strings.
+<h3 class="subhead">Chaves de API</h3>
+{{if .Keys}}
+<ul class="keys">
+{{range .Keys}}<li class="key">
+<span class="key__name">{{.Name}}<span class="key__prefix">{{.Prefix}}…</span></span>
+<span class="muted">criada em {{moment .CreatedAt}} · uso {{relativeSince .LastUsedAt}}</span>
+<form method="post" action="/keys/revoke"><input type="hidden" name="id" value="{{.ID}}"><button class="btn btn--quiet" type="submit">Revogar</button></form>
+</li>{{end}}
+</ul>
+{{else}}
+<p class="muted">Nenhuma chave ativa. Crie uma para conectar um cliente.</p>
+{{end}}
+<form method="post" action="/keys">
+<label class="field" for="key-name"><span class="field__label">Nova chave<span class="field__hint">Um nome para lembrar onde ela está sendo usada.</span></span></label>
+<input id="key-name" type="text" name="name" maxlength="60" placeholder="claude code do notebook" autocapitalize="none" spellcheck="false">
+<div class="actions"><button class="btn" type="submit">Gerar chave</button></div>
+</form>
+<p class="muted">Revogar tem efeito imediato: cada requisição do MCP é autenticada por conta própria.</p>
 
-Depois de configurar, teste as ferramentas e confirme:
-- que o servidor MCP respondeu;
-- que a instância conectada foi reconhecida;
-- que uma consulta de status foi executada com sucesso.</code></pre>
-<p class="muted">O endpoint remoto e a chave de API aparecerão aqui quando o gateway MCP autenticado estiver publicado.</p>
+<h3 class="subhead">Histórico</h3>
+<p class="muted">O índice cobre o que chegou desde que esta instância foi conectada. O WhatsApp devolve mensagens anteriores a uma que ele já conhece, então cada pedido recua mais um trecho.</p>
+<form method="post" action="/instances/history"><div class="actions"><button class="btn btn--ghost" type="submit">Puxar mensagens mais antigas</button></div></form>
 {{else}}
 <h2 id="configuracao">Prepare o WhatsApp antes de configurar o MCP</h2>
 <p>A configuração do Claude fica disponível quando houver uma instância selecionada e conectada.</p>

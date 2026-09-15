@@ -15,10 +15,16 @@ func Handler(state *health.State, freshness time.Duration) http.Handler {
 	return mux
 }
 
-func FullHandler(state *health.State, freshness time.Duration, web http.Handler) http.Handler {
+// FullHandler mounts the probes, the remote MCP endpoint and the control panel
+// on one server. The MCP endpoint authenticates every request on its own and
+// shares nothing with the panel's session cookie.
+func FullHandler(state *health.State, freshness time.Duration, web, remoteMCP http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeHealth(w, state.Snapshot(), freshness, true) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) { writeHealth(w, state.Snapshot(), freshness, false) })
+	if remoteMCP != nil {
+		mux.Handle("/mcp", remoteMCP)
+	}
 	mux.Handle("/", web)
 	return mux
 }

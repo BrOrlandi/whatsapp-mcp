@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	ListenAddr         string
+	PublicURL          string
 	EvolutionURL       string
 	EvolutionAPIKey    string
 	EvolutionTimeout   time.Duration
@@ -17,11 +18,15 @@ type Config struct {
 	DatabaseURL        string
 	FreshnessWindow    time.Duration
 	StatusPollInterval time.Duration
+	StdioEnabled       bool
 }
 
 func Load() Config {
 	return Config{
-		ListenAddr:         env("LISTEN_ADDR", ":8080"),
+		ListenAddr: env("LISTEN_ADDR", ":8080"),
+		// The address clients reach this gateway at. It is not a secret; it is
+		// what the panel prints in the ready-to-paste client configuration.
+		PublicURL:          env("PUBLIC_URL", "https://whatsapp-mcp.example.com"),
 		EvolutionURL:       env("EVOLUTION_URL", "http://evolution-go:4000"),
 		EvolutionAPIKey:    os.Getenv("EVOLUTION_API_KEY"),
 		EvolutionTimeout:   duration("EVOLUTION_TIMEOUT", 5*time.Second),
@@ -30,6 +35,10 @@ func Load() Config {
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		FreshnessWindow:    duration("FRESHNESS_WINDOW", 5*time.Minute),
 		StatusPollInterval: duration("STATUS_POLL_INTERVAL", 15*time.Second),
+		// The stdio transport is a local development convenience. The supported
+		// path is the authenticated HTTP endpoint, so stdio stays off unless asked
+		// for: a server process reading stdin has no client on the other end.
+		StdioEnabled: os.Getenv("MCP_STDIO") == "true",
 	}
 }
 

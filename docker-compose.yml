@@ -107,6 +107,7 @@ services:
     stdin_open: true
     environment:
       LISTEN_ADDR: :8080
+      PUBLIC_URL: ${PUBLIC_URL:-https://whatsapp-mcp.example.com}
       EVOLUTION_URL: http://evolution-go:4000
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-5s}

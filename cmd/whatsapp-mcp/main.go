@@ -15,6 +15,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/httpapi"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/mcp"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/mcphttp"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/rabbit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
@@ -47,14 +48,25 @@ func main() {
 			logger.Error("RabbitMQ consumer stopped", "error", err)
 		}
 	}()
-	go func() {
-		if err := mcp.New(db, db, state, cfg.FreshnessWindow).Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("MCP stdio stopped", "error", err)
-		}
-	}()
+	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow)
+	if cfg.StdioEnabled {
+		go func() {
+			if err := mcpServer.Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("MCP stdio stopped", "error", err)
+			}
+		}()
+	}
 
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey)
-	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler), ReadHeaderTimeout: 5 * time.Second}
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL)
+	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db}, logger)
+	httpServer := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler, remoteMCP),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      90 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -126,4 +138,21 @@ func pollDatabase(ctx context.Context, db *store.Store, state *health.State) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// apiKeyAuth authenticates an MCP client against the stored API keys and
+// records the use, so the panel can show a credential nobody uses any more.
+type apiKeyAuth struct{ store *store.Store }
+
+func (a apiKeyAuth) Authenticate(ctx context.Context, secret string) (string, error) {
+	key, err := a.store.ResolveAPIKey(ctx, secret)
+	if err != nil {
+		return "", err
+	}
+	go func() {
+		touchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = a.store.TouchAPIKey(touchCtx, key.ID)
+	}()
+	return key.InstanceID, nil
 }

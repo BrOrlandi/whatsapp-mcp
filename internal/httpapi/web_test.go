@@ -26,6 +26,11 @@ type fakeRepo struct {
 	tokens               map[string]string
 	names                map[string]string
 	coverage             store.Coverage
+	keys                 []store.APIKey
+	digests              []string
+	nextID               int64
+	oldest               store.Message
+	oldestErr            error
 }
 
 func newRepo() *fakeRepo {
@@ -90,6 +95,36 @@ func (f *fakeRepo) Coverage(_ context.Context, id string) (store.Coverage, error
 	defer f.mu.Unlock()
 	return f.coverage, nil
 }
+func (f *fakeRepo) CreateAPIKey(_ context.Context, name, instanceID, digest, prefix string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	f.keys = append(f.keys, store.APIKey{ID: f.nextID, Name: name, InstanceID: instanceID, Prefix: prefix, CreatedAt: time.Now()})
+	f.digests = append(f.digests, digest)
+	return nil
+}
+func (f *fakeRepo) ListAPIKeys(context.Context) ([]store.APIKey, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.APIKey(nil), f.keys...), nil
+}
+func (f *fakeRepo) RevokeAPIKey(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.keys[:0]
+	for _, key := range f.keys {
+		if key.ID != id {
+			kept = append(kept, key)
+		}
+	}
+	f.keys = kept
+	return nil
+}
+func (f *fakeRepo) OldestMessage(context.Context, string, string) (store.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.oldest, f.oldestErr
+}
 func (f *fakeRepo) ManagedInstances(context.Context) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -101,14 +136,16 @@ func (f *fakeRepo) ManagedInstances(context.Context) (map[string]string, error) 
 }
 
 type fakeEvolution struct {
-	mu        sync.Mutex
-	instances []evolution.Instance
-	err       error
-	qr        evolution.QRCode
-	qrErr     error
-	createErr error
-	calls     []string
-	tokens    []string
+	mu         sync.Mutex
+	instances  []evolution.Instance
+	err        error
+	qr         evolution.QRCode
+	qrErr      error
+	createErr  error
+	calls      []string
+	tokens     []string
+	anchors    []evolution.Anchor
+	historyErr error
 }
 
 func (f *fakeEvolution) record(call, token string) {
@@ -168,6 +205,13 @@ func (f *fakeEvolution) LogoutInstance(_ context.Context, token string) error {
 	f.record("logout", token)
 	return nil
 }
+func (f *fakeEvolution) RequestHistory(_ context.Context, token string, anchor evolution.Anchor, count int) error {
+	f.record("history", token)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.anchors = append(f.anchors, anchor)
+	return f.historyErr
+}
 func (f *fakeEvolution) QRCode(_ context.Context, token string) (evolution.QRCode, error) {
 	f.record("qr", token)
 	return f.qr, f.qrErr
@@ -186,7 +230,7 @@ func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution) (*httptest.Serve
 	repo.mu.Lock()
 	repo.user, repo.hash = "admin", hash
 	repo.mu.Unlock()
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey()))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example"))
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -235,7 +279,7 @@ func mustNotContain(t *testing.T, page, name string, unwanted ...string) {
 
 func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey()))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -283,7 +327,7 @@ func TestEveryPageInlinesTheBrandLogo(t *testing.T) {
 	if !strings.HasPrefix(logo, "<svg") {
 		t.Fatalf("brand.LogoSVG is not inline SVG: %q", logo)
 	}
-	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey()))
+	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
 	defer fresh.Close()
 	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="username"`, `name="password"`)
 
@@ -476,7 +520,7 @@ func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
 // The pairing QR arrives as a data: URI, so the policy must allow it for images
 // and for nothing else.
 func TestContentSecurityPolicyAllowsInlineQRImages(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey()))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/login")
 	if err != nil {
@@ -531,7 +575,7 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.user, repo.hash = "admin", hash
-	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey()))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -550,4 +594,109 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 		"401: logged out from another device",
 		"Bruno", "42", "04/03/2026",
 		"message", "Consumindo", "Parada")
+}
+
+// The secret must appear exactly once, in the body of the response that creates
+// it, and never in a URL: a query string lands in browser history, proxy logs
+// and the referrer of the next request.
+func TestCreatingAKeyShowsItOnceAndNeverInAURL(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	r, err := client.PostForm(ts.URL+"/keys", url.Values{"name": {"claude code"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	page := string(body)
+
+	if r.Request.URL.RawQuery != "" {
+		t.Fatalf("the secret round-tripped through a URL: %s", r.Request.URL)
+	}
+	// The brand SVG defines a gradient id that also starts with the prefix, so
+	// the secret is read from where it is actually offered to the client.
+	index := strings.Index(page, "Bearer "+store.KeyPrefix)
+	if index < 0 {
+		t.Fatalf("the new key was not shown in a usable configuration: %s", page)
+	}
+	index += len("Bearer ")
+	secret := page[index : index+len(store.KeyPrefix)+24]
+	if len(repo.keys) != 1 || repo.keys[0].InstanceID != "one" {
+		t.Fatalf("key was not stored against the instance: %+v", repo.keys)
+	}
+	// Only the digest is stored, never the secret itself.
+	if repo.digests[0] == secret || repo.digests[0] != store.HashAPIKey(secret) {
+		t.Fatal("the stored value is not the digest of the secret")
+	}
+	mustContain(t, page, "key page", "https://mcp.example/mcp", "Bearer "+secret, `"type": "http"`, "claude mcp add")
+
+	// Reloading must not repeat the secret.
+	reloaded := fetch(t, client, ts.URL+"/")
+	if strings.Contains(reloaded, secret) {
+		t.Fatal("the secret is shown again after a reload")
+	}
+	mustContain(t, reloaded, "dashboard", "claude code", repo.keys[0].Prefix)
+}
+
+func TestRevokingAKeyRemovesIt(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	r, _ := client.PostForm(ts.URL+"/keys", url.Values{"name": {"temporária"}})
+	r.Body.Close()
+	if len(repo.keys) != 1 {
+		t.Fatalf("keys = %+v", repo.keys)
+	}
+	r, _ = client.PostForm(ts.URL+"/keys/revoke", url.Values{"id": {"1"}})
+	r.Body.Close()
+	if len(repo.keys) != 0 {
+		t.Fatalf("key survived revocation: %+v", repo.keys)
+	}
+}
+
+// The history request pages backwards from a message the index already holds,
+// which is what the WhatsApp protocol requires.
+func TestHistorySyncAnchorsOnTheOldestMessage(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	repo.oldest = store.Message{MessageID: "OLD", ChatJID: "a@s.whatsapp.net", SentAt: time.Now().Add(-48 * time.Hour)}
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	r, err := client.PostForm(ts.URL+"/instances/history", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if len(evo.anchors) != 1 || evo.anchors[0].MessageID != "OLD" {
+		t.Fatalf("anchors = %+v", evo.anchors)
+	}
+
+	// With nothing indexed there is no anchor, and the panel has to say why
+	// rather than fail silently.
+	empty := newRepo()
+	if err := empty.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	empty.selected = "one"
+	empty.oldestErr = errors.New("no rows")
+	ts2, client2 := signedIn(t, empty, &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}})
+	r, _ = client2.PostForm(ts2.URL+"/instances/history", nil)
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "history failure", "nenhuma mensagem indexada")
 }
