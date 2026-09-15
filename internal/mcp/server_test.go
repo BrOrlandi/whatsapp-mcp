@@ -71,15 +71,32 @@ func (f *fakeIndex) RawMessage(context.Context, string, string) ([]byte, error) 
 }
 
 type fakeLive struct {
-	contacts   []evolution.Contact
-	groups     []evolution.Group
-	group      evolution.Group
-	err        error
-	tokensUsed []string
-	sentText   []string
-	sentMedia  []string
-	history    []evolution.Anchor
-	counts     []int
+	contacts    []evolution.Contact
+	groups      []evolution.Group
+	group       evolution.Group
+	err         error
+	tokensUsed  []string
+	sentText    []string
+	sentMedia   []string
+	history     []evolution.Anchor
+	counts      []int
+	warmed      []string
+	warmErr     error
+	statusFor   []string
+	delivery    evolution.Delivery
+	deliveryErr error
+	sentID      string
+}
+
+func (f *fakeLive) WarmSession(_ context.Context, token, recipient string) error {
+	f.note(token)
+	f.warmed = append(f.warmed, recipient)
+	return f.warmErr
+}
+func (f *fakeLive) Delivered(_ context.Context, token, id string) (evolution.Delivery, error) {
+	f.note(token)
+	f.statusFor = append(f.statusFor, id)
+	return f.delivery, f.deliveryErr
 }
 
 func (f *fakeLive) note(token string) { f.tokensUsed = append(f.tokensUsed, token) }
@@ -101,7 +118,18 @@ func (f *fakeLive) SendText(_ context.Context, token, to, text string) (evolutio
 		return evolution.SentMessage{}, f.err
 	}
 	f.sentText = append(f.sentText, to+"|"+text)
-	return evolution.SentMessage{ID: "SENT1"}, nil
+	return evolution.SentMessage{ID: first(f.sentID, "SENT1")}, nil
+}
+
+// first keeps the fakes readable: a test that cares about the id sets one, and
+// every other test keeps the default.
+func first(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 func (f *fakeLive) SendMedia(_ context.Context, token, to, kind, url, caption, filename string) (evolution.SentMessage, error) {
 	f.note(token)
@@ -515,5 +543,69 @@ func TestEmptyPeriodInsideAHoleIsReportedAsUnknown(t *testing.T) {
 	})
 	if payload["warning"] != nil {
 		t.Fatalf("a quiet period outside the hole was flagged: %#v", payload)
+	}
+}
+
+// A send must warm the recipient's device list first and then tell the truth
+// about whether the message arrived. Reporting the bare acknowledgement is what
+// let a message that was never encrypted read as a success.
+func TestSendWarmsThenConfirmsDelivery(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{
+		sentID:   "3EB035789D5041DB3388CB",
+		delivery: evolution.Delivery{MessageID: "3EB035789D5041DB3388CB", Status: "Delivered", At: "2026-09-15 00:54:41"},
+	}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "send_text_message", map[string]any{"to": "55@s.whatsapp.net", "text": "oi"})
+	if isError {
+		t.Fatalf("send failed: %#v", payload)
+	}
+	if len(live.warmed) != 1 || live.warmed[0] != "55@s.whatsapp.net" {
+		t.Fatalf("the recipient was not warmed: %v", live.warmed)
+	}
+	if len(live.statusFor) != 1 || live.statusFor[0] != "3EB035789D5041DB3388CB" {
+		t.Fatalf("delivery was not checked by id: %v", live.statusFor)
+	}
+	if payload["delivery"] != "Delivered" {
+		t.Fatalf("delivery = %#v", payload["delivery"])
+	}
+}
+
+// An empty delivery record is the shape of a message dropped for a device with
+// no encryption session — and also of a recipient who is simply offline. It
+// must read as unconfirmed: calling it success hides the first, calling it
+// failure misreports the second.
+func TestSendReportsAnUnconfirmedMessage(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{sentID: "3EB0E1FEBEB6284AD63FF1"}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "send_text_message", map[string]any{"to": "55@s.whatsapp.net", "text": "oi"})
+	if isError {
+		t.Fatalf("send failed: %#v", payload)
+	}
+	if payload["delivery"] != "unconfirmed" {
+		t.Fatalf("delivery = %#v, want unconfirmed", payload["delivery"])
+	}
+	warning, _ := payload["warning"].(string)
+	if !strings.Contains(warning, "waiting for this message") {
+		t.Fatalf("the stuck-message case was not explained: %#v", payload)
+	}
+}
+
+// A warm-up is a best effort. It must never turn a send that would have worked
+// into a refusal.
+func TestSendProceedsWhenWarmingFails(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{warmErr: errors.New("usync failed"), sentID: "ABC", delivery: evolution.Delivery{Status: "Delivered"}}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "send_text_message", map[string]any{"to": "55@s.whatsapp.net", "text": "oi"})
+	if isError {
+		t.Fatalf("a failed warm-up blocked the send: %#v", payload)
+	}
+	if payload["delivery"] != "Delivered" {
+		t.Fatalf("delivery = %#v", payload["delivery"])
 	}
 }

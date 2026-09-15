@@ -41,6 +41,8 @@ type Live interface {
 	Group(context.Context, string, string) (evolution.Group, error)
 	SendText(context.Context, string, string, string) (evolution.SentMessage, error)
 	SendMedia(context.Context, string, string, string, string, string, string) (evolution.SentMessage, error)
+	WarmSession(context.Context, string, string) error
+	Delivered(context.Context, string, string) (evolution.Delivery, error)
 	DownloadMedia(context.Context, string, json.RawMessage) (evolution.Media, error)
 	RequestHistory(context.Context, string, evolution.Anchor, int) error
 }

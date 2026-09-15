@@ -169,7 +169,18 @@ func (c *Client) Group(ctx context.Context, token, groupJID string) (Group, erro
 }
 
 // sendResult covers the shapes Evolution uses for a send acknowledgement.
+//
+// Evolution Go returns whatsmeow's own SendResponse, which carries the id and
+// the timestamp nested under Info rather than at the top level. Reading only
+// the flat fields yielded an empty id on every send, and an empty id is not a
+// cosmetic loss: /message/status is keyed by it, so without it there is no way
+// to ask whether the message actually arrived. The flat spellings are kept as
+// fallbacks because other Evolution builds answer in that shape.
 type sendResult struct {
+	Info struct {
+		ID        string `json:"ID"`
+		Timestamp string `json:"Timestamp"`
+	} `json:"Info"`
 	ID        string `json:"ID"`
 	LowerID   string `json:"id"`
 	Timestamp string `json:"Timestamp"`
@@ -177,14 +188,47 @@ type sendResult struct {
 }
 
 func (r sendResult) toSent() SentMessage {
-	sent := SentMessage{ID: first(r.ID, r.LowerID)}
-	for _, value := range []string{r.Timestamp, r.LowerTime} {
+	sent := SentMessage{ID: first(r.Info.ID, r.ID, r.LowerID)}
+	for _, value := range []string{r.Info.Timestamp, r.Timestamp, r.LowerTime} {
 		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
 			sent.Timestamp = parsed.UTC()
 			break
 		}
 	}
 	return sent
+}
+
+// Delivery is what WhatsApp knows about a message after it was sent. An empty
+// Status means Evolution holds no delivery record at all, which is exactly what
+// a message that could not be encrypted for the recipient's device looks like.
+type Delivery struct {
+	MessageID string `json:"message_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+	At        string `json:"at,omitempty"`
+}
+
+// Delivered reports whether WhatsApp acknowledged the message reaching the
+// recipient. It is the only honest answer available: Evolution reports a send
+// as successful even when it silently skipped a device it could not encrypt
+// for, so the send call alone cannot tell arrival from loss.
+func (c *Client) Delivered(ctx context.Context, token, messageID string) (Delivery, error) {
+	if messageID == "" {
+		return Delivery{}, errors.New("a message id is required")
+	}
+	var payload struct {
+		Result *struct {
+			MessageID string `json:"message_id"`
+			Status    string `json:"status"`
+			Timestamp string `json:"timestamp"`
+		} `json:"result"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/message/status", token, map[string]any{"id": messageID}, &payload); err != nil {
+		return Delivery{}, classify(err)
+	}
+	if payload.Result == nil {
+		return Delivery{MessageID: messageID}, nil
+	}
+	return Delivery{MessageID: first(payload.Result.MessageID, messageID), Status: payload.Result.Status, At: payload.Result.Timestamp}, nil
 }
 
 // SendText sends a text message. The recipient is a JID or a phone number;
@@ -248,4 +292,23 @@ func (c *Client) RequestHistory(ctx context.Context, token string, anchor Anchor
 		},
 	}
 	return classify(c.call(ctx, http.MethodPost, "/chat/history-sync", token, body, nil))
+}
+
+// WarmSession asks WhatsApp for the recipient's device list before a message is
+// encrypted for it.
+//
+// The first message a freshly paired device sends to a device it has never
+// talked to can be dropped for that device alone: whatsmeow finds no Signal
+// session, skips it, and the send is still reported as a success, so the
+// recipient is left with a message that never decrypts. Refreshing the device
+// list first is the only lever this API offers against that.
+//
+// It is deliberately best effort. A failure here says nothing about whether the
+// message can be sent, so the caller sends anyway rather than refusing on the
+// strength of a warm-up.
+func (c *Client) WarmSession(ctx context.Context, token, jid string) error {
+	if jid == "" {
+		return errors.New("a recipient is required")
+	}
+	return classify(c.call(ctx, http.MethodPost, "/user/info", token, map[string]any{"number": []string{jid}}, nil))
 }

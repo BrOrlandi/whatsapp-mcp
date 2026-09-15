@@ -410,11 +410,74 @@ func (s *Server) sendText(ctx context.Context, session Session, args arguments) 
 	if args.To == "" || args.Text == "" {
 		return toolError("to and text are both required")
 	}
+	s.warm(ctx, session, args.To)
 	sent, err := s.live.SendText(ctx, session.Token, args.To, args.Text)
 	if err != nil {
 		return liveError(err)
 	}
-	return textResult(map[string]any{"sent": sent, "to": args.To}, false)
+	return textResult(s.confirm(ctx, session, sent, map[string]any{"to": args.To}), false)
+}
+
+// deliveryWait is how long to give WhatsApp before asking whether the message
+// arrived. A send that encrypted cleanly is acknowledged in well under a
+// second, so waiting longer would trade a slow tool for no extra certainty: an
+// undelivered message stays undelivered until the recipient comes back online.
+const deliveryWait = 1500 * time.Millisecond
+
+// warm refreshes the recipient's device list before the message is encrypted
+// for it.
+//
+// The first message a freshly paired instance sends to a device it has never
+// talked to can be dropped for that device alone: no Signal session exists,
+// whatsmeow skips the device, and the recipient is shown a message that never
+// decrypts. Refreshing the device list is the only lever the Evolution API
+// offers against that.
+//
+// It never fails a send. A warm-up that did not work says nothing about whether
+// the message can be delivered, and refusing to send on its account would turn
+// a possible problem into a certain one.
+func (s *Server) warm(ctx context.Context, session Session, recipient string) {
+	_ = s.live.WarmSession(ctx, session.Token, recipient)
+}
+
+// confirm turns a send acknowledgement into something the caller can trust.
+//
+// Evolution reports a send as successful even when it silently skipped a device
+// it could not encrypt for, so "the call returned" and "the message arrived"
+// are different facts and only the second one matters. Asking WhatsApp settles
+// it: a message that never left has no delivery record at all.
+//
+// An unconfirmed message is reported as unconfirmed rather than as a failure. A
+// recipient who is merely offline produces the same empty record, and calling
+// that a failure would be as wrong as calling it a success.
+func (s *Server) confirm(ctx context.Context, session Session, sent evolution.SentMessage, payload map[string]any) map[string]any {
+	payload["sent"] = sent
+	if sent.ID == "" {
+		payload["delivery"] = "unknown"
+		payload["warning"] = "Evolution returned no message id, so delivery could not be checked. The message may still have arrived."
+		return payload
+	}
+	select {
+	case <-ctx.Done():
+		payload["delivery"] = "unknown"
+		return payload
+	case <-time.After(deliveryWait):
+	}
+	delivery, err := s.live.Delivered(ctx, session.Token, sent.ID)
+	if err != nil {
+		payload["delivery"] = "unknown"
+		return payload
+	}
+	if delivery.Status == "" {
+		payload["delivery"] = "unconfirmed"
+		payload["warning"] = "WhatsApp holds no delivery record for this message yet. That is normal for a recipient who is offline, but it is also what a message dropped for a device with no encryption session looks like, and in that case the recipient sees it stuck as \"waiting for this message\" until it is sent again. Check the id again before resending, so a slow delivery is not duplicated."
+		return payload
+	}
+	payload["delivery"] = delivery.Status
+	if delivery.At != "" {
+		payload["delivered_at"] = delivery.At
+	}
+	return payload
 }
 
 func (s *Server) sendMedia(ctx context.Context, session Session, args arguments) map[string]any {
@@ -426,11 +489,12 @@ func (s *Server) sendMedia(ctx context.Context, session Session, args arguments)
 	default:
 		return toolError("type must be one of image, video, audio or document")
 	}
+	s.warm(ctx, session, args.To)
 	sent, err := s.live.SendMedia(ctx, session.Token, args.To, args.Type, args.URL, args.Caption, args.Filename)
 	if err != nil {
 		return liveError(err)
 	}
-	return textResult(map[string]any{"sent": sent, "to": args.To, "type": args.Type}, false)
+	return textResult(s.confirm(ctx, session, sent, map[string]any{"to": args.To, "type": args.Type}), false)
 }
 
 func (s *Server) downloadMedia(ctx context.Context, session Session, args arguments) map[string]any {

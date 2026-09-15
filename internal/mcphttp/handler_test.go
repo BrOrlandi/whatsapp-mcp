@@ -75,6 +75,10 @@ func (f *fakeLive) DownloadMedia(context.Context, string, json.RawMessage) (evol
 	return evolution.Media{}, nil
 }
 func (f *fakeLive) RequestHistory(context.Context, string, evolution.Anchor, int) error { return nil }
+func (f *fakeLive) WarmSession(context.Context, string, string) error                   { return nil }
+func (f *fakeLive) Delivered(context.Context, string, string) (evolution.Delivery, error) {
+	return evolution.Delivery{Status: "Delivered"}, nil
+}
 
 type fakeAuth struct {
 	valid    string

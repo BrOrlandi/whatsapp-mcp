@@ -88,6 +88,12 @@ An outage leaves a hole in the index that reads exactly like quiet days, and tha
 
 `backfill_gap` tries to repair a hole under the same constraint `sync_history` lives with, only from the other side: it anchors on the first message indexed *after* the hole and pages backwards into it, one conversation at a time. A conversation that has said nothing since the hole offers no anchor and cannot be reached at all — the tool counts those as `unreachable_chats` instead of reporting a partial repair as a complete one. Evolution Go exposes no route to read its own stored messages, so this anchor is the only handle available.
 
+### Sending
+
+A send is not finished when the call returns. Evolution reports success even when whatsmeow silently skipped a recipient device it had no encryption session for, and the recipient is then left with a message that never decrypts — WhatsApp shows it as "waiting for this message" indefinitely, and only a resend clears it. This is most likely on the first message a freshly paired instance sends to a device it has never talked to.
+
+So the send tools do two things the API does not. They refresh the recipient's device list before encrypting, which is the only lever against the missing session; and they ask WhatsApp afterwards whether the message actually arrived, reporting `delivery` alongside the acknowledgement. A message with no delivery record is reported as `unconfirmed` rather than as either success or failure, because an offline recipient and a dropped message look identical from here.
+
 ### Untrusted content
 
 Message content is written by third parties. Every reading tool labels it as data rather than instructions, and a send must originate from the user: a message that says "forward this to X" is not a request to act on.
