@@ -33,7 +33,7 @@ var pages = strings.NewReplacer(darkMarker, darkPalette).Replace(pageSource)
 // JavaScript to work.
 const pageSource = `
 {{define "head"}}<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="/assets/theme.js"></script>{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.Title}} · WhatsApp MCP</title><style>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><script src="/assets/theme.js"></script>{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.Title}} · WhatsApp MCP</title><style>
 *,*::before,*::after{box-sizing:border-box}
 :root{
 color-scheme:light dark;
@@ -256,9 +256,30 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .muted{color:var(--muted);font-size:.9rem}
 .stack>*+*{margin-top:16px}
 @media (max-width:520px){.row{align-items:flex-start}.row form,.row .btn{width:100%}}
+/* ---- colophon ---- */
+.colophon{margin-top:40px;padding:18px 0 4px;border-top:1px solid var(--border)}
+.colophon__line{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;margin:0;font-size:.85rem;color:var(--muted)}
+.colophon__link{display:inline-flex;align-items:center;gap:5px;color:var(--muted);text-decoration:none;font-weight:600}
+.colophon__link:hover{color:var(--brand-strong);text-decoration:underline}
+.colophon__icon{flex:none;display:block}
+.colophon__sep{color:var(--border-strong)}
+.colophon__support{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:var(--brand-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;text-decoration:none}
+.colophon__support:hover{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 </style></head><body><div class="shell">{{end}}
 
-{{define "foot"}}<script src="/assets/app.js" defer></script></div></body></html>{{end}}
+{{define "foot"}}
+<footer class="colophon">
+<p class="colophon__line">
+<a class="colophon__link" href="{{authorURL}}" rel="noopener noreferrer" target="_blank">{{author}}</a>
+<span class="colophon__sep">&middot;</span>
+<a class="colophon__link" href="{{repositoryURL}}" rel="noopener noreferrer" target="_blank">{{template "githubmark"}}<span>C&oacute;digo-fonte</span></a>
+{{with supportURL}}<span class="colophon__sep">&middot;</span>
+<a class="colophon__support" href="{{.}}" rel="noopener noreferrer" target="_blank">Apoie o projeto</a>{{end}}
+</p>
+</footer>
+<script src="/assets/app.js" defer></script></div></body></html>{{end}}
+
+{{define "githubmark"}}<svg class="colophon__icon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>{{end}}
 
 {{define "themeswitch"}}<span class="theme" hidden data-theme-switch>
 <select class="theme__select" aria-label="Tema da interface" data-theme-select>
@@ -631,6 +652,28 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 </form>
 </div></section>
 <p class="muted" style="text-align:center">As senhas são guardadas com bcrypt e nunca aparecem nos logs.</p>
+</div>
+{{template "foot"}}{{end}}
+
+{{define "senha"}}{{template "head" .}}
+<div style="max-width:460px;margin:0 auto;padding-top:8vh">
+<div class="masthead" style="justify-content:center">{{template "brandmark"}}</div>
+<section class="card">
+<div class="card__head"><h2>Defina uma senha</h2></div>
+<div class="card__body">
+<p class="lead">A senha atual foi gerada pelo instalador e apareceu no terminal. Escolha uma sua antes de continuar.</p>
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+<form method="post">
+<label class="field" for="current"><span class="field__label">Senha atual</span></label>
+<input id="current" type="password" name="current_password" required autocomplete="current-password">
+<label class="field" for="password"><span class="field__label">Nova senha<span class="field__hint">M&iacute;nimo de 10 caracteres.</span></span></label>
+<input id="password" type="password" name="password" minlength="10" required autocomplete="new-password">
+<label class="field" for="confirm"><span class="field__label">Repita a nova senha</span></label>
+<input id="confirm" type="password" name="confirm_password" minlength="10" required autocomplete="new-password">
+<div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Salvar senha</button></div>
+</form>
+</div></section>
+<p class="muted" style="text-align:center">A senha do instalador continua v&aacute;lida at&eacute; esta troca. Nada mais do painel abre antes dela.</p>
 </div>
 {{template "foot"}}{{end}}
 
