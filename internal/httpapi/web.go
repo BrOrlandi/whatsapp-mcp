@@ -326,6 +326,14 @@ func (a *webApp) dashboardState(r *http.Request) dashboardData {
 	}
 	for _, instance := range instances {
 		_, isManaged := managed[instance.ID]
+		// Evolution's listing carries each instance's token, so an instance
+		// created before this panel existed can be adopted instead of paired
+		// again. Adoption only records what Evolution already told us.
+		if !isManaged && instance.Token != "" {
+			if err := a.store.SaveInstance(r.Context(), instance.ID, instance.Name, instance.Token); err == nil {
+				isManaged = true
+			}
+		}
 		view := instanceView{Instance: instance, Managed: isManaged, Selected: instance.ID == selected}
 		if view.Selected {
 			d.SelectedName = instance.Name
