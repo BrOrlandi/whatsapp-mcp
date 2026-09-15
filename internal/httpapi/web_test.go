@@ -345,7 +345,7 @@ func TestCreateInstanceRegistersTokenAndStartsPairing(t *testing.T) {
 	evo := &fakeEvolution{}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/instances", url.Values{"name": {"pessoal"}})
+	r, err := client.PostForm(ts.URL+"/instancias", url.Values{"name": {"pessoal"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestCreateInstanceFailureKeepsPanelClean(t *testing.T) {
 	evo := &fakeEvolution{createErr: errors.New("licença expirada")}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/instances", url.Values{"name": {"pessoal"}})
+	r, err := client.PostForm(ts.URL+"/instancias", url.Values{"name": {"pessoal"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestPairPageRedirectsWhenConnected(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Body.Close()
-	if r.Request.URL.Path != "/" {
+	if r.Request.URL.Path != "/instancias" {
 		t.Fatalf("pair page ended at %s", r.Request.URL.Path)
 	}
 }
@@ -440,7 +440,7 @@ func TestInstanceActionsUseTheStoredToken(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	for _, action := range []string{"/instances/disconnect", "/instances/logout"} {
+	for _, action := range []string{"/instancias/desconectar", "/instancias/sair"} {
 		r, err := client.PostForm(ts.URL+action, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -451,7 +451,7 @@ func TestInstanceActionsUseTheStoredToken(t *testing.T) {
 		t.Fatalf("calls = %v", evo.calls)
 	}
 
-	r, err := client.PostForm(ts.URL+"/instances/delete", nil)
+	r, err := client.PostForm(ts.URL+"/instancias/remover", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestUnmanagedInstanceCannotBeOperated(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "foreign", Name: "De fora", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/instances/disconnect", nil)
+	r, err := client.PostForm(ts.URL+"/instancias/desconectar", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,8 +484,8 @@ func TestUnmanagedInstanceCannotBeOperated(t *testing.T) {
 	if evo.did("disconnect") {
 		t.Fatal("panel operated an instance it does not manage")
 	}
-	mustContain(t, string(body), "dashboard", "criada por este painel")
-	mustContain(t, fetch(t, client, ts.URL+"/"), "dashboard", "Fora deste painel")
+	mustContain(t, string(body), "instances", "instância deste painel")
+	mustContain(t, fetch(t, client, ts.URL+"/instancias"), "instances", "Sem credenciais aqui")
 }
 
 func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
@@ -496,12 +496,12 @@ func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
 	}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, _ := client.PostForm(ts.URL+"/selection", url.Values{"instance_id": {"one"}, "instance_id_extra": {"two"}})
+	r, _ := client.PostForm(ts.URL+"/instancias/selecionar", url.Values{"instance_id": {"one"}, "instance_id_extra": {"two"}})
 	r.Body.Close()
 	if repo.selected != "one" {
 		t.Fatalf("selected=%q", repo.selected)
 	}
-	r, _ = client.PostForm(ts.URL+"/selection", url.Values{"instance_id": {"unknown"}})
+	r, _ = client.PostForm(ts.URL+"/instancias/selecionar", url.Values{"instance_id": {"unknown"}})
 	if r.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown status=%d", r.StatusCode)
 	}
@@ -585,8 +585,8 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 	}
 	r.Body.Close()
 
-	page := fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "status card",
+	page := fetch(t, client, ts.URL+"/estado")
+	mustContain(t, page, "status page",
 		"Estado do serviço", "Sessão encerrada",
 		"a sessão do WhatsApp foi encerrada e exige um novo QR code",
 		"a fila de eventos está inacessível",
@@ -608,7 +608,7 @@ func TestCreatingAKeyShowsItOnceAndNeverInAURL(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/keys", url.Values{"name": {"claude code"}})
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"claude code"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,9 @@ func TestCreatingAKeyShowsItOnceAndNeverInAURL(t *testing.T) {
 	if repo.digests[0] == secret || repo.digests[0] != store.HashAPIKey(secret) {
 		t.Fatal("the stored value is not the digest of the secret")
 	}
-	mustContain(t, page, "key page", "https://mcp.example/mcp", "Bearer "+secret, `"type": "http"`, "claude mcp add")
+	// The snippets must arrive usable: the endpoint, the secret in place, the
+	// one-line client command and the JSON block for clients configured by file.
+	mustContain(t, page, "key page", "https://mcp.example/mcp", "Bearer "+secret, "claude mcp add", "mcpServers", "WHATSAPP_MCP_KEY")
 
 	// Reloading must not repeat the secret.
 	reloaded := fetch(t, client, ts.URL+"/")
@@ -653,12 +655,12 @@ func TestRevokingAKeyRemovesIt(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, _ := client.PostForm(ts.URL+"/keys", url.Values{"name": {"temporária"}})
+	r, _ := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"temporária"}})
 	r.Body.Close()
 	if len(repo.keys) != 1 {
 		t.Fatalf("keys = %+v", repo.keys)
 	}
-	r, _ = client.PostForm(ts.URL+"/keys/revoke", url.Values{"id": {"1"}})
+	r, _ = client.PostForm(ts.URL+"/chaves/revogar", url.Values{"id": {"1"}})
 	r.Body.Close()
 	if len(repo.keys) != 0 {
 		t.Fatalf("key survived revocation: %+v", repo.keys)
@@ -677,7 +679,7 @@ func TestHistorySyncAnchorsOnTheOldestMessage(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/instances/history", nil)
+	r, err := client.PostForm(ts.URL+"/instancias/historico", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,8 +697,118 @@ func TestHistorySyncAnchorsOnTheOldestMessage(t *testing.T) {
 	empty.selected = "one"
 	empty.oldestErr = errors.New("no rows")
 	ts2, client2 := signedIn(t, empty, &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}})
-	r, _ = client2.PostForm(ts2.URL+"/instances/history", nil)
+	r, _ = client2.PostForm(ts2.URL+"/instancias/historico", nil)
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 	mustContain(t, string(body), "history failure", "nenhuma mensagem indexada")
+}
+
+// The panel is split by task, so each page must exist on its own and the tab
+// bar must say where the operator is.
+func TestPagesAreSeparateAndTheTabBarTracksThem(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	for _, page := range []struct {
+		path, heading, current string
+		absent                 []string
+	}{
+		{"/", "Conectar um cliente", `href="/" aria-current="page"`, []string{"Adicionar instância", "Filas de ingestão"}},
+		{"/instancias", "Instâncias", `href="/instancias" aria-current="page"`, []string{"Chaves ativas", "Filas de ingestão"}},
+		{"/estado", "Estado do serviço", `href="/estado" aria-current="page"`, []string{"Chaves ativas", "Adicionar instância"}},
+	} {
+		body := fetch(t, client, ts.URL+page.path)
+		mustContain(t, body, page.path, page.heading, page.current, `href="/instancias"`, `href="/estado"`)
+		mustNotContain(t, body, page.path, page.absent...)
+	}
+}
+
+// Creating something happens in a dialog, and the dialog is plain markup so it
+// works with the panel's content security policy and without scripting.
+func TestDialogsAreMarkupOnly(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	connect := fetch(t, client, ts.URL+"/")
+	mustContain(t, connect, "connect", `id="nova-chave"`, `href="#nova-chave"`, `action="/chaves"`, "required")
+
+	instances := fetch(t, client, ts.URL+"/instancias")
+	mustContain(t, instances, "instances", `id="nova-instancia"`, `id="remover-instancia"`, `id="encerrar-sessao"`, `action="/instancias"`)
+	// Destructive actions must be confirmed rather than fired by a stray click.
+	mustContain(t, instances, "instances", "Remover a instância?", "Encerrar a sessão do WhatsApp?")
+}
+
+// A key without a name is a key nobody can identify later, which is what made
+// the old flow confusing. It is refused rather than silently named.
+func TestKeyRequiresAName(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"   "}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if len(repo.keys) != 0 {
+		t.Fatalf("an unnamed key was created: %+v", repo.keys)
+	}
+	mustContain(t, string(body), "connect", "Dê um nome")
+}
+
+// The copy helper is served from the panel itself, which is what lets the
+// content security policy stay at 'self'.
+func TestPanelServesItsOwnScript(t *testing.T) {
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	defer ts.Close()
+	r, err := http.Get(ts.URL + "/assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", r.StatusCode)
+	}
+	if !strings.Contains(string(body), "clipboard") {
+		t.Fatalf("unexpected asset body: %s", body)
+	}
+	// A directory listing would expose the layout of the embedded files.
+	listing, err := http.Get(ts.URL + "/assets/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing.Body.Close()
+	if listing.StatusCode == http.StatusOK {
+		t.Fatal("the asset directory is listable")
+	}
+}
+
+func TestCountAndPluralReadNaturally(t *testing.T) {
+	if got := plural(1, "evento", "eventos"); got != "1 evento" {
+		t.Errorf("plural(1) = %q", got)
+	}
+	if got := plural(2, "evento", "eventos"); got != "2 eventos" {
+		t.Errorf("plural(2) = %q", got)
+	}
+	for quantity, want := range map[int64]string{0: "0", 999: "999", 1000: "1.000", 18432: "18.432", 1234567: "1.234.567"} {
+		if got := count(quantity); got != want {
+			t.Errorf("count(%d) = %q, want %q", quantity, got, want)
+		}
+	}
 }

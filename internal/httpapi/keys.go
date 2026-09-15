@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,12 +11,35 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
-// createKey issues a credential for the selected instance and renders the
-// dashboard with the secret in place.
+// keyPage shows a credential exactly once, together with everything needed to
+// use it. Handing over a bare secret and leaving the operator to assemble the
+// client configuration is where the flow used to break, so the snippets arrive
+// already filled in.
+type keyPage struct {
+	layout
+	Name       string
+	Secret     string
+	Endpoint   string
+	Command    string
+	CommandEnv string
+	JSON       string
+	Prompt     string
+}
+
+// verificationPrompt is what the operator pastes into the client to confirm the
+// connection end to end.
+const verificationPrompt = `Use as ferramentas do WhatsApp MCP para verificar a conexão e me diga:
+- o estado da sessão do WhatsApp e o nome da conta conectada;
+- quantas mensagens estão indexadas e desde quando;
+- os títulos das 5 conversas mais recentes.
+
+Não envie nenhuma mensagem. Se alguma ferramenta falhar, mostre o erro exato.`
+
+// createKey issues a credential for the selected instance and renders it once.
 //
-// The secret is shown once, in the body of this response, and never travels
-// through a redirect: a query string would land in browser history, proxy logs
-// and the referrer of the next request.
+// The secret is shown in the body of this response and never travels through a
+// redirect: a query string would land in browser history, proxy logs and the
+// referrer of the next request.
 func (a *webApp) createKey(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
@@ -29,11 +54,8 @@ func (a *webApp) createKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
-	if name == "" {
-		name = "sem nome"
-	}
-	if len(name) > 60 {
-		a.fail(w, r, "/", "Use um nome de até 60 caracteres para a chave.")
+	if name == "" || len(name) > 60 {
+		a.fail(w, r, "/", "Dê um nome de até 60 caracteres para a chave, para você reconhecê-la depois.")
 		return
 	}
 	secret, digest, prefix, err := store.NewAPIKey()
@@ -45,11 +67,38 @@ func (a *webApp) createKey(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "/", "Não foi possível guardar a chave.")
 		return
 	}
-	data := a.dashboardState(r)
-	data.Endpoint = a.publicURL + "/mcp"
-	data.Keys, _ = a.store.ListAPIKeys(r.Context())
-	data.NewKey = secret
-	a.render(w, "dashboard", data)
+	endpoint := a.endpoint()
+	page := keyPage{
+		layout:   a.newLayout(r, "Chave criada", "conectar"),
+		Name:     name,
+		Secret:   secret,
+		Endpoint: endpoint,
+		Command:  fmt.Sprintf("claude mcp add --transport http whatsapp %s --header \"Authorization: Bearer %s\"", endpoint, secret),
+		CommandEnv: fmt.Sprintf("export WHATSAPP_MCP_KEY=%s\nclaude mcp add --transport http whatsapp %s --header \"Authorization: Bearer \\${WHATSAPP_MCP_KEY}\"",
+			secret, endpoint),
+		JSON:   clientConfig(endpoint, secret),
+		Prompt: verificationPrompt,
+	}
+	a.render(w, "chave", page)
+}
+
+// clientConfig renders the MCP client block. It is built here rather than in
+// the template so the quoting is Go's problem and not the reader's.
+func clientConfig(endpoint, secret string) string {
+	config := map[string]any{
+		"mcpServers": map[string]any{
+			"whatsapp": map[string]any{
+				"type":    "http",
+				"url":     endpoint,
+				"headers": map[string]any{"Authorization": "Bearer " + secret},
+			},
+		},
+	}
+	encoded, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 // revokeKey takes a credential out of service. The effect is immediate because
@@ -82,17 +131,17 @@ func (a *webApp) syncHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	selected, err := a.store.SelectedInstance(r.Context())
 	if err != nil || selected == "" {
-		a.fail(w, r, "/", "Selecione uma instância antes de puxar o histórico.")
+		a.fail(w, r, "/instancias", "Selecione uma instância antes de puxar o histórico.")
 		return
 	}
 	token, err := a.store.InstanceToken(r.Context(), selected)
 	if err != nil {
-		a.fail(w, r, "/", "Este painel não gerencia a instância selecionada.")
+		a.fail(w, r, "/instancias", "Este painel não gerencia a instância selecionada.")
 		return
 	}
 	anchor, err := a.store.OldestMessage(r.Context(), selected, "")
 	if err != nil {
-		a.fail(w, r, "/", "Ainda não há nenhuma mensagem indexada para servir de referência. O WhatsApp só devolve mensagens anteriores a uma que ele já conhece, então aguarde as primeiras mensagens chegarem.")
+		a.fail(w, r, "/instancias", "Ainda não há nenhuma mensagem indexada para servir de referência. O WhatsApp só devolve mensagens anteriores a uma que ele já conhece, então aguarde as primeiras mensagens chegarem.")
 		return
 	}
 	request := evolution.Anchor{
@@ -103,8 +152,8 @@ func (a *webApp) syncHistory(w http.ResponseWriter, r *http.Request) {
 		Timestamp: anchor.SentAt,
 	}
 	if err := a.evolution.RequestHistory(r.Context(), token, request, 100); err != nil {
-		a.fail(w, r, "/", "O WhatsApp recusou o pedido de histórico: "+err.Error())
+		a.fail(w, r, "/instancias", "O WhatsApp recusou o pedido de histórico: "+err.Error())
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/instancias", http.StatusSeeOther)
 }

@@ -1,3 +1,4 @@
 .env
 *.log
 bin/
+.playwright-mcp/

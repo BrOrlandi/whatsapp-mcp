@@ -18,7 +18,9 @@ A client needs exactly one thing: an API key. The key identifies the account and
 
 Keys are issued and revoked in the control panel, which also prints this block filled in. Keep the key in the client's credential store, never in a prompt or a versioned file.
 
-The same HTTP server provides a Portuguese control panel at `http://127.0.0.1:8080/`. On first access, create the single administrator. From there the panel owns the whole instance lifecycle: it creates the Evolution instance, renders the pairing QR code, connects, disconnects and removes it. Evolution Go has no public surface and its manager is never needed. Passwords are bcrypt-hashed in PostgreSQL; sessions use signed, HttpOnly, SameSite cookies with concurrency-safe server-side state. A process restart intentionally invalidates active sessions.
+The same HTTP server provides a Portuguese control panel at `http://127.0.0.1:8080/`, split by task: **Conectar** hands a client everything it needs, **Instâncias** owns the WhatsApp account lifecycle, and **Estado** is the diagnostic view. Creating a key or an instance happens in a dialog, and destructive actions ask first. Evolution Go has no public surface and its manager is never needed.
+
+Generating a key lands on a page that shows the secret once alongside the `claude mcp add` command, the JSON block for file-configured clients, and a prompt to verify the connection — all filled in, so nothing has to be assembled by hand. Passwords are bcrypt-hashed in PostgreSQL; sessions use signed, HttpOnly, SameSite cookies with concurrency-safe server-side state. A process restart intentionally invalidates active sessions.
 
 The panel mints a per-instance Evolution token, stores it in PostgreSQL and uses it for every per-instance call, because Evolution resolves the target instance from the key on the request and accepts no instance parameter. That token is an internal secret: it is never displayed and never reaches an MCP client. An instance created outside the panel has no token here, so the panel marks it and refuses to operate it.
 
