@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -364,4 +365,162 @@ func (c *Client) React(ctx context.Context, token, chatJID, messageID, emoji str
 		return SentMessage{}, classify(err)
 	}
 	return result.toSent(), nil
+}
+
+// Presence is what WhatsApp knows about one number: whether it exists at all,
+// and the identity it answers to. Checking before sending is the difference
+// between a message that fails and one that is never attempted.
+type Presence struct {
+	Number     string `json:"number"`
+	JID        string `json:"jid,omitempty"`
+	OnWhatsApp bool   `json:"on_whatsapp"`
+}
+
+// CheckNumbers reports which of the given numbers have WhatsApp accounts.
+func (c *Client) CheckNumbers(ctx context.Context, token string, numbers []string) ([]Presence, error) {
+	if len(numbers) == 0 {
+		return nil, errors.New("at least one number is required")
+	}
+	var raw []struct {
+		Query        string `json:"Query"`
+		JID          string `json:"JID"`
+		IsInWhatsapp bool   `json:"IsIn"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/user/check", token, map[string]any{"number": numbers, "formatJid": true}, &raw); err != nil {
+		return nil, classify(err)
+	}
+	found := make([]Presence, 0, len(raw))
+	for _, item := range raw {
+		found = append(found, Presence{Number: item.Query, JID: item.JID, OnWhatsApp: item.IsInWhatsapp || item.JID != ""})
+	}
+	return found, nil
+}
+
+// Avatar returns the URL of a profile picture. WhatsApp serves the image from
+// its own CDN on a short-lived link, so this is a URL to fetch rather than
+// bytes to keep.
+func (c *Client) Avatar(ctx context.Context, token, jid string, full bool) (string, error) {
+	if jid == "" {
+		return "", errors.New("a number is required")
+	}
+	var raw struct {
+		URL string `json:"URL"`
+		Url string `json:"url"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/user/avatar", token, map[string]any{"number": jid, "preview": !full}, &raw); err != nil {
+		return "", classify(err)
+	}
+	return first(raw.URL, raw.Url), nil
+}
+
+// SendLocation sends a point on the map, optionally named.
+func (c *Client) SendLocation(ctx context.Context, token, recipient string, latitude, longitude float64, name, address string) (SentMessage, error) {
+	var result sendResult
+	body := map[string]any{"number": recipient, "latitude": latitude, "longitude": longitude, "formatJid": true}
+	if name != "" {
+		body["name"] = name
+	}
+	if address != "" {
+		body["address"] = address
+	}
+	if err := c.call(ctx, http.MethodPost, "/send/location", token, body, &result); err != nil {
+		return SentMessage{}, classify(err)
+	}
+	return result.toSent(), nil
+}
+
+// SendContact shares a contact card.
+func (c *Client) SendContact(ctx context.Context, token, recipient, fullName, phone, organization string) (SentMessage, error) {
+	if fullName == "" || phone == "" {
+		return SentMessage{}, errors.New("a contact needs a name and a phone number")
+	}
+	var result sendResult
+	card := map[string]any{"fullName": fullName, "phone": phone}
+	if organization != "" {
+		card["organization"] = organization
+	}
+	body := map[string]any{"number": recipient, "vcard": card, "formatJid": true}
+	if err := c.call(ctx, http.MethodPost, "/send/contact", token, body, &result); err != nil {
+		return SentMessage{}, classify(err)
+	}
+	return result.toSent(), nil
+}
+
+// SendPoll sends a poll. maxAnswers of one makes it single-choice, which is
+// what most callers mean by a poll.
+func (c *Client) SendPoll(ctx context.Context, token, recipient, question string, options []string, maxAnswers int) (SentMessage, error) {
+	if question == "" || len(options) < 2 {
+		return SentMessage{}, errors.New("a poll needs a question and at least two options")
+	}
+	if maxAnswers <= 0 || maxAnswers > len(options) {
+		maxAnswers = 1
+	}
+	var result sendResult
+	body := map[string]any{"number": recipient, "question": question, "options": options, "maxAnswer": maxAnswers, "formatJid": true}
+	if err := c.call(ctx, http.MethodPost, "/send/poll", token, body, &result); err != nil {
+		return SentMessage{}, classify(err)
+	}
+	return result.toSent(), nil
+}
+
+// PollResult is one option of a poll and the people who chose it.
+type PollResult struct {
+	Option string   `json:"option"`
+	Votes  int      `json:"votes"`
+	Voters []string `json:"voters,omitempty"`
+}
+
+// PollResults reads the tally of a poll already sent. A poll nobody can read
+// the answers to is barely a poll, which is why this belongs alongside sending
+// one rather than as a later addition.
+func (c *Client) PollResults(ctx context.Context, token, pollMessageID string) ([]PollResult, error) {
+	if pollMessageID == "" {
+		return nil, errors.New("a poll message id is required")
+	}
+	var raw []struct {
+		Name    string   `json:"Name"`
+		Option  string   `json:"option"`
+		Count   int      `json:"Count"`
+		Votes   int      `json:"votes"`
+		Voters  []string `json:"Voters"`
+		Senders []string `json:"voters"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/polls/"+url.PathEscape(pollMessageID)+"/results", token, nil, &raw); err != nil {
+		return nil, classify(err)
+	}
+	results := make([]PollResult, 0, len(raw))
+	for _, item := range raw {
+		voters := item.Voters
+		if len(voters) == 0 {
+			voters = item.Senders
+		}
+		count := item.Count
+		if count == 0 {
+			count = item.Votes
+		}
+		if count == 0 {
+			count = len(voters)
+		}
+		results = append(results, PollResult{Option: first(item.Name, item.Option), Votes: count, Voters: voters})
+	}
+	return results, nil
+}
+
+// OrganiseChat archives, pins or mutes a conversation, and undoes each. These
+// only change how the account's own client displays the chat, so unlike a
+// revocation they are private and reversible.
+func (c *Client) OrganiseChat(ctx context.Context, token, chatJID, action string) error {
+	if chatJID == "" {
+		return errors.New("a chat is required")
+	}
+	paths := map[string]string{
+		"archive": "/chat/archive", "unarchive": "/chat/unarchive",
+		"pin": "/chat/pin", "unpin": "/chat/unpin",
+		"mute": "/chat/mute", "unmute": "/chat/unmute",
+	}
+	path, ok := paths[action]
+	if !ok {
+		return errors.New("action must be archive, unarchive, pin, unpin, mute or unmute")
+	}
+	return classify(c.call(ctx, http.MethodPost, path, token, map[string]any{"chat": chatJID}, nil))
 }

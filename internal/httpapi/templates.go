@@ -55,6 +55,24 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .brand__mark svg{width:100%;height:100%;display:block}
 .brand__name{font-weight:700;font-size:1rem;color:var(--brand);letter-spacing:-.01em}
 .brand__tagline{display:block;font-weight:400;font-size:.78rem;color:var(--muted);letter-spacing:0}
+.tool{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;background:var(--surface)}
+.tool__head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:12px 14px}
+.tool__name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;color:var(--brand);font-size:.98rem}
+.tool__desc{margin:0;padding:0 14px 12px;color:var(--muted);font-size:.9rem;line-height:1.55}
+.tool__args{margin:0;padding:0 14px 12px;list-style:none;display:grid;gap:6px}
+.tool__arg{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:.86rem;line-height:1.5}
+.tool__argname{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.tool__type{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem}
+.tool__req{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--warn)}
+.tool__argdesc{color:var(--muted);flex:1 1 220px;min-width:0}
+.recipe{border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);margin-bottom:14px;overflow:hidden}
+.recipe__head{padding:14px 16px 0}
+.recipe__title{margin:0 0 4px;font-size:1.05rem}
+.recipe__summary{margin:0 0 10px;color:var(--muted);font-size:.92rem;line-height:1.6}
+.recipe__meta{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px}
+.recipe__tool{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;padding:2px 7px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--border);color:var(--muted)}
+.recipe__prompt{margin:0;padding:14px 16px;background:var(--surface-soft);border-top:1px solid var(--border);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;line-height:1.65;white-space:pre-wrap;overflow-x:auto}
+.recipe__caveat{margin:0;padding:11px 16px;border-top:1px solid var(--border);font-size:.85rem;color:var(--muted);line-height:1.55}
 .nav{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border);margin-bottom:24px}
 .nav a{position:relative;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;text-decoration:none;color:var(--muted);font-weight:600;font-size:.94rem;border-radius:var(--radius-sm) var(--radius-sm) 0 0;border-bottom:2px solid transparent;margin-bottom:-1px}
 .nav a:hover{color:var(--text);background:var(--surface-soft)}
@@ -212,6 +230,8 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <a href="/"{{if eq .Active "conectar"}} aria-current="page"{{end}}>Conectar</a>
 <a href="/instancias"{{if eq .Active "instancias"}} aria-current="page"{{end}}>Instâncias</a>
 <a href="/estado"{{if eq .Active "estado"}} aria-current="page"{{end}}><span class="nav__dot nav__dot--{{.SessionTone}}"></span>Estado</a>
+<a href="/documentacao"{{if eq .Active "documentacao"}} aria-current="page"{{end}}>Documentação</a>
+<a href="/receitas"{{if eq .Active "receitas"}} aria-current="page"{{end}}>Receitas</a>
 </nav>
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 {{end}}
@@ -564,5 +584,39 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Entrar</button></div>
 </form>
 </div></section>
+</div>
+{{template "foot"}}{{end}}
+{{define "documentacao"}}{{template "head" .}}{{template "nav" .}}
+<h1>O que o MCP sabe fazer</h1>
+<p class="lead">{{.Count}} ferramentas, lidas do próprio servidor. Esta página não é uma cópia mantida à mão: ela descreve exatamente a superfície que o MCP publica, então só fica errada se o servidor estiver.</p>
+{{range .Tools}}
+<article class="tool">
+<div class="tool__head"><span class="tool__name">{{.Name}}</span></div>
+<p class="tool__desc">{{.Description}}</p>
+{{if .Arguments}}<ul class="tool__args">
+{{range .Arguments}}<li class="tool__arg"><span class="tool__argname">{{.Name}}</span><span class="tool__type">{{.Type}}</span>{{if .Required}}<span class="tool__req">obrigatório</span>{{end}}<span class="tool__argdesc">{{.Description}}{{if .Choices}} Valores: {{range $i, $c := .Choices}}{{if $i}}, {{end}}{{$c}}{{end}}.{{end}}</span></li>{{end}}
+</ul>{{else}}<p class="tool__args muted" style="font-size:.86rem">Sem argumentos.</p>{{end}}
+</article>
+{{end}}
+</div>
+{{template "foot"}}{{end}}
+
+{{define "receitas"}}{{template "head" .}}{{template "nav" .}}
+<h1>Receitas</h1>
+<p class="lead">Nenhuma destas precisa de código novo. O gateway só responde pelo WhatsApp quando perguntado — esperar a hora, vigiar um termo, montar o relatório, tudo isso é trabalho do assistente, escrito como instrução. Cada receita é um prompt para colar.</p>
+{{range .Recipes}}
+<article class="recipe">
+<div class="recipe__head">
+<h2 class="recipe__title">{{.Title}}</h2>
+<p class="recipe__summary">{{.Summary}}</p>
+</div>
+<div class="recipe__meta">
+{{range .Uses}}<span class="recipe__tool">{{.}}</span>{{end}}
+{{with .Schedule}}<span class="recipe__tool">⏱ {{.}}</span>{{end}}
+</div>
+<pre class="recipe__prompt">{{.Prompt}}</pre>
+{{with .Caveat}}<p class="recipe__caveat"><strong>Atenção:</strong> {{.}}</p>{{end}}
+</article>
+{{end}}
 </div>
 {{template "foot"}}{{end}}`

@@ -78,6 +78,13 @@ Evolution Go exposes no route to list conversations or read message history — 
 | `edit_message` | index + Evolution | replace the text of one of the account's own messages |
 | `react_to_message` | index + Evolution | react with an emoji, or clear the reaction |
 | `backfill_gap` | index + Evolution | find windows the index missed and try to refill them |
+| `check_numbers` | Evolution | which numbers have a WhatsApp account, and the JID to use |
+| `get_profile_picture` | Evolution | URL of a contact's or group's picture |
+| `send_location` | Evolution | send a point on the map |
+| `send_contact` | Evolution | share a contact card |
+| `send_poll` | Evolution | send a poll |
+| `get_poll_results` | Evolution | read a poll's tally |
+| `organise_chat` | Evolution | archive, pin or mute a conversation, and undo each |
 
 Summarising is not a tool: `get_chat_messages` returns the period and the client summarises it, which avoids an LLM credential and a per-call cost in the backend.
 
@@ -102,6 +109,12 @@ So the send tools do two things the API does not. They refresh the recipient's d
 Revoking a message is irreversible and it reaches other people's phones, so `delete_message` is two-step by construction. A call without `confirm` changes nothing and returns the conversation, the timestamp and the text, because the caller names an opaque id and nobody can approve an id they cannot read. Only the confirmed call deletes.
 
 `delete_message` and `edit_message` also refuse a message this account did not send. WhatsApp would refuse it too, but refusing here means the caller is told plainly rather than handed an opaque API error — and it settles the question from the index, which records who sent what, rather than from the caller's own claim. `react_to_message` carries no such guard: reacting to other people is the point of it.
+
+### The panel documents itself
+
+`/documentacao` lists every tool with its arguments, read from the MCP server's own definitions rather than transcribed. A hand-kept list of capabilities is a list that quietly stops being true — a tool gains an argument, the page still shows the old one — so this page is wrong only if the server is.
+
+`/receitas` is the other half: what the gateway makes possible without any code. Scheduling a message, watching for keywords, chasing unanswered conversations — none of that lives here. The assistant waits, watches and reports; this gateway only answers for WhatsApp when asked. Each recipe is a prompt to paste, and names the tools it leans on so it can be adapted honestly.
 
 ### Untrusted content
 

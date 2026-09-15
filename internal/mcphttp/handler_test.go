@@ -79,6 +79,23 @@ func (f *fakeLive) DownloadMedia(context.Context, string, json.RawMessage) (evol
 }
 func (f *fakeLive) RequestHistory(context.Context, string, evolution.Anchor, int) error { return nil }
 func (f *fakeLive) WarmSession(context.Context, string, string) error                   { return nil }
+func (f *fakeLive) CheckNumbers(context.Context, string, []string) ([]evolution.Presence, error) {
+	return nil, nil
+}
+func (f *fakeLive) Avatar(context.Context, string, string, bool) (string, error) { return "", nil }
+func (f *fakeLive) SendLocation(context.Context, string, string, float64, float64, string, string) (evolution.SentMessage, error) {
+	return evolution.SentMessage{}, nil
+}
+func (f *fakeLive) SendContact(context.Context, string, string, string, string, string) (evolution.SentMessage, error) {
+	return evolution.SentMessage{}, nil
+}
+func (f *fakeLive) SendPoll(context.Context, string, string, string, []string, int) (evolution.SentMessage, error) {
+	return evolution.SentMessage{}, nil
+}
+func (f *fakeLive) PollResults(context.Context, string, string) ([]evolution.PollResult, error) {
+	return nil, nil
+}
+func (f *fakeLive) OrganiseChat(context.Context, string, string, string) error { return nil }
 func (f *fakeLive) DeleteMessage(context.Context, string, string, string) (evolution.SentMessage, error) {
 	return evolution.SentMessage{}, nil
 }

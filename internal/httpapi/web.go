@@ -139,6 +139,8 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /instancias/remover", a.deleteInstance)
 	mux.HandleFunc("POST /instancias/historico", a.syncHistory)
 	mux.HandleFunc("GET /estado", a.statusPage)
+	mux.HandleFunc("GET /documentacao", a.docs)
+	mux.HandleFunc("GET /receitas", a.recipes)
 	mux.HandleFunc("GET /pair", a.pairPage)
 	mux.HandleFunc("POST /chaves", a.createKey)
 	mux.HandleFunc("POST /chaves/revogar", a.revokeKey)

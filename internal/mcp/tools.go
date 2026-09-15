@@ -142,6 +142,67 @@ func toolDefinitions() []any {
 			}, "required": []string{"message_id"}},
 		},
 		map[string]any{
+			"name":        "check_numbers",
+			"description": "Check which phone numbers have a WhatsApp account, and return the JID to address each one by. Worth calling before sending to a number that was typed rather than read from a conversation: a number with no account cannot receive anything, and this is the difference between knowing that and watching a send fail.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"numbers": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Phone numbers with country code."},
+			}, "required": []string{"numbers"}},
+		},
+		map[string]any{
+			"name":        "get_profile_picture",
+			"description": "Return the URL of a contact's or group's profile picture. WhatsApp serves it from its own CDN on a short-lived link, so fetch it rather than storing the URL.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"to":   stringSchema("JID or phone number with country code."),
+				"full": map[string]any{"type": "boolean", "description": "Full resolution instead of the thumbnail."},
+			}, "required": []string{"to"}},
+		},
+		map[string]any{
+			"name":        "send_location",
+			"description": "Send a point on the map, optionally with a name and a street address.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"to":        stringSchema("Recipient JID or phone number with country code."),
+				"latitude":  map[string]any{"type": "number"},
+				"longitude": map[string]any{"type": "number"},
+				"name":      stringSchema("Optional name of the place."),
+				"address":   stringSchema("Optional street address."),
+			}, "required": []string{"to", "latitude", "longitude"}},
+		},
+		map[string]any{
+			"name":        "send_contact",
+			"description": "Share a contact card.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"to":           stringSchema("Recipient JID or phone number with country code."),
+				"name":         stringSchema("Full name on the card."),
+				"phone":        stringSchema("Phone number on the card, with country code."),
+				"organization": stringSchema("Optional organisation."),
+			}, "required": []string{"to", "name", "phone"}},
+		},
+		map[string]any{
+			"name":        "send_poll",
+			"description": "Send a poll with two or more options. Read the answers later with get_poll_results, using the message id this returns.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"to":          stringSchema("Recipient JID or phone number with country code."),
+				"question":    stringSchema("The question being asked."),
+				"options":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Two or more options."},
+				"max_answers": map[string]any{"type": "integer", "minimum": 1, "description": "How many options one person may pick. Defaults to 1."},
+			}, "required": []string{"to", "question", "options"}},
+		},
+		map[string]any{
+			"name":        "get_poll_results",
+			"description": "Read the tally of a poll already sent, option by option, with who voted for each where WhatsApp reveals it.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"message_id": stringSchema("Message id of the poll, as returned by send_poll or the reading tools."),
+			}, "required": []string{"message_id"}},
+		},
+		map[string]any{
+			"name":        "organise_chat",
+			"description": "Archive, pin or mute a conversation, or undo any of those. These change only how this account's own WhatsApp displays the chat: nothing is sent, the other side sees nothing, and every action has an inverse.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"chat_jid": stringSchema("JID of the conversation, as returned by list_chats."),
+				"action":   map[string]any{"type": "string", "enum": []string{"archive", "unarchive", "pin", "unpin", "mute", "unmute"}},
+			}, "required": []string{"chat_jid", "action"}},
+		},
+		map[string]any{
 			"name":        "backfill_gap",
 			"description": "Refill a window the index missed. An outage leaves a hole that reads exactly like quiet days, so when a period comes back empty, check here before concluding nothing was said. Called without arguments it reports the holes it can see and refills the most recent one. Refilling anchors on the first message indexed after the hole and pages backwards into it, one conversation at a time, so conversations with nothing after the hole cannot be reached and are reported as such. Returns immediately: the messages arrive asynchronously.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
@@ -158,26 +219,38 @@ func toolDefinitions() []any {
 
 // arguments is the shared decoding of every tool input.
 type arguments struct {
-	Search     string `json:"search"`
-	Query      string `json:"query"`
-	ChatJID    string `json:"chat_jid"`
-	GroupJID   string `json:"group_jid"`
-	MessageID  string `json:"message_id"`
-	To         string `json:"to"`
-	Text       string `json:"text"`
-	Type       string `json:"type"`
-	URL        string `json:"url"`
-	Caption    string `json:"caption"`
-	Filename   string `json:"filename"`
-	Since      string `json:"since"`
-	Until      string `json:"until"`
-	Order      string `json:"order"`
-	Limit      int    `json:"limit"`
-	Count      int    `json:"count"`
-	Chats      int    `json:"chats"`
-	DetectOnly bool   `json:"detect_only"`
-	Emoji      string `json:"emoji"`
-	Confirm    bool   `json:"confirm"`
+	Search     string   `json:"search"`
+	Query      string   `json:"query"`
+	ChatJID    string   `json:"chat_jid"`
+	GroupJID   string   `json:"group_jid"`
+	MessageID  string   `json:"message_id"`
+	To         string   `json:"to"`
+	Text       string   `json:"text"`
+	Type       string   `json:"type"`
+	URL        string   `json:"url"`
+	Caption    string   `json:"caption"`
+	Filename   string   `json:"filename"`
+	Since      string   `json:"since"`
+	Until      string   `json:"until"`
+	Order      string   `json:"order"`
+	Limit      int      `json:"limit"`
+	Count      int      `json:"count"`
+	Chats      int      `json:"chats"`
+	DetectOnly bool     `json:"detect_only"`
+	Emoji      string   `json:"emoji"`
+	Confirm    bool     `json:"confirm"`
+	Numbers    []string `json:"numbers"`
+	Full       bool     `json:"full"`
+	Latitude   float64  `json:"latitude"`
+	Longitude  float64  `json:"longitude"`
+	Name       string   `json:"name"`
+	Address    string   `json:"address"`
+	Phone      string   `json:"phone"`
+	Org        string   `json:"organization"`
+	Question   string   `json:"question"`
+	Options    []string `json:"options"`
+	MaxAnswers int      `json:"max_answers"`
+	Action     string   `json:"action"`
 }
 
 func (s *Server) call(ctx context.Context, params callParams) map[string]any {
@@ -221,6 +294,20 @@ func (s *Server) call(ctx context.Context, params callParams) map[string]any {
 		return s.editMessage(ctx, session, args)
 	case "react_to_message":
 		return s.reactToMessage(ctx, session, args)
+	case "check_numbers":
+		return s.checkNumbers(ctx, session, args)
+	case "get_profile_picture":
+		return s.profilePicture(ctx, session, args)
+	case "send_location":
+		return s.sendLocation(ctx, session, args)
+	case "send_contact":
+		return s.sendContact(ctx, session, args)
+	case "send_poll":
+		return s.sendPoll(ctx, session, args)
+	case "get_poll_results":
+		return s.pollResults(ctx, session, args)
+	case "organise_chat":
+		return s.organiseChat(ctx, session, args)
 	case "backfill_gap":
 		return s.backfillGap(ctx, session, args)
 	}
@@ -828,4 +915,111 @@ func (s *Server) reactToMessage(ctx context.Context, session Session, args argum
 		payload["emoji"] = args.Emoji
 	}
 	return textResult(payload, false)
+}
+
+func (s *Server) checkNumbers(ctx context.Context, session Session, args arguments) map[string]any {
+	if len(args.Numbers) == 0 {
+		return toolError("numbers is required; pass at least one phone number with its country code")
+	}
+	found, err := s.live.CheckNumbers(ctx, session.Token, args.Numbers)
+	if err != nil {
+		return liveError(err)
+	}
+	return textResult(map[string]any{"numbers": found, "count": len(found)}, false)
+}
+
+func (s *Server) profilePicture(ctx context.Context, session Session, args arguments) map[string]any {
+	if args.To == "" {
+		return toolError("to is required")
+	}
+	url, err := s.live.Avatar(ctx, session.Token, args.To, args.Full)
+	if err != nil {
+		return liveError(err)
+	}
+	if url == "" {
+		return textResult(map[string]any{"to": args.To, "url": "", "note": "This contact has no profile picture, or their privacy settings hide it from this account."}, false)
+	}
+	return textResult(map[string]any{"to": args.To, "url": url, "note": "WhatsApp serves this from its own CDN on a short-lived link. Fetch it now rather than storing the URL."}, false)
+}
+
+func (s *Server) sendLocation(ctx context.Context, session Session, args arguments) map[string]any {
+	if args.To == "" {
+		return toolError("to is required")
+	}
+	if args.Latitude == 0 && args.Longitude == 0 {
+		return toolError("latitude and longitude are required; null island is almost certainly not the intended place")
+	}
+	s.warm(ctx, session, args.To)
+	sent, err := s.live.SendLocation(ctx, session.Token, args.To, args.Latitude, args.Longitude, args.Name, args.Address)
+	if err != nil {
+		return liveError(err)
+	}
+	return textResult(s.confirm(ctx, session, sent, map[string]any{"to": args.To, "latitude": args.Latitude, "longitude": args.Longitude}), false)
+}
+
+func (s *Server) sendContact(ctx context.Context, session Session, args arguments) map[string]any {
+	if args.To == "" || args.Name == "" || args.Phone == "" {
+		return toolError("to, name and phone are all required")
+	}
+	s.warm(ctx, session, args.To)
+	sent, err := s.live.SendContact(ctx, session.Token, args.To, args.Name, args.Phone, args.Org)
+	if err != nil {
+		return liveError(err)
+	}
+	return textResult(s.confirm(ctx, session, sent, map[string]any{"to": args.To, "contact": args.Name}), false)
+}
+
+func (s *Server) sendPoll(ctx context.Context, session Session, args arguments) map[string]any {
+	if args.To == "" || strings.TrimSpace(args.Question) == "" {
+		return toolError("to and question are both required")
+	}
+	if len(args.Options) < 2 {
+		return toolError("a poll needs at least two options; with one there is nothing to choose")
+	}
+	s.warm(ctx, session, args.To)
+	sent, err := s.live.SendPoll(ctx, session.Token, args.To, args.Question, args.Options, args.MaxAnswers)
+	if err != nil {
+		return liveError(err)
+	}
+	payload := s.confirm(ctx, session, sent, map[string]any{"to": args.To, "question": args.Question, "options": args.Options})
+	payload["note"] = "Read the answers later with get_poll_results, using the message id above."
+	return textResult(payload, false)
+}
+
+func (s *Server) pollResults(ctx context.Context, session Session, args arguments) map[string]any {
+	if args.MessageID == "" {
+		return toolError("message_id is required; it is the id send_poll returned for the poll")
+	}
+	results, err := s.live.PollResults(ctx, session.Token, args.MessageID)
+	if err != nil {
+		return liveError(err)
+	}
+	total := 0
+	for _, result := range results {
+		total += result.Votes
+	}
+	return s.readResult(ctx, session, map[string]any{"message_id": args.MessageID, "results": results, "total_votes": total})
+}
+
+func (s *Server) organiseChat(ctx context.Context, session Session, args arguments) map[string]any {
+	if args.ChatJID == "" {
+		return toolError("chat_jid is required; list_chats returns the available ones")
+	}
+	// The enum lives in this tool's schema, so it is this layer's job to hold
+	// callers to it. Leaving the check to the client below would let an unknown
+	// action be reported as a WhatsApp failure, which is a different problem
+	// with a different fix.
+	switch args.Action {
+	case "archive", "unarchive", "pin", "unpin", "mute", "unmute":
+	default:
+		return toolError("action must be one of archive, unarchive, pin, unpin, mute or unmute; got %q", args.Action)
+	}
+	if err := s.live.OrganiseChat(ctx, session.Token, args.ChatJID, args.Action); err != nil {
+		return liveError(err)
+	}
+	return textResult(map[string]any{
+		"chat_jid": args.ChatJID,
+		"action":   args.Action,
+		"note":     "This changed only how this account's WhatsApp displays the conversation. Nothing was sent and the other side sees nothing.",
+	}, false)
 }

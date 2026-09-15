@@ -47,6 +47,13 @@ type Live interface {
 	DeleteMessage(context.Context, string, string, string) (evolution.SentMessage, error)
 	EditMessage(context.Context, string, string, string, string) (evolution.SentMessage, error)
 	React(context.Context, string, string, string, string, bool, string) (evolution.SentMessage, error)
+	CheckNumbers(context.Context, string, []string) ([]evolution.Presence, error)
+	Avatar(context.Context, string, string, bool) (string, error)
+	SendLocation(context.Context, string, string, float64, float64, string, string) (evolution.SentMessage, error)
+	SendContact(context.Context, string, string, string, string, string) (evolution.SentMessage, error)
+	SendPoll(context.Context, string, string, string, []string, int) (evolution.SentMessage, error)
+	PollResults(context.Context, string, string) ([]evolution.PollResult, error)
+	OrganiseChat(context.Context, string, string, string) error
 	DownloadMedia(context.Context, string, json.RawMessage) (evolution.Media, error)
 	RequestHistory(context.Context, string, evolution.Anchor, int) error
 }

@@ -97,6 +97,11 @@ type fakeLive struct {
 	deleted     []string
 	edited      []string
 	reactions   []string
+	locations   []string
+	polls       []string
+	pollMax     int
+	pollResults []evolution.PollResult
+	organised   []string
 }
 
 func (f *fakeLive) WarmSession(_ context.Context, token, recipient string) error {
@@ -133,6 +138,55 @@ func (f *fakeLive) React(_ context.Context, token, chat, id, emoji string, fromM
 	}
 	f.reactions = append(f.reactions, id+"|"+emoji+"|"+participant)
 	return evolution.SentMessage{ID: "REACT1"}, nil
+}
+
+func (f *fakeLive) CheckNumbers(_ context.Context, token string, numbers []string) ([]evolution.Presence, error) {
+	f.note(token)
+	found := make([]evolution.Presence, 0, len(numbers))
+	for _, n := range numbers {
+		found = append(found, evolution.Presence{Number: n, JID: n + "@s.whatsapp.net", OnWhatsApp: true})
+	}
+	return found, f.err
+}
+func (f *fakeLive) Avatar(_ context.Context, token, jid string, full bool) (string, error) {
+	f.note(token)
+	return "https://cdn.example/avatar.jpg", f.err
+}
+func (f *fakeLive) SendLocation(_ context.Context, token, to string, lat, lon float64, name, address string) (evolution.SentMessage, error) {
+	f.note(token)
+	if f.err != nil {
+		return evolution.SentMessage{}, f.err
+	}
+	f.locations = append(f.locations, to)
+	return evolution.SentMessage{ID: first(f.sentID, "LOC1")}, nil
+}
+func (f *fakeLive) SendContact(_ context.Context, token, to, name, phone, org string) (evolution.SentMessage, error) {
+	f.note(token)
+	if f.err != nil {
+		return evolution.SentMessage{}, f.err
+	}
+	return evolution.SentMessage{ID: first(f.sentID, "CARD1")}, nil
+}
+func (f *fakeLive) SendPoll(_ context.Context, token, to, question string, options []string, max int) (evolution.SentMessage, error) {
+	f.note(token)
+	if f.err != nil {
+		return evolution.SentMessage{}, f.err
+	}
+	f.polls = append(f.polls, question)
+	f.pollMax = max
+	return evolution.SentMessage{ID: first(f.sentID, "POLL1")}, nil
+}
+func (f *fakeLive) PollResults(_ context.Context, token, id string) ([]evolution.PollResult, error) {
+	f.note(token)
+	return f.pollResults, f.err
+}
+func (f *fakeLive) OrganiseChat(_ context.Context, token, chat, action string) error {
+	f.note(token)
+	if f.err != nil {
+		return f.err
+	}
+	f.organised = append(f.organised, chat+"|"+action)
+	return nil
 }
 
 func (f *fakeLive) note(token string) { f.tokensUsed = append(f.tokensUsed, token) }
@@ -243,6 +297,8 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 		"list_contacts", "list_groups", "get_group",
 		"send_text_message", "send_media_message", "download_media", "sync_history",
 		"backfill_gap", "delete_message", "edit_message", "react_to_message",
+		"check_numbers", "get_profile_picture", "send_location", "send_contact",
+		"send_poll", "get_poll_results", "organise_chat",
 	} {
 		if !strings.Contains(response, `"`+tool+`"`) {
 			t.Errorf("tools/list is missing %s", tool)
@@ -743,5 +799,89 @@ func TestDestructiveToolsRejectAnUnknownMessage(t *testing.T) {
 	}
 	if len(live.deleted) != 0 {
 		t.Fatal("an unknown id still reached WhatsApp")
+	}
+}
+
+// A poll nobody can read the answers to is barely a poll, so sending one has to
+// hand back the id that reads them.
+func TestPollRoundTrip(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{
+		sentID:      "POLLID",
+		delivery:    evolution.Delivery{Status: "Delivered"},
+		pollResults: []evolution.PollResult{{Option: "sim", Votes: 2, Voters: []string{"a", "b"}}, {Option: "não", Votes: 1}},
+	}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "send_poll", map[string]any{
+		"to": "55@s.whatsapp.net", "question": "vamos?", "options": []string{"sim", "não"},
+	})
+	if isError {
+		t.Fatalf("poll failed: %#v", payload)
+	}
+	sent, _ := payload["sent"].(map[string]any)
+	if sent == nil || sent["id"] != "POLLID" {
+		t.Fatalf("the poll id was not returned: %#v", payload)
+	}
+
+	payload, isError = call(t, server, "get_poll_results", map[string]any{"message_id": "POLLID"})
+	if isError {
+		t.Fatalf("results failed: %#v", payload)
+	}
+	if total, _ := payload["total_votes"].(float64); total != 3 {
+		t.Fatalf("total_votes = %#v", payload["total_votes"])
+	}
+}
+
+// A poll with one option is not a choice, and a send that cannot succeed should
+// be refused here rather than by WhatsApp.
+func TestSendPollRejectsASingleOption(t *testing.T) {
+	server := testServer(&fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}, &fakeLive{}, nil)
+	payload, isError := call(t, server, "send_poll", map[string]any{"to": "55@s.whatsapp.net", "question": "vamos?", "options": []string{"sim"}})
+	if !isError || !strings.Contains(payload["error"].(string), "at least two options") {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+// Archiving, pinning and muting are private and reversible, so they take no
+// confirmation — but an unknown action must not reach WhatsApp as a guess.
+func TestOrganiseChatValidatesTheAction(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "organise_chat", map[string]any{"chat_jid": "a@s.whatsapp.net", "action": "pin"})
+	if isError {
+		t.Fatalf("pin failed: %#v", payload)
+	}
+	if len(live.organised) != 1 || live.organised[0] != "a@s.whatsapp.net|pin" {
+		t.Fatalf("organised = %v", live.organised)
+	}
+
+	payload, isError = call(t, server, "organise_chat", map[string]any{"chat_jid": "a@s.whatsapp.net", "action": "burn"})
+	if !isError {
+		t.Fatalf("an unknown action was accepted: %#v", payload)
+	}
+	if len(live.organised) != 1 {
+		t.Fatalf("the unknown action reached WhatsApp: %v", live.organised)
+	}
+}
+
+// Checking a number before sending is the point of the tool, so it must return
+// the JID to address rather than only a yes or no.
+func TestCheckNumbersReturnsTheAddressableJID(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	server := testServer(index, &fakeLive{}, nil)
+	payload, isError := call(t, server, "check_numbers", map[string]any{"numbers": []string{"5511999999999"}})
+	if isError {
+		t.Fatalf("check failed: %#v", payload)
+	}
+	numbers, _ := payload["numbers"].([]any)
+	if len(numbers) != 1 {
+		t.Fatalf("numbers = %#v", payload["numbers"])
+	}
+	first, _ := numbers[0].(map[string]any)
+	if first["jid"] != "5511999999999@s.whatsapp.net" || first["on_whatsapp"] != true {
+		t.Fatalf("entry = %#v", first)
 	}
 }
