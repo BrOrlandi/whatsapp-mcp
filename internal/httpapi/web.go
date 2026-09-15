@@ -6,10 +6,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +20,16 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/auth"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/brand"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
+
+// StatusReader exposes the live gateway state to the panel. It is the same
+// snapshot the health endpoints and the MCP tools read, so all three describe a
+// failure the same way.
+type StatusReader interface {
+	Snapshot() health.Snapshot
+}
 
 var ErrNotFound = errors.New("not found")
 var ErrAdminExists = errors.New("admin already exists")
@@ -27,9 +39,24 @@ type ControlStore interface {
 	CreateAdmin(context.Context, string, string) error
 	SelectedInstance(context.Context) (string, error)
 	SelectInstance(context.Context, string) error
+	Coverage(context.Context, string) (store.Coverage, error)
+	SaveInstance(context.Context, string, string, string) error
+	InstanceToken(context.Context, string) (string, error)
+	ForgetInstance(context.Context, string) error
+	ManagedInstances(context.Context) (map[string]string, error)
 }
-type InstanceFetcher interface {
+
+// EvolutionAPI is the slice of Evolution this panel drives. The panel owns the
+// whole instance lifecycle so the operator never needs the Evolution Manager,
+// which is why creation, pairing and teardown all appear here.
+type EvolutionAPI interface {
 	FetchInstances(context.Context) ([]evolution.Instance, error)
+	CreateInstance(context.Context, string, string) (evolution.Instance, error)
+	DeleteInstance(context.Context, string) error
+	ConnectInstance(context.Context, string) error
+	DisconnectInstance(context.Context, string) error
+	LogoutInstance(context.Context, string) error
+	QRCode(context.Context, string) (evolution.QRCode, error)
 }
 
 type sessions struct {
@@ -80,14 +107,14 @@ func NewSessionKey() ([]byte, error) {
 
 type webApp struct {
 	store     ControlStore
-	evolution InstanceFetcher
+	evolution EvolutionAPI
+	status    StatusReader
 	sessions  *sessions
-	baseURL   string
 	templates *template.Template
 }
 
-func NewWebHandler(store ControlStore, client InstanceFetcher, sessionKey []byte, baseURL string) http.Handler {
-	a := &webApp{store: store, evolution: client, sessions: newSessions(sessionKey), baseURL: strings.TrimRight(baseURL, "/"), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages))}
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte) http.Handler {
+	a := &webApp{store: store, evolution: client, status: status, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages))}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.dashboard)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -96,17 +123,35 @@ func NewWebHandler(store ControlStore, client InstanceFetcher, sessionKey []byte
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("POST /selection", a.selectInstance)
+	mux.HandleFunc("POST /instances", a.createInstance)
+	mux.HandleFunc("GET /pair", a.pairPage)
+	mux.HandleFunc("POST /instances/connect", a.connectInstance)
+	mux.HandleFunc("POST /instances/disconnect", a.disconnectInstance)
+	mux.HandleFunc("POST /instances/logout", a.logoutInstance)
+	mux.HandleFunc("POST /instances/delete", a.deleteInstance)
 	mux.HandleFunc("GET /api/selected-instance", a.selectedJSON)
 	return securityHeaders(mux)
 }
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'")
+		// data: is required for img-src because the pairing QR code arrives from
+		// Evolution as an inline data URI; no other source is allowed.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// newInstanceToken mints the credential Evolution uses to resolve which
+// instance a request targets. It is an internal secret, never shown in the UI.
+func newInstanceToken() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
 }
 func (a *webApp) admin(r *http.Request) (string, string, error) {
 	u, h, err := a.store.Admin(r.Context())
@@ -198,36 +243,274 @@ func (a *webApp) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", 303)
 }
 
+// instanceView is one row of the dashboard list. Managed marks the instances
+// this panel created, which are the only ones it holds a token for and
+// therefore the only ones it can operate.
+type instanceView struct {
+	evolution.Instance
+	Managed  bool
+	Selected bool
+}
+
 type dashboardData struct {
-	BaseURL, Selected, Notice string
-	Instances                 []evolution.Instance
-	Unavailable               bool
-	Ready                     bool
+	Selected, Notice, Error string
+	Instances               []instanceView
+	Unavailable             bool
+	Ready                   bool
+	NeedsPairing            bool
+	SelectedName            string
+	Status                  *statusView
+}
+
+// statusView is the operational picture the panel shows: what WhatsApp reports,
+// what the ingestion is doing, and how much history is actually indexed.
+type statusView struct {
+	WhatsApp  health.WhatsApp
+	Queues    []health.Queue
+	Problems  []string
+	Coverage  store.Coverage
+	HasIndex  bool
+	LastEvent time.Time
+}
+
+// statusView reads the live snapshot and pairs it with the index coverage. The
+// coverage query can fail while the database is the thing that is broken, and
+// that must not stop the rest of the status from rendering.
+func (a *webApp) statusView(r *http.Request, selected string) *statusView {
+	if a.status == nil {
+		return nil
+	}
+	snapshot := a.status.Snapshot()
+	view := &statusView{WhatsApp: snapshot.WhatsApp, Queues: snapshot.Queues, Problems: snapshot.Problems(), LastEvent: snapshot.LastEventAt}
+	if selected != "" {
+		if coverage, err := a.store.Coverage(r.Context(), selected); err == nil {
+			view.Coverage, view.HasIndex = coverage, true
+		}
+	}
+	return view
+}
+
+// dashboardState gathers everything the dashboard and its actions need: the
+// live instance list from Evolution, the ids this panel manages, and which one
+// is currently selected.
+func (a *webApp) dashboardState(r *http.Request) dashboardData {
+	selected, _ := a.store.SelectedInstance(r.Context())
+	managed, _ := a.store.ManagedInstances(r.Context())
+	instances, err := a.evolution.FetchInstances(r.Context())
+	d := dashboardData{Selected: selected, Unavailable: err != nil, Status: a.statusView(r, selected)}
+	if err != nil {
+		d.Notice = "A API Evolution está indisponível no momento. Tente novamente em instantes."
+		return d
+	}
+	for _, instance := range instances {
+		_, isManaged := managed[instance.ID]
+		view := instanceView{Instance: instance, Managed: isManaged, Selected: instance.ID == selected}
+		if view.Selected {
+			d.SelectedName = instance.Name
+			switch {
+			case instance.Status == evolution.StatusConnected:
+				d.Ready = true
+			case isManaged:
+				d.NeedsPairing = true
+			}
+		}
+		d.Instances = append(d.Instances, view)
+	}
+	switch {
+	case len(d.Instances) == 0:
+		d.Notice = "Nenhuma instância ainda. Crie a primeira abaixo e conecte o WhatsApp sem sair deste painel."
+	case selected == "":
+		d.Notice = "Escolha qual instância o MCP deve usar."
+	case d.NeedsPairing:
+		d.Notice = "A instância selecionada ainda não está conectada. Conecte o WhatsApp para liberar o MCP."
+	case !d.Ready:
+		d.Notice = "A instância selecionada não foi criada por este painel, então ele não pode operá-la. Crie uma instância aqui."
+	}
+	return d
 }
 
 func (a *webApp) dashboard(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
-	selected, _ := a.store.SelectedInstance(r.Context())
-	instances, err := a.evolution.FetchInstances(r.Context())
-	d := dashboardData{BaseURL: a.baseURL, Selected: selected, Instances: instances, Unavailable: err != nil}
+	d := a.dashboardState(r)
+	d.Error = r.URL.Query().Get("erro")
+	a.render(w, "dashboard", d)
+}
+
+// selectedToken resolves the Evolution credential for the selected instance.
+// An instance created outside this panel has no token here, and the panel says
+// so instead of pretending the action is possible.
+func (a *webApp) selectedToken(r *http.Request) (string, error) {
+	selected, err := a.store.SelectedInstance(r.Context())
 	if err != nil {
-		d.Notice = "A API Evolution está indisponível no momento."
-	} else if len(instances) == 0 {
-		d.Notice = "Nenhuma instância encontrada. Entre no Evolution Go para criar e conectar o WhatsApp."
-	} else {
-		for _, instance := range instances {
-			if instance.ID == selected && instance.Status == evolution.StatusConnected {
-				d.Ready = true
-				break
-			}
-		}
-		if !d.Ready && selected != "" {
-			d.Notice = "A instância selecionada ainda não está conectada. Entre no Evolution Go, conecte o WhatsApp e recarregue esta página."
+		return "", err
+	}
+	if selected == "" {
+		return "", ErrNotFound
+	}
+	return a.store.InstanceToken(r.Context(), selected)
+}
+
+// fail sends the operator back to a page with a readable reason. Evolution
+// error text can carry its own wording, so it is passed as a query value and
+// escaped by the template, never interpolated into markup here.
+func (a *webApp) fail(w http.ResponseWriter, r *http.Request, path, reason string) {
+	http.Redirect(w, r, path+"?erro="+url.QueryEscape(reason), http.StatusSeeOther)
+}
+
+func (a *webApp) createInstance(w http.ResponseWriter, r *http.Request) {
+	if !a.require(w, r) {
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" || len(name) > 60 {
+		a.fail(w, r, "/", "Informe um nome de instância com até 60 caracteres.")
+		return
+	}
+	token, err := newInstanceToken()
+	if err != nil {
+		a.fail(w, r, "/", "Não foi possível gerar as credenciais da instância.")
+		return
+	}
+	created, err := a.evolution.CreateInstance(r.Context(), name, token)
+	if err != nil {
+		a.fail(w, r, "/", "A Evolution recusou a criação da instância: "+err.Error())
+		return
+	}
+	if err := a.store.SaveInstance(r.Context(), created.ID, created.Name, token); err != nil {
+		a.fail(w, r, "/", "A instância foi criada, mas não foi possível guardar suas credenciais.")
+		return
+	}
+	if err := a.store.SelectInstance(r.Context(), created.ID); err != nil {
+		a.fail(w, r, "/", "A instância foi criada, mas não foi possível selecioná-la.")
+		return
+	}
+	if err := a.evolution.ConnectInstance(r.Context(), token); err != nil {
+		a.fail(w, r, "/", "A instância foi criada, mas não foi possível iniciá-la: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/pair", http.StatusSeeOther)
+}
+
+// pairData drives the pairing page. The page refreshes itself on a timer, so a
+// scanned code moves the operator forward without any client-side scripting.
+type pairData struct {
+	Name, Code, Notice, Error string
+	QRCode                    template.URL
+	Connected                 bool
+}
+
+// qrImageSource accepts the QR code only as the inline PNG data URI Evolution
+// is documented to produce. The value is remote input rendered into a src
+// attribute, so anything else — another scheme, another media type, a stray
+// character — is dropped rather than trusted.
+func qrImageSource(image string) template.URL {
+	const prefix = "data:image/png;base64,"
+	payload, found := strings.CutPrefix(image, prefix)
+	if !found || payload == "" {
+		return ""
+	}
+	if _, err := base64.StdEncoding.DecodeString(payload); err != nil {
+		return ""
+	}
+	return template.URL(prefix + payload)
+}
+
+func (a *webApp) pairPage(w http.ResponseWriter, r *http.Request) {
+	if !a.require(w, r) {
+		return
+	}
+	state := a.dashboardState(r)
+	if state.Ready {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	d := pairData{Name: state.SelectedName, Error: r.URL.Query().Get("erro")}
+	token, err := a.selectedToken(r)
+	if err != nil {
+		d.Notice = "Nenhuma instância deste painel está selecionada."
+		a.render(w, "pair", d)
+		return
+	}
+	code, err := a.evolution.QRCode(r.Context(), token)
+	switch {
+	case errors.Is(err, evolution.ErrLoggedIn):
+		d.Connected = true
+		d.Notice = "A sessão já está pareada. Aguardando a conexão ficar ativa."
+	case err != nil:
+		d.Notice = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
+	default:
+		d.QRCode, d.Code = qrImageSource(code.Image), code.Code
+		if d.QRCode == "" && d.Code == "" {
+			d.Notice = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
 		}
 	}
-	a.render(w, "dashboard", d)
+	a.render(w, "pair", d)
+}
+
+func (a *webApp) connectInstance(w http.ResponseWriter, r *http.Request) {
+	a.instanceAction(w, r, "/pair", func(ctx context.Context, token string) error {
+		return a.evolution.ConnectInstance(ctx, token)
+	})
+}
+
+func (a *webApp) disconnectInstance(w http.ResponseWriter, r *http.Request) {
+	a.instanceAction(w, r, "/", func(ctx context.Context, token string) error {
+		return a.evolution.DisconnectInstance(ctx, token)
+	})
+}
+
+func (a *webApp) logoutInstance(w http.ResponseWriter, r *http.Request) {
+	a.instanceAction(w, r, "/", func(ctx context.Context, token string) error {
+		return a.evolution.LogoutInstance(ctx, token)
+	})
+}
+
+// instanceAction runs one Evolution operation against the selected instance,
+// which is the only instance this panel ever touches.
+func (a *webApp) instanceAction(w http.ResponseWriter, r *http.Request, destination string, run func(context.Context, string) error) {
+	if !a.require(w, r) {
+		return
+	}
+	token, err := a.selectedToken(r)
+	if err != nil {
+		a.fail(w, r, "/", "Selecione uma instância criada por este painel antes desta ação.")
+		return
+	}
+	if err := run(r.Context(), token); err != nil {
+		a.fail(w, r, "/", "A Evolution recusou a operação: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
+}
+
+func (a *webApp) deleteInstance(w http.ResponseWriter, r *http.Request) {
+	if !a.require(w, r) {
+		return
+	}
+	selected, err := a.store.SelectedInstance(r.Context())
+	if err != nil || selected == "" {
+		a.fail(w, r, "/", "Nenhuma instância selecionada.")
+		return
+	}
+	if _, err := a.store.InstanceToken(r.Context(), selected); err != nil {
+		a.fail(w, r, "/", "Este painel não gerencia a instância selecionada.")
+		return
+	}
+	if err := a.evolution.DeleteInstance(r.Context(), selected); err != nil {
+		a.fail(w, r, "/", "A Evolution recusou a remoção: "+err.Error())
+		return
+	}
+	if err := a.store.ForgetInstance(r.Context(), selected); err != nil {
+		a.fail(w, r, "/", "A instância foi removida na Evolution, mas o registro local permaneceu.")
+		return
+	}
+	if err := a.store.SelectInstance(r.Context(), ""); err != nil {
+		a.fail(w, r, "/", "A instância foi removida, mas a seleção não foi limpa.")
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 func (a *webApp) selectInstance(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
@@ -290,9 +573,71 @@ func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {
 // templates. The logo is trusted markup embedded in the binary, so it is
 // inlined as template.HTML; every other value stays contextually escaped.
 var templateFuncs = template.FuncMap{
-	"logo":        brand.LogoSVG,
-	"statusLabel": statusLabel,
-	"statusTone":  statusTone,
+	"logo":          brand.LogoSVG,
+	"statusLabel":   statusLabel,
+	"statusTone":    statusTone,
+	"sessionLabel":  sessionLabel,
+	"sessionTone":   sessionTone,
+	"moment":        moment,
+	"relativeSince": relativeSince,
+}
+
+// sessionLabel turns the WhatsApp session state into readable Portuguese. The
+// distinctions matter operationally: a logged-out session needs a new QR code,
+// while a disconnected one usually recovers on its own.
+func sessionLabel(state string) string {
+	switch state {
+	case "connected":
+		return "Conectado"
+	case "pairing":
+		return "Pareando"
+	case "disconnected":
+		return "Desconectado"
+	case "logged_out":
+		return "Sessão encerrada"
+	case "banned":
+		return "Conta banida"
+	case "failed":
+		return "Falha de conexão"
+	}
+	return "Desconhecido"
+}
+
+func sessionTone(state string) string {
+	switch state {
+	case "connected":
+		return "ok"
+	case "pairing":
+		return "warn"
+	}
+	return "off"
+}
+
+// moment formats an instant for the panel, leaving an unset one blank rather
+// than printing a zero date that reads as real data.
+func moment(at time.Time) string {
+	if at.IsZero() {
+		return "—"
+	}
+	return at.Local().Format("02/01/2006 15:04")
+}
+
+// relativeSince says how long ago something happened, which is what tells the
+// operator whether ingestion is alive without reading timestamps.
+func relativeSince(at time.Time) string {
+	if at.IsZero() {
+		return "nunca"
+	}
+	elapsed := time.Since(at)
+	switch {
+	case elapsed < time.Minute:
+		return "agora há pouco"
+	case elapsed < time.Hour:
+		return fmt.Sprintf("há %d min", int(elapsed.Minutes()))
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("há %d h", int(elapsed.Hours()))
+	}
+	return fmt.Sprintf("há %d dias", int(elapsed.Hours()/24))
 }
 
 // statusLabel turns an Evolution connection status into readable Portuguese.
@@ -322,7 +667,7 @@ func statusTone(s evolution.ConnectionStatus) string {
 
 const pages = `
 {{define "head"}}<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.}} · WhatsApp MCP</title><style>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{{if eq . "Conectar o WhatsApp"}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.}} · WhatsApp MCP</title><style>
 *,*::before,*::after{box-sizing:border-box}
 :root{
 color-scheme:light dark;
@@ -390,6 +735,17 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .empty{margin:18px 0 0;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
 .link-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:20px 0}.link-grid a{display:flex;align-items:center;min-height:44px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft);font-weight:600;text-decoration:none}.link-grid a:hover{border-color:var(--brand-strong);background:var(--surface)}
 .empty__title{font-weight:600;color:var(--text)}
+.subhead{font-size:1rem;margin-top:22px}
+.problems{margin:14px 0;padding:12px 14px 12px 32px;border-radius:var(--radius-sm);border:1px solid var(--danger-border);background:var(--danger-bg);color:var(--danger)}
+.problems li+li{margin-top:6px}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:18px 0 0}
+.fact dt{font-size:.82rem;color:var(--muted);font-weight:600}
+.fact dd{margin:2px 0 0;font-weight:600}
+.fact__detail{display:block;font-weight:400;font-size:.82rem;color:var(--muted)}
+.queues{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.queue{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
+.queue__name{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem}
+.qrcode{display:block;margin:0 auto;width:256px;height:256px;max-width:100%;background:#fff;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border)}
 code{background:var(--surface-soft);border:1px solid var(--border);padding:2px 6px;border-radius:6px;font-size:.88em;overflow-wrap:anywhere}
 pre{overflow:auto;background:#0c241e;color:#e8fff7;padding:16px;border-radius:var(--radius-sm);font-size:.88rem;line-height:1.5}
 pre code{background:none;border:0;padding:0;color:inherit}
@@ -432,59 +788,131 @@ pre code{background:none;border:0;padding:0;color:inherit}
 {{define "dashboard"}}{{template "head" "Painel"}}<main class="page">
 <header class="topbar">{{template "brand"}}<form method="post" action="/logout"><button class="btn btn--quiet" type="submit">Sair</button></form></header>
 
-<section class="card" aria-labelledby="instancia">
-<div class="card__head"><h2 id="instancia">Instância do WhatsApp</h2>
-<a class="btn btn--ghost" href="{{.BaseURL}}/manager/login">Abrir o Evolution Manager</a></div>
-<p class="muted">Conecte o QR code no Evolution Manager e volte aqui para escolher qual instância o MCP deve usar.</p>
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 
-{{if .Unavailable}}<p class="alert" role="alert">{{.Notice}} Verifique <code>EVOLUTION_URL</code> e <code>EVOLUTION_API_KEY</code> e recarregue a página.</p>
-{{else if .Instances}}
+<section class="card" aria-labelledby="instancia">
+<div class="card__head"><h2 id="instancia">Instância do WhatsApp</h2></div>
+<p class="muted">Crie, conecte e remova instâncias aqui mesmo. Este painel fala com o WhatsApp por dentro; nenhuma outra interface é necessária.</p>
+
+{{if .Unavailable}}<p class="alert" role="alert">{{.Notice}}</p>
+{{else}}
+{{if .Instances}}
 <form method="post" action="/selection">
 <ul class="instances">
-{{range .Instances}}<li class="instance{{if eq $.Selected .ID}} instance--selected{{end}}">
+{{range .Instances}}<li class="instance{{if .Selected}} instance--selected{{end}}">
 <label class="instance__label" for="instance-{{.ID}}">
-<input id="instance-{{.ID}}" type="radio" name="instance_id" value="{{.ID}}"{{if eq $.Selected .ID}} checked{{end}}>
+<input id="instance-{{.ID}}" type="radio" name="instance_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
 <span class="instance__name">{{.Name}}{{if .Number}}<span class="instance__number">{{.Number}}</span>{{end}}</span>
 </label>
 <span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
-{{if eq $.Selected .ID}}<span class="pill pill--current">Em uso pelo MCP</span>{{end}}
+{{if .Selected}}<span class="pill pill--current">Em uso pelo MCP</span>{{end}}
+{{if not .Managed}}<span class="pill pill--off">Fora deste painel</span>{{end}}
 </li>{{end}}
 </ul>
 <div class="actions"><button class="btn" type="submit">Usar esta instância</button></div>
 </form>
-{{if .Selected}}<form method="post" action="/selection"><input type="hidden" name="instance_id" value=""><div class="actions"><button class="btn btn--ghost" type="submit">Remover seleção</button></div></form>{{end}}
 {{else}}
-<div class="empty"><p class="empty__title">Nenhuma instância encontrada</p><p class="muted">{{.Notice}}</p></div>
+<div class="empty"><p class="empty__title">Nenhuma instância ainda</p><p class="muted">{{.Notice}}</p></div>
+{{end}}
+
+<form method="post" action="/instances">
+<label class="field" for="new-instance"><span class="field__label">Criar uma instância<span class="field__hint">Um nome para identificar esta conta de WhatsApp.</span></span></label>
+<input id="new-instance" type="text" name="name" maxlength="60" required placeholder="pessoal" autocapitalize="none" spellcheck="false">
+<div class="actions"><button class="btn" type="submit">Criar e conectar</button></div>
+</form>
+
+{{if .NeedsPairing}}<div class="actions"><a class="btn" href="/pair">Conectar o WhatsApp</a></div>{{end}}
+
+{{if .Selected}}
+<div class="actions">
+<form method="post" action="/instances/disconnect"><button class="btn btn--ghost" type="submit">Desconectar</button></form>
+<form method="post" action="/instances/logout"><button class="btn btn--ghost" type="submit">Encerrar sessão do WhatsApp</button></form>
+<form method="post" action="/instances/delete"><button class="btn btn--ghost" type="submit">Remover instância</button></form>
+</div>
+<p class="muted">Desconectar apenas para o cliente e preserva o pareamento. Encerrar a sessão exige um novo QR code. Remover apaga a instância na Evolution.</p>
+{{end}}
 {{end}}
 <p class="muted">O MCP usa no máximo uma instância. Selecionar outra substitui a seleção atual.</p>
 </section>
 
+{{with .Status}}
+<section class="card" aria-labelledby="estado">
+<div class="card__head"><h2 id="estado">Estado do serviço</h2>
+<span class="pill pill--{{sessionTone .WhatsApp.State}}">{{sessionLabel .WhatsApp.State}}</span></div>
+
+{{if .Problems}}
+<ul class="problems">{{range .Problems}}<li>{{.}}</li>{{end}}</ul>
+{{else}}
+<p class="muted">Nenhum problema detectado. As mensagens estão sendo recebidas e indexadas.</p>
+{{end}}
+
+<dl class="facts">
+<div class="fact"><dt>Último evento recebido</dt><dd>{{relativeSince .LastEvent}}<span class="fact__detail">{{moment .LastEvent}}</span></dd></div>
+{{if .WhatsApp.PushName}}<div class="fact"><dt>Conta conectada</dt><dd>{{.WhatsApp.PushName}}</dd></div>{{end}}
+{{if .HasIndex}}
+<div class="fact"><dt>Mensagens indexadas</dt><dd>{{.Coverage.Messages}}</dd></div>
+<div class="fact"><dt>Histórico desde</dt><dd>{{moment .Coverage.OldestAt}}</dd></div>
+{{end}}
+</dl>
+
+{{if .WhatsApp.Reason}}<p class="muted">Motivo informado pelo WhatsApp: <code>{{.WhatsApp.Reason}}</code></p>{{end}}
+
+{{if .Queues}}
+<h3 class="subhead">Filas de ingestão</h3>
+<ul class="queues">
+{{range .Queues}}<li class="queue">
+<span class="queue__name">{{.Name}}</span>
+<span class="pill pill--{{if .Consuming}}ok{{else}}off{{end}}">{{if .Consuming}}Consumindo{{else}}Parada{{end}}</span>
+<span class="muted">{{.Delivered}} eventos{{if .Rejected}} · {{.Rejected}} rejeitados{{end}} · {{relativeSince .LastEventAt}}</span>
+</li>{{end}}
+</ul>
+<p class="muted">Uma fila parada acumula mensagens no broker sem que nada seja indexado.</p>
+{{end}}
+</section>
+{{end}}
+
 <section class="card" aria-labelledby="configuracao">
 {{if .Ready}}
 <h2 id="configuracao">Configurar o MCP no Claude</h2>
-<p>O WhatsApp está conectado e a instância selecionada está pronta. Copie o prompt abaixo e cole no Claude para configurar o uso do MCP.</p>
-<pre><code>Configure o WhatsApp MCP já instalado neste ambiente para uso no Claude.
+<p>O WhatsApp está conectado na instância <strong>{{.SelectedName}}</strong> e pronto para uso.</p>
+<pre><code>Configure o WhatsApp MCP remoto no Claude.
 
-A instância do WhatsApp já está configurada, conectada e selecionada no painel.
-Não crie outra instância, não solicite QR Code e não abra o Evolution Manager.
+A instância do WhatsApp já está criada, conectada e selecionada no painel.
+Não crie outra instância e não solicite QR Code.
 
-Use o transporte MCP stdio e preserve a configuração segura existente.
-Não peça, revele ou imprima API keys, senhas, tokens ou connection strings.
+Use somente a URL do serviço e a credencial fornecida pelo painel.
+Não peça, revele ou imprima senhas, tokens ou connection strings.
 
-Depois de configurar, teste as ferramentas do WhatsApp MCP e confirme:
-- que o servidor MCP iniciou corretamente;
-- que a instância selecionada foi encontrada;
-- que o estado do WhatsApp está conectado;
-- que uma consulta de status foi executada com sucesso.
-
-Se o MCP não puder ser configurado, informe o erro técnico exato e os arquivos/comandos necessários, sem sugerir alterar EVOLUTION_URL ou EVOLUTION_API_KEY sem evidência.</code></pre>
-<p class="muted">O MCP é configurado localmente via stdio. Este painel web serve para acompanhar a instância e a conexão.</p>
+Depois de configurar, teste as ferramentas e confirme:
+- que o servidor MCP respondeu;
+- que a instância conectada foi reconhecida;
+- que uma consulta de status foi executada com sucesso.</code></pre>
+<p class="muted">O endpoint remoto e a chave de API aparecerão aqui quando o gateway MCP autenticado estiver publicado.</p>
 {{else}}
 <h2 id="configuracao">Prepare o WhatsApp antes de configurar o MCP</h2>
-<p>O prompt de configuração do Claude ficará disponível quando houver uma instância selecionada e conectada.</p>
-<div class="empty"><p class="empty__title">Instância ainda não pronta</p><p class="muted">{{.Notice}}</p><div class="actions"><a class="btn" href="{{.BaseURL}}/manager/login">Abrir o Evolution Go</a></div></div>
-<p class="muted">No Evolution Go, crie ou conecte a instância do WhatsApp. Depois volte ao painel, selecione a instância conectada e recarregue esta página.</p>
+<p>A configuração do Claude fica disponível quando houver uma instância selecionada e conectada.</p>
+<div class="empty"><p class="empty__title">Instância ainda não pronta</p><p class="muted">{{.Notice}}</p>{{if .NeedsPairing}}<div class="actions"><a class="btn" href="/pair">Conectar o WhatsApp</a></div>{{end}}</div>
 {{end}}
-<div class="link-grid"><a href="/">Painel do MCP</a><a href="/healthz">Health do MCP</a><a href="/readyz">Readiness do MCP</a><a href="/api/selected-instance">Instância selecionada (autenticado)</a><a href="{{.BaseURL}}/swagger/index.html">Swagger da Evolution Go</a></div>
+<div class="link-grid"><a href="/">Painel do MCP</a><a href="/healthz">Health do MCP</a><a href="/readyz">Readiness do MCP</a><a href="/api/selected-instance">Instância selecionada (autenticado)</a></div>
 </section>
+</main></body></html>{{end}}
+
+{{define "pair"}}{{template "head" "Conectar o WhatsApp"}}<main class="page page--narrow">
+{{template "brand"}}
+<section class="card"><h1>Conectar o WhatsApp</h1>
+{{with .Name}}<p class="muted">Instância <strong>{{.}}</strong>.</p>{{end}}
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+{{if .QRCode}}
+<p>No celular, abra o WhatsApp em <strong>Dispositivos conectados</strong>, toque em <strong>Conectar um dispositivo</strong> e aponte a câmera para o código.</p>
+<p><img class="qrcode" src="{{.QRCode}}" alt="QR code para conectar o WhatsApp" width="256" height="256"></p>
+{{else}}
+<div class="empty"><p class="empty__title">Aguardando o QR code</p><p class="muted">{{.Notice}}</p></div>
+{{end}}
+{{with .Code}}<p class="muted">Código: <code>{{.}}</code></p>{{end}}
+<div class="actions">
+<form method="post" action="/instances/connect"><button class="btn btn--ghost" type="submit">Gerar outro código</button></form>
+<a class="btn btn--quiet" href="/">Voltar ao painel</a>
+</div>
+</section>
+<p class="muted">Esta página se atualiza sozinha a cada 5 segundos. O código expira rápido; se ele sumir, gere outro.</p>
 </main></body></html>{{end}}`

@@ -49,21 +49,14 @@ services:
       timeout: 5s
       retries: 10
 
+  # Evolution has no public surface: it stays on the project's internal network,
+  # reachable only by whatsapp-mcp. The control panel drives it from the inside,
+  # so neither its API nor its manager needs to be exposed.
   evolution-go:
     image: evoapicloud/evolution-go:0.7.2
     restart: unless-stopped
     expose:
       - "4000"
-    networks:
-      - default
-      - dokploy-network
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=dokploy-network
-      - traefik.http.routers.evolution-go.rule=Host(`evolution-go.example.com`)
-      - traefik.http.routers.evolution-go.entrypoints=web-secure
-      - traefik.http.routers.evolution-go.tls.certresolver=letsencrypt
-      - traefik.http.services.evolution-go.loadbalancer.server.port=4000
     environment:
       SERVER_PORT: "4000"
       CLIENT_NAME: evolution
@@ -115,12 +108,10 @@ services:
     environment:
       LISTEN_ADDR: :8080
       EVOLUTION_URL: http://evolution-go:4000
-      EVOLUTION_PUBLIC_URL: https://evolution-go.example.com
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-5s}
       STATUS_POLL_INTERVAL: ${STATUS_POLL_INTERVAL:-15s}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-whatsapp}
-      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-message}
       DATABASE_URL: postgres://${MCP_DB_USER}:${MCP_DB_PASSWORD}@postgres-mcp:5432/${MCP_DB_NAME:-whatsapp_mcp}?sslmode=disable
       FRESHNESS_WINDOW: ${FRESHNESS_WINDOW:-5m}
     expose:

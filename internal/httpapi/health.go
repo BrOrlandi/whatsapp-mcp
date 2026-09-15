@@ -23,9 +23,25 @@ func FullHandler(state *health.State, freshness time.Duration, web http.Handler)
 	return mux
 }
 
+// writeHealth reports the whole snapshot, including the WhatsApp session state
+// and the per-queue consumption, so a probe failure can be diagnosed from the
+// response alone. It carries no credentials: every field here is state, never
+// configuration.
 func writeHealth(w http.ResponseWriter, snapshot health.Snapshot, freshness time.Duration, live bool) {
 	stale := snapshot.Stale(freshness)
-	body := map[string]any{"evolution_connected": snapshot.EvolutionConnected, "last_event_at": snapshot.LastEventAt, "rabbit_connected": snapshot.RabbitConnected, "database_connected": snapshot.DatabaseConnected, "stale": stale}
+	body := map[string]any{
+		"evolution_connected": snapshot.EvolutionConnected,
+		"last_event_at":       snapshot.LastEventAt,
+		"last_message_at":     snapshot.LastMessageAt,
+		"rabbit_connected":    snapshot.RabbitConnected,
+		"database_connected":  snapshot.DatabaseConnected,
+		"whatsapp":            snapshot.WhatsApp,
+		"queues":              snapshot.Queues,
+		"stale":               stale,
+	}
+	if problems := snapshot.Problems(); len(problems) > 0 {
+		body["problems"] = problems
+	}
 	if stale {
 		body["warning"] = health.FreshnessWarning
 	}

@@ -39,21 +39,21 @@ func main() {
 		logger.Error("generate session key", "error", err)
 		os.Exit(1)
 	}
-	go pollEvolution(ctx, evolutionClient, state, cfg.StatusPollInterval, logger)
+	go pollEvolution(ctx, evolutionClient, db, state, cfg.StatusPollInterval, logger)
 	go pollDatabase(ctx, db, state)
-	consumer := &rabbit.Consumer{URL: cfg.RabbitURL, Queue: cfg.RabbitQueue, Store: db, SetConnected: state.SetRabbit, OnPersisted: state.MarkEvent, Logger: logger}
+	consumer := &rabbit.Consumer{URL: cfg.RabbitURL, Queues: cfg.RabbitQueues, Store: db, State: state, Logger: logger}
 	go func() {
 		if err := consumer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("RabbitMQ consumer stopped", "error", err)
 		}
 	}()
 	go func() {
-		if err := mcp.New(db, state, cfg.FreshnessWindow).Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
+		if err := mcp.New(db, db, state, cfg.FreshnessWindow).Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("MCP stdio stopped", "error", err)
 		}
 	}()
 
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, sessionKey, cfg.EvolutionPublicURL)
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey)
 	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -68,18 +68,45 @@ func main() {
 	}
 }
 
-type statusClient interface {
-	Status(context.Context) (bool, string, error)
+// instanceLister is the slice of Evolution the readiness poll needs.
+type instanceLister interface {
+	FetchInstances(context.Context) ([]evolution.Instance, error)
 }
 
-func pollEvolution(ctx context.Context, client statusClient, state *health.State, interval time.Duration, logger *slog.Logger) {
+// selectionReader is the slice of the store the readiness poll needs.
+type selectionReader interface {
+	SelectedInstance(context.Context) (string, error)
+}
+
+// pollEvolution derives readiness from the instance the panel actually
+// selected. Evolution resolves the target instance from the key on the request,
+// so a global status call answers for no instance in particular; listing the
+// instances and looking up the selected one is the only reading that matches
+// what the operator chose.
+//
+// Connection events are the primary signal and arrive on their own queues; this
+// poll exists to recover the truth after a restart and to notice a silent drop.
+func pollEvolution(ctx context.Context, client instanceLister, selection selectionReader, state *health.State, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		connected, _, err := client.Status(ctx)
+		connected := false
+		selected, err := selection.SelectedInstance(ctx)
+		if err == nil && selected != "" {
+			instances, fetchErr := client.FetchInstances(ctx)
+			err = fetchErr
+			for _, instance := range instances {
+				if instance.ID == selected {
+					connected = instance.Status == evolution.StatusConnected
+					break
+				}
+			}
+		}
 		state.SetEvolution(err == nil && connected)
-		if err != nil && ctx.Err() == nil {
-			logger.Warn("Evolution status poll failed", "error", err)
+		if err == nil {
+			state.ReconcileWhatsApp(connected)
+		} else if ctx.Err() == nil {
+			logger.Warn("Evolution readiness poll failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():
