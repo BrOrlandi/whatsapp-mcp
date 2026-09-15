@@ -42,6 +42,15 @@ func (f fakeIndex) Messages(context.Context, string, store.MessageQuery) ([]stor
 func (f fakeIndex) OldestMessage(context.Context, string, string) (store.Message, error) {
 	return store.Message{}, errors.New("empty")
 }
+func (f fakeIndex) IndexGaps(context.Context, string, time.Duration, int) ([]store.Gap, error) {
+	return nil, nil
+}
+func (f fakeIndex) GapAnchors(context.Context, string, string, time.Time, int) ([]store.Message, error) {
+	return nil, nil
+}
+func (f fakeIndex) ChatsWithoutAnchor(context.Context, string, time.Time) (int64, error) {
+	return 0, nil
+}
 func (f fakeIndex) RawMessage(context.Context, string, string) ([]byte, error) {
 	return nil, errors.New("empty")
 }

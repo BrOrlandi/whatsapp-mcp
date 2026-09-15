@@ -203,3 +203,112 @@ func itoa(value int) string {
 	}
 	return digits
 }
+
+// Gap is a window in which the index holds nothing. A quiet account and a dead
+// pipeline look identical from the outside, so a gap is reported as a suspicion
+// to be weighed rather than as proof that messages were lost: the surrounding
+// timestamps are facts, the hole between them is not.
+type Gap struct {
+	Since time.Time `json:"since"`
+	Until time.Time `json:"until"`
+}
+
+// Silence is how long the whole index must go quiet before the hole is worth
+// reporting. An account sleeps every night, so anything shorter than a day is
+// ordinary; a window this wide across every conversation at once is not.
+const Silence = 24 * time.Hour
+
+// IndexGaps reports the windows in which no conversation of the instance
+// produced a single message. It looks at the index as a whole rather than at
+// one chat because one silent chat says nothing, while every chat falling
+// silent at the same moment is the shape an outage leaves behind.
+//
+// Ordering is most recent first, since a caller repairing an index cares about
+// the hole it is still living with.
+func (s *Store) IndexGaps(ctx context.Context, instanceID string, silence time.Duration, limit int) ([]Gap, error) {
+	if instanceID == "" {
+		return nil, errors.New("instance is required")
+	}
+	if silence <= 0 {
+		silence = Silence
+	}
+	if limit <= 0 || limit > maxPageSize {
+		limit = 10
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+                WITH ordered AS (
+                    SELECT sent_at, lag(sent_at) OVER (ORDER BY sent_at) AS previous
+                    FROM messages
+                    WHERE instance_id = $1 AND sent_at IS NOT NULL
+                )
+                SELECT previous, sent_at FROM ordered
+                WHERE previous IS NOT NULL AND sent_at - previous > $2 * interval '1 second'
+                ORDER BY sent_at DESC
+                LIMIT $3`, instanceID, silence.Seconds(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var gaps []Gap
+	for rows.Next() {
+		var gap Gap
+		if err := rows.Scan(&gap.Since, &gap.Until); err != nil {
+			return nil, err
+		}
+		gap.Since, gap.Until = gap.Since.UTC(), gap.Until.UTC()
+		gaps = append(gaps, gap)
+	}
+	return gaps, rows.Err()
+}
+
+// GapAnchors returns, for each conversation, the earliest message indexed after
+// the given moment. That message is the only handle a gap offers: WhatsApp
+// answers a history request with the messages immediately *before* one it
+// already knows, so refilling a hole means paging backwards from the first
+// message that landed after it.
+//
+// A conversation with nothing after the hole therefore has no anchor at all and
+// cannot be refilled, which is why the count of those is reported alongside
+// rather than silently left out.
+func (s *Store) GapAnchors(ctx context.Context, instanceID, chatJID string, after time.Time, limit int) ([]Message, error) {
+	if instanceID == "" {
+		return nil, errors.New("instance is required")
+	}
+	if limit <= 0 || limit > maxPageSize {
+		limit = 20
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+                WITH ranked AS (
+                    SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at,
+                           row_number() OVER (PARTITION BY chat_jid ORDER BY sent_at ASC) AS position
+                    FROM messages
+                    WHERE instance_id = $1 AND sent_at > $2 AND ($3 = '' OR chat_jid = $3)
+                )
+                SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at
+                FROM ranked WHERE position = 1
+                ORDER BY sent_at ASC
+                LIMIT $4`, instanceID, after, chatJID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
+// ChatsWithoutAnchor counts the conversations that hold nothing after the given
+// moment. These are the conversations a gap repair cannot reach, and reporting
+// how many there are keeps a partial repair from reading as a complete one.
+func (s *Store) ChatsWithoutAnchor(ctx context.Context, instanceID string, after time.Time) (int64, error) {
+	if instanceID == "" {
+		return 0, errors.New("instance is required")
+	}
+	var total int64
+	err := s.DB.QueryRowContext(ctx, `
+                SELECT count(*) FROM (
+                    SELECT chat_jid FROM messages
+                    WHERE instance_id = $1 AND sent_at IS NOT NULL
+                    GROUP BY chat_jid
+                    HAVING max(sent_at) <= $2
+                ) AS stale`, instanceID, after).Scan(&total)
+	return total, err
+}

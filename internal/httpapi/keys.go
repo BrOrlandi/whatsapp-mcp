@@ -17,13 +17,37 @@ import (
 // already filled in.
 type keyPage struct {
 	layout
-	Name       string
-	Secret     string
+	Name   string
+	Secret string
+	Setup  clientSetup
+	Prompt string
+}
+
+// clientSetup is everything a client needs, rendered the same way wherever it
+// appears. On the page that creates a key it carries the real secret; anywhere
+// else it carries a placeholder, because the secret is shown once and only once.
+type clientSetup struct {
 	Endpoint   string
+	Secret     string
+	HasSecret  bool
 	Command    string
 	CommandEnv string
 	JSON       string
-	Prompt     string
+}
+
+// keyPlaceholder stands in for the secret once it can no longer be shown.
+const keyPlaceholder = "SUA_CHAVE"
+
+func newClientSetup(endpoint, secret string) clientSetup {
+	setup := clientSetup{Endpoint: endpoint, Secret: secret, HasSecret: secret != ""}
+	if !setup.HasSecret {
+		setup.Secret = keyPlaceholder
+	}
+	setup.Command = fmt.Sprintf("claude mcp add --transport http whatsapp %s --header \"Authorization: Bearer %s\"", endpoint, setup.Secret)
+	setup.CommandEnv = fmt.Sprintf("export WHATSAPP_MCP_KEY=%s\nclaude mcp add --transport http whatsapp %s --header \"Authorization: Bearer \\${WHATSAPP_MCP_KEY}\"",
+		setup.Secret, endpoint)
+	setup.JSON = clientConfig(endpoint, setup.Secret)
+	return setup
 }
 
 // verificationPrompt is what the operator pastes into the client to confirm the
@@ -67,16 +91,11 @@ func (a *webApp) createKey(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "/", "Não foi possível guardar a chave.")
 		return
 	}
-	endpoint := a.endpoint()
 	page := keyPage{
-		layout:   a.newLayout(r, "Chave criada", "conectar"),
-		Name:     name,
-		Secret:   secret,
-		Endpoint: endpoint,
-		Command:  fmt.Sprintf("claude mcp add --transport http whatsapp %s --header \"Authorization: Bearer %s\"", endpoint, secret),
-		CommandEnv: fmt.Sprintf("export WHATSAPP_MCP_KEY=%s\nclaude mcp add --transport http whatsapp %s --header \"Authorization: Bearer \\${WHATSAPP_MCP_KEY}\"",
-			secret, endpoint),
-		JSON:   clientConfig(endpoint, secret),
+		layout: a.newLayout(r, "Chave criada", "conectar"),
+		Name:   name,
+		Secret: secret,
+		Setup:  newClientSetup(a.endpoint(), secret),
 		Prompt: verificationPrompt,
 	}
 	a.render(w, "chave", page)
@@ -156,4 +175,31 @@ func (a *webApp) syncHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/instancias", http.StatusSeeOther)
+}
+
+// progress reports the checklist state as data, so the connect page can notice
+// a client authenticating without the operator reloading it by hand.
+//
+// It carries no credential and no instance detail: only whether a key exists
+// and whether one has been used.
+func (a *webApp) progress(w http.ResponseWriter, r *http.Request) {
+	if !a.authenticated(r) {
+		http.Error(w, `{"error":"unauthenticated"}`, http.StatusUnauthorized)
+		return
+	}
+	keys, err := a.store.ListAPIKeys(r.Context())
+	if err != nil {
+		http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	connected := false
+	for _, key := range keys {
+		if !key.LastUsedAt.IsZero() {
+			connected = true
+			break
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"has_key": len(keys) > 0, "client_connected": connected})
 }

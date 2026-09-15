@@ -1,0 +1,17 @@
+# Development override: publishes the dependency ports on loopback so the
+# gateway can run on the host with `go run` while its dependencies stay in
+# Docker. Production never publishes these — see docker-compose.yml.
+#
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml
+services:
+  postgres-mcp:
+    ports:
+      - "127.0.0.1:${MCP_DB_PORT:-5433}:5432"
+
+  rabbitmq:
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+
+  evolution-go:
+    ports:
+      - "127.0.0.1:${EVOLUTION_PORT:-4000}:4000"

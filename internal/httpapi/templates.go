@@ -76,12 +76,25 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .lead{color:var(--muted);margin-top:0}
 
 /* ---- steps ---- */
-.step{display:grid;grid-template-columns:30px 1fr;gap:0 14px;padding:16px 0}
+.step{padding:4px 0}
 .step+.step{border-top:1px solid var(--border)}
-.step__n{width:30px;height:30px;border-radius:50%;background:var(--brand);color:var(--brand-ink);display:grid;place-items:center;font-weight:700;font-size:.9rem}
-.step__title{font-weight:700;margin:4px 0 0}
-.step__body{grid-column:2;margin-top:6px}
+.step__summary{display:flex;align-items:center;gap:12px;padding:14px 0;cursor:pointer;list-style:none}
+.step__summary::-webkit-details-marker{display:none}
+.step__summary:hover .step__title{color:var(--brand)}
+.step[data-locked] .step__summary{cursor:default;opacity:.6}
+.step__n{width:30px;height:30px;flex:none;border-radius:50%;background:var(--brand);color:var(--brand-ink);display:grid;place-items:center;font-weight:700;font-size:.9rem}
+.step--done .step__n{background:var(--ok);font-size:1rem}
+.step[data-locked] .step__n{background:var(--off-bg);color:var(--off)}
+.step__title{font-weight:700}
+.step--done .step__title{color:var(--muted);font-weight:600}
+.step__state{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ok)}
+.step__state--waiting{color:var(--warn);display:inline-flex;align-items:center;gap:6px}
+.step__state--waiting::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.step__state--waiting::before{animation:none}}
+.step__body{padding:0 0 18px 42px}
 .step__body>:first-child{margin-top:0}
+@media (max-width:520px){.step__body{padding-left:0}}
 
 /* ---- pills, badges ---- */
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
@@ -170,6 +183,17 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .dialog__close{text-decoration:none;color:var(--muted);font-size:1.5rem;line-height:1;padding:0 4px}
 .dialog__close:hover{color:var(--text)}
 
+.tabs__radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.tabs__bar{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px}
+.tabs__tab{padding:8px 14px;font-weight:600;font-size:.92rem;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
+.tabs__tab:hover{color:var(--text);background:var(--surface-soft)}
+.tabs__panel{display:none}
+#tab-code:checked~.tabs__panel--code,#tab-desktop:checked~.tabs__panel--desktop{display:block}
+#tab-code:checked~.tabs__bar label[for=tab-code],#tab-desktop:checked~.tabs__bar label[for=tab-desktop]{color:var(--brand);border-bottom-color:var(--brand)}
+.tabs__radio:focus-visible~.tabs__bar label{outline:3px solid var(--ring);outline-offset:2px}
+.prompts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.prompt .snippet{margin:0}
+.prompt pre{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);padding:10px 12px;font-family:inherit;font-size:.92rem;white-space:pre-wrap}
 .qrcode{display:block;margin:0 auto;width:250px;height:250px;max-width:100%;background:#fff;padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .muted{color:var(--muted);font-size:.9rem}
@@ -192,6 +216,34 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 {{end}}
 
+{{define "clientTabs"}}
+<div class="tabs">
+<input class="tabs__radio" type="radio" name="cliente" id="tab-code" checked>
+<input class="tabs__radio" type="radio" name="cliente" id="tab-desktop">
+<div class="tabs__bar" role="tablist">
+<label class="tabs__tab" for="tab-code">Claude Code</label>
+<label class="tabs__tab" for="tab-desktop">Claude Desktop</label>
+</div>
+
+<div class="tabs__panel tabs__panel--code">
+<p class="muted">Um comando no terminal, de dentro de qualquer projeto.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Comando</span></div>
+<pre data-copy><code>{{.Command}}</code></pre></div>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Sem a chave no arquivo</span><span class="snippet__note">opcional</span></div>
+<pre data-copy><code>{{.CommandEnv}}</code></pre></div>
+<p class="muted">Na segunda forma o Claude Code lê a chave de <code>WHATSAPP_MCP_KEY</code>, que você exporta no seu shell, e ela não fica na configuração. Confira depois com <code>claude mcp list</code>.</p>
+</div>
+
+<div class="tabs__panel tabs__panel--desktop">
+<p class="muted">Em <strong>Configurações → Desenvolvedor → Editar configuração</strong>, cole o bloco abaixo e reinicie o aplicativo.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">claude_desktop_config.json</span></div>
+<pre data-copy><code>{{.JSON}}</code></pre></div>
+<p class="muted">Se o arquivo já tiver outros servidores, acrescente só o trecho <code>"whatsapp"</code> dentro de <code>mcpServers</code>.</p>
+</div>
+</div>
+{{if not .HasSecret}}<p class="muted">Troque <code>SUA_CHAVE</code> pela chave que você guardou. Se não guardou, gere outra — a chave é exibida uma única vez.</p>{{end}}
+{{end}}
+
 {{define "conectar"}}{{template "head" .}}{{template "nav" .}}
 <h1>Conectar um cliente a este MCP</h1>
 <p class="lead">O cliente precisa de uma única informação: a chave de API. Ela já identifica a conta e a instância do WhatsApp.</p>
@@ -201,18 +253,52 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <div class="card__head"><h2>Passo a passo</h2><span class="pill pill--ok">Instância {{.InstanceName}} conectada</span></div>
 <div class="card__body">
 
-<div class="step"><span class="step__n">1</span><p class="step__title">Gere uma chave</p>
+<details class="step{{if .HasKey}} step--done{{end}}"{{if not .HasKey}} open{{end}}>
+<summary class="step__summary">
+<span class="step__n" aria-hidden="true">{{if .HasKey}}✓{{else}}1{{end}}</span>
+<span class="step__title">Gere uma chave</span>
+{{if .HasKey}}<span class="step__state">concluído</span>{{end}}
+</summary>
 <div class="step__body">
+{{if .HasKey}}
+<p class="muted">{{plural (len64 .Keys) "chave ativa" "chaves ativas"}}. Uma por cliente, para revogar um sem derrubar os outros.</p>
+<div class="actions"><a class="btn btn--ghost btn--small" href="#nova-chave">Gerar outra chave</a></div>
+{{else}}
 <p class="muted">Uma chave por cliente. Assim dá para revogar um sem derrubar os outros.</p>
 <div class="actions"><a class="btn" href="#nova-chave">Gerar nova chave</a></div>
-</div></div>
+{{end}}
+</div></details>
 
-<div class="step"><span class="step__n">2</span><p class="step__title">Configure o cliente</p>
-<div class="step__body"><p class="muted">Ao gerar a chave você recebe o comando e o JSON já preenchidos, prontos para copiar.</p></div></div>
+<details class="step{{if .ClientConnected}} step--done{{end}}"{{if and .HasKey (not .ClientConnected)}} open{{end}}{{if not .HasKey}} data-locked="true"{{end}}>
+<summary class="step__summary">
+<span class="step__n" aria-hidden="true">{{if .ClientConnected}}✓{{else}}2{{end}}</span>
+<span class="step__title">Configure o cliente</span>
+{{if .ClientConnected}}<span class="step__state">concluído</span>{{else if .HasKey}}<span class="step__state step__state--waiting" data-progress data-connected="false">aguardando conexão</span>{{end}}
+</summary>
+<div class="step__body">
+{{if .ClientConnected}}<p class="muted">Um cliente se autenticou {{relativeSince .LastUse}}. Nada mais a fazer aqui.</p>{{end}}
+{{if .HasKey}}
+<p class="muted">Endpoint deste MCP: <code>{{.Endpoint}}</code> — fixo e não é segredo. A autenticação é o <code>Authorization: Bearer</code> com a sua chave.</p>
+{{template "clientTabs" .Setup}}
+{{if not .ClientConnected}}<p class="muted">Assim que o cliente fizer a primeira chamada, este passo se marca sozinho — esta página detecta e atualiza.</p>{{end}}
+{{else}}
+<p class="muted">Gere a chave primeiro. Ela vem com o comando e o JSON já preenchidos.</p>
+{{end}}
+</div></details>
 
-<div class="step"><span class="step__n">3</span><p class="step__title">Use</p>
-<div class="step__body"><p class="muted">Peça ao Claude para listar suas conversas ou buscar uma mensagem. As ferramentas aparecem sozinhas depois que o cliente reinicia.</p></div></div>
-
+<details class="step{{if .ClientConnected}} step--done{{end}}"{{if .ClientConnected}} open{{end}}{{if not .ClientConnected}} data-locked="true"{{end}}>
+<summary class="step__summary">
+<span class="step__n" aria-hidden="true">{{if .ClientConnected}}✓{{else}}3{{end}}</span>
+<span class="step__title">Use</span>
+{{if .ClientConnected}}<span class="step__state">pronto</span>{{end}}
+</summary>
+<div class="step__body">
+<p class="muted">As ferramentas aparecem sozinhas depois que o cliente reinicia. Experimente pedir:</p>
+<ul class="prompts">
+{{range .Prompts}}<li class="prompt"><div class="snippet"><pre data-copy><code>{{.}}</code></pre></div></li>{{end}}
+</ul>
+<p class="muted">Leitura e busca são seguras. Envio só acontece quando você pede explicitamente.</p>
+</div></details>
 </div></section>
 
 <section class="card">
@@ -230,14 +316,6 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{else}}
 <div class="empty"><p class="empty__title">Nenhuma chave ativa</p><p class="muted">Gere a primeira para conectar um cliente.</p><div class="actions" style="justify-content:center;margin-top:14px"><a class="btn" href="#nova-chave">Gerar chave</a></div></div>
 {{end}}
-</div></section>
-
-<section class="card">
-<div class="card__head"><h2>Endereço do serviço</h2></div>
-<div class="card__body">
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Endpoint MCP</span><span class="snippet__note">fixo, não é segredo</span></div>
-<pre data-copy><code>{{.Endpoint}}</code></pre></div>
-<p class="muted">Autenticação por <code>Authorization: Bearer</code>. Sem chave válida, o endpoint responde <code>401</code>.</p>
 </div></section>
 
 {{else}}
@@ -277,23 +355,9 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 </div>
 
 <section class="card card--accent">
-<div class="card__head"><h2>Claude Code</h2><span class="pill pill--accent pill--plain">recomendado</span></div>
+<div class="card__head"><h2>Configure o cliente</h2></div>
 <div class="card__body">
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Um comando, já preenchido</span></div>
-<pre data-copy><code>{{.Command}}</code></pre></div>
-<p class="muted">Rode no terminal, dentro de qualquer projeto. Depois disso o Claude Code enxerga as ferramentas do WhatsApp.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Sem a chave no arquivo</span><span class="snippet__note">opcional</span></div>
-<pre data-copy><code>{{.CommandEnv}}</code></pre></div>
-<p class="muted">Nesta forma o Claude Code lê a chave de <code>WHATSAPP_MCP_KEY</code>, que você exporta no seu shell. A chave não fica na configuração.</p>
-</div></section>
-
-<section class="card">
-<div class="card__head"><h2>Claude Desktop e outros clientes</h2></div>
-<div class="card__body">
-<p class="muted">Cole este bloco no arquivo de configuração MCP do cliente. No Claude Desktop: <strong>Configurações → Desenvolvedor → Editar configuração</strong>.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Configuração JSON</span></div>
-<pre data-copy><code>{{.JSON}}</code></pre></div>
-<p class="muted">Reinicie o cliente depois de salvar.</p>
+{{template "clientTabs" .Setup}}
 </div></section>
 
 <section class="card">

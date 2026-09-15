@@ -20,7 +20,7 @@ Keys are issued and revoked in the control panel, which also prints this block f
 
 The same HTTP server provides a Portuguese control panel at `http://127.0.0.1:8080/`, split by task: **Conectar** hands a client everything it needs, **Instâncias** owns the WhatsApp account lifecycle, and **Estado** is the diagnostic view. Creating a key or an instance happens in a dialog, and destructive actions ask first. Evolution Go has no public surface and its manager is never needed.
 
-Generating a key lands on a page that shows the secret once alongside the `claude mcp add` command, the JSON block for file-configured clients, and a prompt to verify the connection — all filled in, so nothing has to be assembled by hand. Passwords are bcrypt-hashed in PostgreSQL; sessions use signed, HttpOnly, SameSite cookies with concurrency-safe server-side state. A process restart intentionally invalidates active sessions.
+**Conectar** is a three-step checklist that tracks itself: a key exists or it does not, and a key that has been used proves a client authenticated with it. While the second step waits, the page polls and closes it the moment a client makes its first call. Generating a key shows the secret once alongside the `claude mcp add` command, the JSON block for file-configured clients, and a prompt to verify the connection — all filled in. Passwords are bcrypt-hashed in PostgreSQL; sessions use signed, HttpOnly, SameSite cookies with concurrency-safe server-side state. A process restart intentionally invalidates active sessions.
 
 The panel mints a per-instance Evolution token, stores it in PostgreSQL and uses it for every per-instance call, because Evolution resolves the target instance from the key on the request and accepts no instance parameter. That token is an internal secret: it is never displayed and never reaches an MCP client. An instance created outside the panel has no token here, so the panel marks it and refuses to operate it.
 
@@ -108,11 +108,26 @@ RabbitMQ uses durable quorum queues and manual acknowledgements. The gateway con
 
 ## Local development
 
-`POST /mcp` is the supported transport. A stdio transport exists for debugging a local build and is off unless `MCP_STDIO=true`; it has no credential, so it acts on the instance the panel selected.
+`just` drives everything. `just` on its own lists the recipes.
+
+There are three ways to run it, from least to most setup:
 
 ```sh
-go build -o ./bin/whatsapp-mcp ./cmd/whatsapp-mcp
+just preview      # the panel alone, fake data, no dependencies at all
+just tunnel       # in one terminal: SSH tunnel to the server's Evolution
+just dev-remote   # in another: the gateway against that Evolution
+just up && just dev   # the whole stack locally, with a WhatsApp of your own to pair
 ```
+
+**`just preview`** serves the control panel against fabricated data on port 8090. It talks to nothing, so it is the fastest way to work on layout and wording.
+
+**`just dev-remote`** runs the gateway locally against the Evolution on the server. Live reads and sending work; ingestion does not, and that is expected — the server's Evolution publishes to the server's queue, not to yours, so the local index stays empty. Evolution has no published port and no public domain, so `just tunnel` asks the host for the container's address on the Docker bridge and forwards to it.
+
+**`just up && just dev`** runs everything locally and needs a WhatsApp account to pair. It is the only mode where ingestion, history sync and the message index actually work.
+
+`just check` runs what has to pass before a commit: format, vet, tests, race, build, compose validation.
+
+`POST /mcp` is the supported transport. A stdio transport exists for debugging a local build and is off unless `MCP_STDIO=true`; it has no credential, so it acts on the instance the panel selected.
 
 Running the binary directly needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and `EVOLUTION_API_KEY`. These are backend configuration: an MCP client never sees them.
 

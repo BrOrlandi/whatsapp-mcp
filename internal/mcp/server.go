@@ -27,6 +27,9 @@ type Index interface {
 	ListChats(context.Context, string, string, int) ([]store.Chat, error)
 	Messages(context.Context, string, store.MessageQuery) ([]store.Message, error)
 	OldestMessage(context.Context, string, string) (store.Message, error)
+	IndexGaps(context.Context, string, time.Duration, int) ([]store.Gap, error)
+	GapAnchors(context.Context, string, string, time.Time, int) ([]store.Message, error)
+	ChatsWithoutAnchor(context.Context, string, time.Time) (int64, error)
 	RawMessage(context.Context, string, string) ([]byte, error)
 }
 

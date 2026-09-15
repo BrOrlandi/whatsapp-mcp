@@ -144,6 +144,7 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /chaves/revogar", a.revokeKey)
 	mux.Handle("GET /assets/", assetHandler())
 	mux.HandleFunc("GET /api/selected-instance", a.selectedJSON)
+	mux.HandleFunc("GET /api/progresso", a.progress)
 	return securityHeaders(mux)
 }
 
@@ -390,6 +391,26 @@ type connectPage struct {
 	InstanceName string
 	Endpoint     string
 	Keys         []store.APIKey
+	// HasKey and ClientConnected drive the checklist. They are facts the panel
+	// already holds rather than a stored notion of progress: a key exists or it
+	// does not, and a key that has been used proves a client authenticated with
+	// it. Revoking the last key therefore reopens the first step on its own.
+	HasKey          bool
+	ClientConnected bool
+	LastUse         time.Time
+	Setup           clientSetup
+	Prompts         []string
+}
+
+// suggestedPrompts are starting points that exercise the tools people reach for
+// first. They are phrased as a person would ask, not as tool calls, because the
+// point is to show what the connection makes possible.
+var suggestedPrompts = []string{
+	"Qual é o número de telefone conectado no meu WhatsApp?",
+	"Liste minhas 10 conversas mais recentes do WhatsApp.",
+	"Me resuma a conversa do WhatsApp com o João da Silva de hoje.",
+	"Procure no meu WhatsApp as mensagens que falam sobre contrato.",
+	"Quais grupos do WhatsApp eu participo? Quem são os administradores do maior deles?",
 }
 
 func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
@@ -406,6 +427,14 @@ func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
 		Endpoint:     a.endpoint(),
 	}
 	page.Keys, _ = a.store.ListAPIKeys(r.Context())
+	page.Setup = newClientSetup(page.Endpoint, "")
+	page.Prompts = suggestedPrompts
+	page.HasKey = len(page.Keys) > 0
+	for _, key := range page.Keys {
+		if key.LastUsedAt.After(page.LastUse) {
+			page.LastUse, page.ClientConnected = key.LastUsedAt, true
+		}
+	}
 	a.render(w, "conectar", page)
 }
 
@@ -682,7 +711,12 @@ var templateFuncs = template.FuncMap{
 	"relativeSince": relativeSince,
 	"plural":        plural,
 	"count":         count,
+	"len64":         len64,
 }
+
+// len64 gives templates a length the counters can consume, since plural counts
+// in int64 and the template package has no conversion of its own.
+func len64(values []store.APIKey) int64 { return int64(len(values)) }
 
 // plural keeps the counters readable. "1 eventos" is the kind of detail that
 // makes a panel look unfinished.

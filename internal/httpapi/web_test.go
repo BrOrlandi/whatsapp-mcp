@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -810,5 +811,114 @@ func TestCountAndPluralReadNaturally(t *testing.T) {
 		if got := count(quantity); got != want {
 			t.Errorf("count(%d) = %q, want %q", quantity, got, want)
 		}
+	}
+}
+
+// The checklist reflects facts the panel already holds rather than a stored
+// notion of progress, so revoking the last key reopens the first step on its
+// own and a key that has been used proves the client is configured.
+func TestConnectChecklistTracksTheRealState(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	// No key yet: the first step is open and asks for one.
+	page := fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "checklist empty", "Gerar nova chave")
+	mustNotContain(t, page, "checklist empty", `class="step step--done"`, "concluído")
+
+	// A key exists but was never used: step one is done, step two is not.
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"notebook"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	page = fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "checklist with key", `class="step step--done"`, "concluído", "1 chave ativa", "Gerar outra chave")
+	mustNotContain(t, page, "checklist with key", "Um cliente se autenticou")
+
+	// The key has been used: a client authenticated, so the remaining steps close.
+	repo.mu.Lock()
+	repo.keys[0].LastUsedAt = time.Now().Add(-5 * time.Minute)
+	repo.mu.Unlock()
+	page = fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "checklist used", "Um cliente se autenticou", "pronto")
+
+	// Revoking the last key reopens the first step without any extra bookkeeping.
+	r, err = client.PostForm(ts.URL+"/chaves/revogar", url.Values{"id": {"1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	page = fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "checklist after revoke", "Gerar nova chave")
+	mustNotContain(t, page, "checklist after revoke", `class="step step--done"`, "concluído")
+}
+
+// The connect page notices a client authenticating without a manual reload, so
+// the checklist has to be readable as data. It must say nothing beyond that.
+func TestProgressEndpointReportsTheChecklistAndNothingElse(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	read := func() map[string]any {
+		t.Helper()
+		r, err := client.Get(ts.URL + "/api/progresso")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d", r.StatusCode)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	state := read()
+	if state["has_key"] != false || state["client_connected"] != false {
+		t.Fatalf("empty state = %#v", state)
+	}
+
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"notebook"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if state = read(); state["has_key"] != true || state["client_connected"] != false {
+		t.Fatalf("with key = %#v", state)
+	}
+
+	repo.mu.Lock()
+	repo.keys[0].LastUsedAt = time.Now()
+	repo.mu.Unlock()
+	if state = read(); state["client_connected"] != true {
+		t.Fatalf("after use = %#v", state)
+	}
+	// The checklist is the whole payload: no credential, no instance, no prefix.
+	if len(state) != 2 {
+		t.Fatalf("progress leaked extra fields: %#v", state)
+	}
+
+	// It is a signed-in view like any other page.
+	anonymous, err := http.Get(ts.URL + "/api/progresso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anonymous.Body.Close()
+	if anonymous.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous status = %d", anonymous.StatusCode)
 	}
 }

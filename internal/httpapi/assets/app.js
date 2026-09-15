@@ -34,6 +34,37 @@
     );
   }
 
+  // While the checklist waits for a client to connect, ask the server whether
+  // it has. The server already knows: any authenticated MCP request stamps the
+  // key it was made with. Polling only runs while that step is open, and stops
+  // as soon as it closes, so an idle page costs nothing.
+  var waiting = document.querySelector("[data-progress][data-connected='false']");
+  if (waiting) {
+    var attempts = 0;
+    var timer = window.setInterval(function () {
+      attempts += 1;
+      // Give up after roughly ten minutes: by then the page is stale anyway and
+      // a reload is the honest way back.
+      if (attempts > 150) {
+        window.clearInterval(timer);
+        return;
+      }
+      fetch("/api/progresso", { headers: { Accept: "application/json" } })
+        .then(function (response) {
+          return response.ok ? response.json() : null;
+        })
+        .then(function (state) {
+          if (state && state.client_connected) {
+            window.clearInterval(timer);
+            window.location.reload();
+          }
+        })
+        .catch(function () {
+          /* A failed poll is not worth reporting: the next one may succeed. */
+        });
+    }, 4000);
+  }
+
   document.querySelectorAll("[data-copy]").forEach(function (block) {
     var source = block.querySelector("code") || block;
     var button = document.createElement("button");

@@ -14,18 +14,22 @@ import (
 )
 
 type fakeIndex struct {
-	selected  string
-	names     map[string]string
-	tokens    map[string]string
-	coverage  store.Coverage
-	chats     []store.Chat
-	messages  []store.Message
-	oldest    store.Message
-	oldestErr error
-	raw       []byte
-	rawErr    error
-	lastQuery store.MessageQuery
-	err       error
+	selected    string
+	names       map[string]string
+	tokens      map[string]string
+	coverage    store.Coverage
+	chats       []store.Chat
+	messages    []store.Message
+	oldest      store.Message
+	oldestErr   error
+	gaps        []store.Gap
+	anchors     []store.Message
+	anchorAfter time.Time
+	unreachable int64
+	raw         []byte
+	rawErr      error
+	lastQuery   store.MessageQuery
+	err         error
 }
 
 func (f *fakeIndex) SelectedInstance(context.Context) (string, error) { return f.selected, nil }
@@ -51,6 +55,16 @@ func (f *fakeIndex) Messages(_ context.Context, _ string, query store.MessageQue
 }
 func (f *fakeIndex) OldestMessage(context.Context, string, string) (store.Message, error) {
 	return f.oldest, f.oldestErr
+}
+func (f *fakeIndex) IndexGaps(context.Context, string, time.Duration, int) ([]store.Gap, error) {
+	return f.gaps, nil
+}
+func (f *fakeIndex) GapAnchors(_ context.Context, _ string, _ string, after time.Time, _ int) ([]store.Message, error) {
+	f.anchorAfter = after
+	return f.anchors, nil
+}
+func (f *fakeIndex) ChatsWithoutAnchor(context.Context, string, time.Time) (int64, error) {
+	return f.unreachable, nil
 }
 func (f *fakeIndex) RawMessage(context.Context, string, string) ([]byte, error) {
 	return f.raw, f.rawErr
@@ -164,6 +178,7 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 		"whatsapp_status", "list_chats", "get_chat_messages", "search_messages",
 		"list_contacts", "list_groups", "get_group",
 		"send_text_message", "send_media_message", "download_media", "sync_history",
+		"backfill_gap",
 	} {
 		if !strings.Contains(response, `"`+tool+`"`) {
 			t.Errorf("tools/list is missing %s", tool)
@@ -385,5 +400,120 @@ func TestStatusAnswersWhileDegraded(t *testing.T) {
 	problems := payload["problems"].([]any)
 	if len(problems) == 0 {
 		t.Fatalf("status hid the problems: %#v", payload)
+	}
+}
+
+// A hole in the index is entered from its far side: WhatsApp only answers with
+// messages older than one it already knows, so the anchor has to be the first
+// message that landed after the hole, not the last one before it.
+func TestBackfillGapAnchorsAfterTheHole(t *testing.T) {
+	gapSince := time.Date(2026, 9, 12, 1, 34, 0, 0, time.UTC)
+	gapUntil := time.Date(2026, 9, 15, 3, 0, 0, 0, time.UTC)
+	index := &fakeIndex{
+		gaps: []store.Gap{{Since: gapSince, Until: gapUntil}},
+		anchors: []store.Message{
+			{MessageID: "AFTER1", ChatJID: "a@s.whatsapp.net", SentAt: gapUntil},
+			{MessageID: "AFTER2", ChatJID: "g@g.us", IsGroup: true, SentAt: gapUntil.Add(time.Minute)},
+		},
+		unreachable: 298,
+	}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "backfill_gap", nil)
+	if isError {
+		t.Fatalf("backfill failed: %#v", payload)
+	}
+	if !index.anchorAfter.Equal(gapSince) {
+		t.Fatalf("anchors were looked for after %s, want the start of the hole %s", index.anchorAfter, gapSince)
+	}
+	if len(live.history) != 2 || live.history[0].MessageID != "AFTER1" || live.history[1].MessageID != "AFTER2" {
+		t.Fatalf("history requests = %+v", live.history)
+	}
+	if !live.history[1].IsGroup {
+		t.Fatal("the group anchor lost its group flag, which WhatsApp needs to resolve the chat")
+	}
+	if live.counts[0] != 100 {
+		t.Fatalf("count = %d, want the 100 default", live.counts[0])
+	}
+	// A repair that reached two conversations out of three hundred must not
+	// read as a repair of the whole index.
+	if unreachable, _ := payload["unreachable_chats"].(float64); unreachable != 298 {
+		t.Fatalf("unreachable_chats = %#v", payload["unreachable_chats"])
+	}
+}
+
+// Detection has to stand on its own: the caller may want to know a window was
+// lost without firing hundreds of history requests at WhatsApp.
+func TestBackfillGapDetectOnlyAsksForNothing(t *testing.T) {
+	index := &fakeIndex{
+		gaps:    []store.Gap{{Since: time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)}},
+		anchors: []store.Message{{MessageID: "AFTER1", ChatJID: "a@s.whatsapp.net"}},
+	}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "backfill_gap", map[string]any{"detect_only": true})
+	if isError {
+		t.Fatalf("detection failed: %#v", payload)
+	}
+	if len(live.history) != 0 {
+		t.Fatalf("detect_only asked WhatsApp for %d histories", len(live.history))
+	}
+	if payload["detected_gaps"] == nil || payload["repairing"] == nil {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+// A clean index must not invent a hole, because a false alarm sends the caller
+// chasing messages that were never sent.
+func TestBackfillGapStaysQuietWithoutAHole(t *testing.T) {
+	live := &fakeLive{}
+	server := testServer(&fakeIndex{}, live, nil)
+	payload, isError := call(t, server, "backfill_gap", nil)
+	if isError {
+		t.Fatalf("backfill failed: %#v", payload)
+	}
+	if len(live.history) != 0 {
+		t.Fatal("a clean index still triggered history requests")
+	}
+	if !strings.Contains(payload["note"].(string), "nothing looks lost") {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+// The whole point of detection: an empty period inside a known hole is unknown,
+// not quiet, and saying so is what stops "he sent nothing" from being a lie.
+func TestEmptyPeriodInsideAHoleIsReportedAsUnknown(t *testing.T) {
+	index := &fakeIndex{gaps: []store.Gap{{
+		Since: time.Date(2026, 9, 12, 1, 34, 0, 0, time.UTC),
+		Until: time.Date(2026, 9, 15, 3, 0, 0, 0, time.UTC),
+	}}}
+	server := testServer(index, &fakeLive{}, nil)
+
+	payload, isError := call(t, server, "get_chat_messages", map[string]any{
+		"chat_jid": "a@s.whatsapp.net",
+		"since":    "2026-09-14T00:00:00Z",
+		"until":    "2026-09-14T23:59:59Z",
+	})
+	if isError {
+		t.Fatalf("read failed: %#v", payload)
+	}
+	warning, _ := payload["warning"].(string)
+	if !strings.Contains(warning, "unknown rather than empty") {
+		t.Fatalf("an empty read inside a hole was reported bare: %#v", payload)
+	}
+	if payload["gap"] == nil {
+		t.Fatal("the hole itself was not reported")
+	}
+
+	// A period safely outside the hole must stay a plain empty answer.
+	payload, _ = call(t, server, "get_chat_messages", map[string]any{
+		"chat_jid": "a@s.whatsapp.net",
+		"since":    "2026-09-01T00:00:00Z",
+		"until":    "2026-09-02T00:00:00Z",
+	})
+	if payload["warning"] != nil {
+		t.Fatalf("a quiet period outside the hole was flagged: %#v", payload)
 	}
 }
