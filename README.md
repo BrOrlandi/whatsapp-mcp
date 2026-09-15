@@ -210,10 +210,13 @@ free to self-host for any noncommercial use. If it saves you time, you can
 support the work:
 
 <p align="center">
-  <a href="https://github.com/sponsors/BrOrlandi"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/%E2%9D%A4%20sponsor%20on%20github-monthly%20or%20one--off-0b6b5d?style=for-the-badge"></a>
+  <a href="https://donate.stripe.com/8x200jdhA6c1d375jF9Ve06"><img alt="Support the project" src="https://img.shields.io/badge/%E2%98%95%20support%20this%20project-pay%20what%20you%20want-0b6b5d?style=for-the-badge"></a>
+  <a href="https://github.com/sponsors/BrOrlandi"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/%E2%9D%A4%20sponsor%20on%20github-monthly-24292f?style=for-the-badge"></a>
 </p>
 
-One-off or recurring, any amount. It goes to the person writing the code.
+Pay what you want — the suggested amount is 10 dollars, and Stripe charges in
+your own currency. Or sponsor monthly on GitHub. Either way it goes to the
+person writing the code.
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Use it, modify it, self-host it and
