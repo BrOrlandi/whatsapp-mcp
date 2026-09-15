@@ -404,7 +404,9 @@ func TestPairPageRendersQRCodeAndSelfRefreshes(t *testing.T) {
 	}
 	ts, client := signedIn(t, repo, evo)
 	page := fetch(t, client, ts.URL+"/pair")
-	mustContain(t, page, "pair", `http-equiv="refresh"`, `src="data:image/png;base64,AAAA"`, "2@abc", "Dispositivos conectados")
+	mustContain(t, page, "pair", `http-equiv="refresh"`, `src="data:image/png;base64,AAAA"`, "Dispositivos conectados", `class="guide"`)
+	// The pairing code is for the camera, not for the operator to read.
+	mustNotContain(t, page, "pair", "2@abc")
 	if evo.tokens[len(evo.tokens)-1] != "tok" {
 		t.Fatalf("QR fetched with token %q", evo.tokens)
 	}
@@ -465,6 +467,38 @@ func TestInstanceActionsUseTheStoredToken(t *testing.T) {
 	}
 	if _, err := repo.InstanceToken(context.Background(), "one"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("token survived delete: %v", err)
+	}
+}
+
+// Every row removes itself, so the form names the instance and the selection
+// only moves when the removed instance was the one in use.
+func TestRemovingANamedInstanceLeavesTheSelectionAlone(t *testing.T) {
+	repo := newRepo()
+	for _, id := range []string{"one", "two"} {
+		if err := repo.SaveInstance(context.Background(), id, id, "tok-"+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{
+		{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected},
+		{ID: "two", Name: "Trabalho", Status: evolution.StatusDisconnected},
+	}}
+	ts, client := signedIn(t, repo, evo)
+
+	r, err := client.PostForm(ts.URL+"/instancias/remover", url.Values{"instance_id": {"two"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if _, err := repo.InstanceToken(context.Background(), "two"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("token survived delete: %v", err)
+	}
+	if repo.selected != "one" {
+		t.Fatalf("selection changed: %q", repo.selected)
+	}
+	if _, err := repo.InstanceToken(context.Background(), "one"); err != nil {
+		t.Fatalf("the instance in use was touched: %v", err)
 	}
 }
 
@@ -726,7 +760,23 @@ func TestPagesAreSeparateAndTheTabBarTracksThem(t *testing.T) {
 		body := fetch(t, client, ts.URL+page.path)
 		mustContain(t, body, page.path, page.heading, page.current, `href="/instancias"`, `href="/estado"`)
 		mustNotContain(t, body, page.path, page.absent...)
+		// The theme switch rides in the masthead, and the script that applies
+		// the choice loads before the first paint.
+		mustContain(t, body, page.path, "data-theme-select", `src="/assets/theme.js"`)
 	}
+}
+
+// The dark palette must reach both the system preference and an explicit pick,
+// or choosing a theme would only change half the page.
+func TestDarkPaletteServesBothTheSystemAndAnExplicitChoice(t *testing.T) {
+	repo := newRepo()
+	ts, client := signedIn(t, repo, &fakeEvolution{})
+	body := fetch(t, client, ts.URL+"/")
+	mustContain(t, body, "connect", "@media (prefers-color-scheme:dark){:root:not([data-theme=light])", ":root[data-theme=dark]{color-scheme:dark;")
+	if strings.Count(body, "--brand-ink:#04211b") != 2 {
+		t.Fatalf("the dark palette is not applied to both selectors")
+	}
+	mustNotContain(t, body, "connect", darkMarker)
 }
 
 // Creating something happens in a dialog, and the dialog is plain markup so it
@@ -744,9 +794,14 @@ func TestDialogsAreMarkupOnly(t *testing.T) {
 	mustContain(t, connect, "connect", `id="nova-chave"`, `href="#nova-chave"`, `action="/chaves"`, "required")
 
 	instances := fetch(t, client, ts.URL+"/instancias")
-	mustContain(t, instances, "instances", `id="nova-instancia"`, `id="remover-instancia"`, `id="encerrar-sessao"`, `action="/instancias"`)
+	mustContain(t, instances, "instances", `id="nova-instancia"`, `id="remover-0"`, `id="encerrar-sessao"`, `action="/instancias"`)
 	// Destructive actions must be confirmed rather than fired by a stray click.
 	mustContain(t, instances, "instances", "Remover a instância?", "Encerrar a sessão do WhatsApp?")
+	// The confirmation names the account it destroys, and the row that opens it
+	// carries the instance id, so neither depends on what is selected.
+	mustContain(t, instances, "instances", `href="#remover-0"`, `name="instance_id" value="one"`, "Pessoal")
+	// Slow forms say the click landed instead of looking idle.
+	mustContain(t, instances, "instances", `data-busy="Criando instância…"`, "data-busy-note")
 }
 
 // A key without a name is a key nobody can identify later, which is what made
@@ -788,6 +843,16 @@ func TestPanelServesItsOwnScript(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "clipboard") {
 		t.Fatalf("unexpected asset body: %s", body)
+	}
+	// The theme override ships the same way, from this origin.
+	theme, err := http.Get(ts.URL + "/assets/theme.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	themeBody, _ := io.ReadAll(theme.Body)
+	theme.Body.Close()
+	if theme.StatusCode != http.StatusOK || !strings.Contains(string(themeBody), "data-theme") {
+		t.Fatalf("theme asset status = %d body = %s", theme.StatusCode, themeBody)
 	}
 	// A directory listing would expose the layout of the embedded files.
 	listing, err := http.Get(ts.URL + "/assets/")

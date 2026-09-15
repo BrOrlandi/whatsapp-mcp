@@ -1,15 +1,39 @@
 package httpapi
 
-// pages holds every template the control panel renders.
+import "strings"
+
+// darkPalette is the panel in the dark theme. The same declarations serve two
+// selectors — the system preference and an explicit choice from the masthead —
+// so they live here once and are stitched into the stylesheet where the marker
+// sits, instead of being kept in sync by hand.
+const darkPalette = `
+--bg:#0a1513;--surface:#11211d;--surface-soft:#152b26;--surface-sunken:#0d1b18;--border:#23413a;--border-strong:#2f544b;
+--text:#e4f1ec;--muted:#93aca4;
+--brand:#2fc9a0;--brand-strong:#4adcb4;--brand-ink:#04211b;--brand-soft:#123029;
+--accent:#93b4ff;--accent-soft:#16224a;
+--danger:#ffaea7;--danger-bg:#361917;--danger-border:#67312e;
+--ok:#6fdcaa;--ok-bg:#0f3526;--ok-border:#1d5a40;
+--warn:#f2ce85;--warn-bg:#352a10;--off:#a4b9bf;--off-bg:#1a292d;
+--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+--shadow-lift:0 12px 40px rgba(0,0,0,.5);
+`
+
+// darkMarker is where the stylesheet asks for the dark palette.
+const darkMarker = "/*dark-palette*/"
+
+// pages is the stylesheet-complete template source the panel parses.
+var pages = strings.NewReplacer(darkMarker, darkPalette).Replace(pageSource)
+
+// pageSource holds every template the control panel renders.
 //
 // The panel is split by task rather than stacked on one screen: connecting a
 // client, managing instances and reading the service state are different jobs
 // done at different moments, and putting them on one page made the flow hard to
 // follow. Dialogs use the :target selector so creating something never needs
 // JavaScript to work.
-const pages = `
+const pageSource = `
 {{define "head"}}<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.Title}} · WhatsApp MCP</title><style>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="/assets/theme.js"></script>{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.Title}} · WhatsApp MCP</title><style>
 *,*::before,*::after{box-sizing:border-box}
 :root{
 color-scheme:light dark;
@@ -24,17 +48,9 @@ color-scheme:light dark;
 --shadow:0 1px 2px rgba(16,36,28,.06),0 8px 24px rgba(16,36,28,.06);
 --shadow-lift:0 12px 40px rgba(16,36,28,.18);
 }
-@media (prefers-color-scheme:dark){:root{
---bg:#0a1513;--surface:#11211d;--surface-soft:#152b26;--surface-sunken:#0d1b18;--border:#23413a;--border-strong:#2f544b;
---text:#e4f1ec;--muted:#93aca4;
---brand:#2fc9a0;--brand-strong:#4adcb4;--brand-ink:#04211b;--brand-soft:#123029;
---accent:#93b4ff;--accent-soft:#16224a;
---danger:#ffaea7;--danger-bg:#361917;--danger-border:#67312e;
---ok:#6fdcaa;--ok-bg:#0f3526;--ok-border:#1d5a40;
---warn:#f2ce85;--warn-bg:#352a10;--off:#a4b9bf;--off-bg:#1a292d;
---shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
---shadow-lift:0 12px 40px rgba(0,0,0,.5);
-}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){/*dark-palette*/}}
+:root[data-theme=light]{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark;/*dark-palette*/}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 h1,h2,h3{line-height:1.25;margin:0;color:var(--text)}
@@ -50,6 +66,11 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 /* ---- shell ---- */
 .shell{max-width:1000px;margin:0 auto;padding:0 clamp(16px,4vw,24px) 72px}
 .masthead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:20px 0 14px}
+.masthead__tools{display:flex;align-items:center;gap:8px}
+.theme{display:inline-flex}
+.theme[hidden]{display:none}
+.theme__select{appearance:none;-webkit-appearance:none;font:inherit;font-size:1rem;line-height:1;width:38px;height:38px;padding:0;text-align:center;text-align-last:center;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);cursor:pointer}
+.theme__select:hover{background:var(--surface-soft)}
 .brand{display:flex;align-items:center;gap:12px;min-width:0;text-decoration:none;color:inherit}
 .brand__mark{width:38px;height:38px;flex:none}
 .brand__mark svg{width:100%;height:100%;display:block}
@@ -137,6 +158,19 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 :where(a,button,input,summary):focus-visible{outline:3px solid var(--ring);outline-offset:2px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .actions--end{justify-content:flex-end}
+.btn[disabled]{cursor:progress;opacity:.72}
+.btn[disabled]:hover{background:var(--brand)}
+.btn[aria-disabled=true]{pointer-events:none;opacity:.45}
+.spinner{width:15px;height:15px;flex:none;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation-duration:2.4s}}
+.busy{display:flex;align-items:center;gap:10px;margin:14px 0 0;color:var(--muted);font-size:.88rem;line-height:1.5}
+.busy[hidden]{display:none}
+
+/* ---- numbered how-to list ---- */
+.guide{list-style:none;counter-reset:guide;margin:0;padding:0;display:grid;gap:9px}
+.guide li{position:relative;counter-increment:guide;padding-left:32px;line-height:1.5}
+.guide li::before{content:counter(guide);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:var(--brand-soft);color:var(--brand);font-size:.76rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
 
 /* ---- forms ---- */
 .field{display:block;margin:0 0 14px}
@@ -161,6 +195,11 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .row__title{font-weight:600;overflow-wrap:anywhere}
 .row__meta{display:block;font-weight:400;font-size:.84rem;color:var(--muted)}
 .row__label{display:flex;align-items:center;gap:11px;flex:1 1 220px;min-width:0;cursor:pointer}
+.row__remove{margin-left:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;text-decoration:none;color:var(--muted);font-size:.95rem;line-height:1;border:1px solid transparent}
+.row__remove:hover{background:var(--danger-bg);border-color:var(--danger-border);color:var(--danger)}
+.target{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:12px 14px;margin-bottom:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
+.target__name{font-weight:700;overflow-wrap:anywhere}
+.target__meta{color:var(--muted);font-size:.88rem;overflow-wrap:anywhere}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
 /* ---- facts ---- */
@@ -221,11 +260,19 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 
 {{define "foot"}}<script src="/assets/app.js" defer></script></div></body></html>{{end}}
 
+{{define "themeswitch"}}<span class="theme" hidden data-theme-switch>
+<select class="theme__select" aria-label="Tema da interface" data-theme-select>
+<option value="system" title="Seguir o sistema">◐</option>
+<option value="light" title="Tema claro">☀</option>
+<option value="dark" title="Tema escuro">☾</option>
+</select></span>{{end}}
+
 {{define "brandmark"}}<span class="brand__mark">{{logo}}</span><span class="brand__name">WhatsApp MCP<span class="brand__tagline">Painel de controle</span></span>{{end}}
 
 {{define "nav"}}
 <header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
-<form method="post" action="/logout"><button class="btn btn--quiet" type="submit">Sair</button></form></header>
+<div class="masthead__tools">{{template "themeswitch"}}
+<form method="post" action="/logout"><button class="btn btn--quiet" type="submit">Sair</button></form></div></header>
 <nav class="nav" aria-label="Seções">
 <a href="/"{{if eq .Active "conectar"}} aria-current="page"{{end}}>Conectar</a>
 <a href="/instancias"{{if eq .Active "instancias"}} aria-current="page"{{end}}>Instâncias</a>
@@ -402,14 +449,15 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{else if .Instances}}
 <form method="post" action="/instancias/selecionar">
 <ul class="rows">
-{{range .Instances}}<li class="row{{if .Selected}} row--on{{end}}">
+{{range $i, $inst := .Instances}}<li class="row{{if .Selected}} row--on{{end}}">
 <label class="row__label" for="instance-{{.ID}}">
 <input id="instance-{{.ID}}" type="radio" name="instance_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
 <span class="row__main"><span class="row__title">{{.Name}}</span>{{if .Number}}<span class="row__meta mono">{{.Number}}</span>{{end}}</span>
 </label>
 <span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
 {{if .Selected}}<span class="pill pill--ok pill--plain">Em uso pelo MCP</span>{{end}}
-{{if not .Managed}}<span class="pill pill--off pill--plain">Sem credenciais aqui</span>{{end}}
+{{if .Managed}}<a class="row__remove" href="#remover-{{$i}}" title="Remover esta instância" aria-label="Remover a instância {{.Name}}"><span aria-hidden="true">✕</span></a>
+{{else}}<span class="pill pill--off pill--plain">Sem credenciais aqui</span>{{end}}
 </li>{{end}}
 </ul>
 <div class="actions" style="margin-top:14px"><button class="btn" type="submit">Usar a selecionada</button></div>
@@ -446,8 +494,8 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <h3>Zona de risco</h3>
 <div class="actions" style="margin-top:10px">
 <a class="btn btn--danger btn--small" href="#encerrar-sessao">Encerrar sessão do WhatsApp</a>
-<a class="btn btn--danger btn--small" href="#remover-instancia">Remover instância</a>
 </div>
+<p class="muted">Para apagar uma instância, use o ✕ na linha dela, na lista acima.</p>
 </div>
 </div></section>
 {{end}}
@@ -456,12 +504,13 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <div class="dialog">
 <div class="dialog__head"><h2 id="nova-instancia-titulo">Adicionar instância</h2><a class="dialog__close" href="#" aria-label="Fechar">×</a></div>
 <div class="dialog__body">
-<form method="post" action="/instancias">
+<form method="post" action="/instancias" data-busy="Criando instância…">
 <label class="field" for="new-instance"><span class="field__label">Nome da instância</span>
 <span class="field__hint">Só para você identificar a conta. Ex.: “pessoal”, “trabalho”.</span></label>
 <input id="new-instance" type="text" name="name" maxlength="60" required placeholder="pessoal" autocapitalize="none" spellcheck="false">
 <p class="muted">Depois de criar, o painel abre o QR code para você parear o WhatsApp.</p>
 <div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn" type="submit">Criar e parear</button></div>
+<p class="busy" data-busy-note role="status" hidden>Criando a instância no WhatsApp. Isso leva alguns segundos; o painel abre o QR code assim que ela estiver pronta.</p>
 </form>
 </div></div></div>
 
@@ -474,14 +523,25 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <form method="post" action="/instancias/sair"><div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn btn--danger" type="submit">Encerrar sessão</button></div></form>
 </div></div></div>
 
-<div class="overlay" id="remover-instancia" role="dialog" aria-modal="true" aria-labelledby="remover-titulo">
+{{range $i, $inst := .Instances}}{{if .Managed}}
+<div class="overlay" id="remover-{{$i}}" role="dialog" aria-modal="true" aria-labelledby="remover-{{$i}}-titulo">
 <div class="dialog">
-<div class="dialog__head"><h2 id="remover-titulo">Remover a instância?</h2><a class="dialog__close" href="#" aria-label="Fechar">×</a></div>
+<div class="dialog__head"><h2 id="remover-{{$i}}-titulo">Remover a instância?</h2><a class="dialog__close" href="#" aria-label="Fechar">×</a></div>
 <div class="dialog__body">
-<p>A instância é apagada e o WhatsApp é desconectado. As chaves de API emitidas para ela param de funcionar.</p>
+<div class="target">
+<span class="target__name">{{.Name}}</span>
+{{if .Number}}<span class="target__meta mono">{{.Number}}</span>{{else}}<span class="target__meta">Sem número: ainda não pareada.</span>{{end}}
+<span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
+</div>
+<p>Esta instância é apagada e o WhatsApp é desconectado. As chaves de API emitidas para ela param de funcionar.</p>
 <p class="muted">As mensagens já indexadas continuam no banco.</p>
-<form method="post" action="/instancias/remover"><div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn btn--danger" type="submit">Remover instância</button></div></form>
+<form method="post" action="/instancias/remover" data-busy="Removendo…">
+<input type="hidden" name="instance_id" value="{{.ID}}">
+<div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn btn--danger" type="submit">Remover instância</button></div>
+<p class="busy" data-busy-note role="status" hidden>Removendo a instância no WhatsApp.</p>
+</form>
 </div></div></div>
+{{end}}{{end}}
 {{template "foot"}}{{end}}
 
 {{define "estado"}}{{template "head" .}}{{template "nav" .}}
@@ -535,12 +595,17 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <div class="card__head"><h2>QR code</h2><span class="pill pill--warn">Aguardando leitura</span></div>
 <div class="card__body stack">
 {{if .QRCode}}
-<p>No celular: <strong>WhatsApp → Dispositivos conectados → Conectar um dispositivo</strong>, e aponte a câmera para o código.</p>
+<ol class="guide">
+<li>Abra o <strong>WhatsApp</strong> no celular.</li>
+<li>Toque em <strong>Configurações</strong> (no Android, o menu <strong>⋮</strong>).</li>
+<li>Toque em <strong>Dispositivos conectados</strong>.</li>
+<li>Toque em <strong>Conectar um dispositivo</strong>.</li>
+<li>Aponte a câmera para o QR code abaixo.</li>
+</ol>
 <img class="qrcode" src="{{.QRCode}}" alt="QR code para conectar o WhatsApp" width="250" height="250">
 {{else}}
 <div class="empty"><p class="empty__title">Aguardando o QR code</p><p class="muted">{{.Notice}}</p></div>
 {{end}}
-{{with .Code}}<p class="muted">Código: <code>{{.}}</code></p>{{end}}
 <p class="muted">Esta página se atualiza sozinha a cada 5 segundos. O código expira rápido; se sumir, gere outro.</p>
 <div class="actions">
 <form method="post" action="/instancias/conectar"><button class="btn btn--ghost" type="submit">Gerar outro código</button></form>

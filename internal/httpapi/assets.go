@@ -10,6 +10,7 @@ import (
 // also what lets the content security policy stay at 'self'.
 //
 //go:embed assets/app.js
+//go:embed assets/theme.js
 var assets embed.FS
 
 // assetHandler serves the embedded files.

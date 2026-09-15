@@ -65,6 +65,46 @@
     }, 4000);
   }
 
+  // Some of these forms wait on WhatsApp: creating an instance only answers
+  // once Evolution has the session up, which is several seconds of a page that
+  // looks idle. People read that as a dead click and press the button again,
+  // which creates a second instance. Marking the form busy says the click
+  // landed. The page still works without this file: the button is a plain
+  // submit and the browser's own progress bar is the fallback.
+  document.querySelectorAll("form[data-busy]").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      if (form.dataset.state === "busy") {
+        event.preventDefault();
+        return;
+      }
+      form.dataset.state = "busy";
+      form.setAttribute("aria-busy", "true");
+      var note = form.querySelector("[data-busy-note]");
+      if (note) {
+        note.hidden = false;
+      }
+      var button = form.querySelector("button[type=submit]") || form.querySelector("button");
+      // Disabling happens after this handler returns: a control disabled
+      // during the submit event can be left out of the request body, and the
+      // fields are what the server is being asked about.
+      window.setTimeout(function () {
+        form.querySelectorAll("a.btn").forEach(function (link) {
+          link.setAttribute("aria-disabled", "true");
+          link.tabIndex = -1;
+        });
+        if (!button) {
+          return;
+        }
+        button.disabled = true;
+        button.textContent = form.getAttribute("data-busy") || "Aguarde";
+        var spinner = document.createElement("span");
+        spinner.className = "spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        button.insertBefore(spinner, button.firstChild);
+      }, 0);
+    });
+  });
+
   document.querySelectorAll("[data-copy]").forEach(function (block) {
     var source = block.querySelector("code") || block;
     var button = document.createElement("button");

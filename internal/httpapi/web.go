@@ -555,8 +555,8 @@ func (a *webApp) selectInstance(w http.ResponseWriter, r *http.Request) {
 // code moves the operator forward without any client-side scripting.
 type pairPageData struct {
 	layout
-	Name, Code, Notice string
-	QRCode             template.URL
+	Name, Notice string
+	QRCode       template.URL
 }
 
 // qrImageSource accepts the QR only as the inline PNG data URI Evolution is
@@ -598,8 +598,8 @@ func (a *webApp) pairPage(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		page.Notice = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
 	default:
-		page.QRCode, page.Code = qrImageSource(code.Image), code.Code
-		if page.QRCode == "" && page.Code == "" {
+		page.QRCode = qrImageSource(code.Image)
+		if page.QRCode == "" {
 			page.Notice = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
 		}
 	}
@@ -642,30 +642,45 @@ func (a *webApp) instanceAction(w http.ResponseWriter, r *http.Request, destinat
 	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
 
+// deleteInstance removes the instance the form names, and the one in use when
+// it names none. Naming it is what lets every row carry its own remove button:
+// the operator removes the account they pointed at, not whatever happened to be
+// selected, and the confirmation can say which account that is.
 func (a *webApp) deleteInstance(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
 	selected, err := a.store.SelectedInstance(r.Context())
-	if err != nil || selected == "" {
+	if err != nil {
+		a.fail(w, r, "/instancias", "Não foi possível ler a instância em uso.")
+		return
+	}
+	target := strings.TrimSpace(r.FormValue("instance_id"))
+	if target == "" {
+		target = selected
+	}
+	if target == "" {
 		a.fail(w, r, "/instancias", "Nenhuma instância selecionada.")
 		return
 	}
-	if _, err := a.store.InstanceToken(r.Context(), selected); err != nil {
-		a.fail(w, r, "/instancias", "Este painel não gerencia a instância selecionada.")
+	if _, err := a.store.InstanceToken(r.Context(), target); err != nil {
+		a.fail(w, r, "/instancias", "Este painel não gerencia essa instância.")
 		return
 	}
-	if err := a.evolution.DeleteInstance(r.Context(), selected); err != nil {
+	if err := a.evolution.DeleteInstance(r.Context(), target); err != nil {
 		a.fail(w, r, "/instancias", "O WhatsApp recusou a remoção: "+err.Error())
 		return
 	}
-	if err := a.store.ForgetInstance(r.Context(), selected); err != nil {
+	if err := a.store.ForgetInstance(r.Context(), target); err != nil {
 		a.fail(w, r, "/instancias", "A instância foi removida, mas o registro local permaneceu.")
 		return
 	}
-	if err := a.store.SelectInstance(r.Context(), ""); err != nil {
-		a.fail(w, r, "/instancias", "A instância foi removida, mas a seleção não foi limpa.")
-		return
+	// Only the instance in use leaves the MCP without a selection.
+	if target == selected {
+		if err := a.store.SelectInstance(r.Context(), ""); err != nil {
+			a.fail(w, r, "/instancias", "A instância foi removida, mas a seleção não foi limpa.")
+			return
+		}
 	}
 	http.Redirect(w, r, "/instancias", http.StatusSeeOther)
 }
