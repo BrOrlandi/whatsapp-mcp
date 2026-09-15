@@ -1,4 +1,13 @@
+# Secrets and local configuration.
 .env
-*.log
+
+# Build output. The gateway is built from source or pulled as an image; a
+# committed binary is 19 MB of noise that goes stale on the next commit.
+/whatsapp-mcp
 bin/
+*.log
+
+# Agent and tooling scratch directories.
+.hermes/
 .playwright-mcp/
+.claude/

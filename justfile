@@ -137,7 +137,7 @@ dev-remote:
     go run ./cmd/whatsapp-mcp
 
 # Abre o túnel SSH até a Evolution do servidor. Deixe rodando em outro terminal.
-tunnel host="ubuntu@example.com":
+tunnel host=env_var_or_default("TUNNEL_HOST", "ubuntu@example.com"):
     ./scripts/evolution-tunnel.sh {{host}} {{tunnel_port}}
 
 # Sobe só o painel, com dados falsos: para mexer em layout e texto.

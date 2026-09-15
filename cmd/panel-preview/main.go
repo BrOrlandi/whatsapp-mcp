@@ -34,8 +34,10 @@ func (f *fakeStore) Admin(context.Context) (string, string, error) {
 func (f *fakeStore) CreateAdmin(context.Context, string, string) error {
 	return httpapi.ErrAdminExists
 }
-func (f *fakeStore) SelectedInstance(context.Context) (string, error) { return "inst-1", nil }
-func (f *fakeStore) SelectInstance(context.Context, string) error     { return nil }
+func (f *fakeStore) AdminMustChangePassword(context.Context) (bool, error) { return false, nil }
+func (f *fakeStore) SetAdminPassword(context.Context, string) error        { return nil }
+func (f *fakeStore) SelectedInstance(context.Context) (string, error)      { return "inst-1", nil }
+func (f *fakeStore) SelectInstance(context.Context, string) error          { return nil }
 func (f *fakeStore) SaveInstance(context.Context, string, string, string) error {
 	return nil
 }
@@ -96,7 +98,7 @@ func main() {
 	state := health.NewState()
 	state.SetDependencies(true, true, true)
 	state.MarkEvent(time.Now().Add(-40 * time.Second))
-	state.SetWhatsApp("connected", "", "5511999999999@s.whatsapp.net", "Bruno Orlandi")
+	state.SetWhatsApp("connected", "", "5511999999999@s.whatsapp.net", "Fulano de Tal")
 	for _, q := range []string{"message", "sendmessage", "historysync", "connected", "disconnected", "loggedout", "pairsuccess", "connectfailure", "temporaryban"} {
 		state.SetQueueConsuming(q, true, "")
 		state.MarkQueueEvent(q, time.Now().Add(-2*time.Minute), false)

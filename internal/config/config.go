@@ -19,6 +19,11 @@ type Config struct {
 	FreshnessWindow    time.Duration
 	StatusPollInterval time.Duration
 	StdioEnabled       bool
+	// The installer has to create the first administrator without a person at a
+	// keyboard. Both are read once at start and never stored anywhere but the
+	// hashed password in PostgreSQL.
+	BootstrapAdminUser     string
+	BootstrapAdminPassword string
 }
 
 func Load() Config {
@@ -26,7 +31,7 @@ func Load() Config {
 		ListenAddr: env("LISTEN_ADDR", ":8080"),
 		// The address clients reach this gateway at. It is not a secret; it is
 		// what the panel prints in the ready-to-paste client configuration.
-		PublicURL:          env("PUBLIC_URL", "https://whatsapp-mcp.example.com"),
+		PublicURL:          env("PUBLIC_URL", "http://127.0.0.1:8080"),
 		EvolutionURL:       env("EVOLUTION_URL", "http://evolution-go:4000"),
 		EvolutionAPIKey:    os.Getenv("EVOLUTION_API_KEY"),
 		EvolutionTimeout:   duration("EVOLUTION_TIMEOUT", 5*time.Second),
@@ -38,7 +43,9 @@ func Load() Config {
 		// The stdio transport is a local development convenience. The supported
 		// path is the authenticated HTTP endpoint, so stdio stays off unless asked
 		// for: a server process reading stdin has no client on the other end.
-		StdioEnabled: os.Getenv("MCP_STDIO") == "true",
+		StdioEnabled:           os.Getenv("MCP_STDIO") == "true",
+		BootstrapAdminUser:     env("BOOTSTRAP_ADMIN_USER", "admin"),
+		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 	}
 }
 
