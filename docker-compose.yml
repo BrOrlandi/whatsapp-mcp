@@ -1,3 +1,11 @@
+# Self-contained stack: Evolution Go, its PostgreSQL, RabbitMQ, MinIO, the
+# gateway's own PostgreSQL, and the gateway. Host-agnostic on purpose: it
+# publishes the panel on loopback and knows nothing about a reverse proxy.
+#
+# The project name is pinned so the named volumes keep their identity no matter
+# which directory or overlay file Compose is invoked from.
+name: whatsapp-mcp
+
 services:
   postgres-evolution:
     image: postgres:17.6-alpine3.22
@@ -107,7 +115,7 @@ services:
     stdin_open: true
     environment:
       LISTEN_ADDR: :8080
-      PUBLIC_URL: ${PUBLIC_URL:-https://whatsapp-mcp.example.com}
+      PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
       EVOLUTION_URL: http://evolution-go:4000
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-5s}
@@ -115,18 +123,17 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-whatsapp}
       DATABASE_URL: postgres://${MCP_DB_USER}:${MCP_DB_PASSWORD}@postgres-mcp:5432/${MCP_DB_NAME:-whatsapp_mcp}?sslmode=disable
       FRESHNESS_WINDOW: ${FRESHNESS_WINDOW:-5m}
-    expose:
-      - "8080"
-    networks:
-      - default
-      - dokploy-network
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=dokploy-network
-      - traefik.http.routers.whatsapp-mcp.rule=Host(`whatsapp-mcp.example.com`)
-      - traefik.http.routers.whatsapp-mcp.entrypoints=web-secure
-      - traefik.http.routers.whatsapp-mcp.tls.certresolver=letsencrypt
-      - traefik.http.services.whatsapp-mcp.loadbalancer.server.port=8080
+      # Set by the installer so the first administrator exists before the panel
+      # is reachable. Empty means the panel asks for one on first visit, which
+      # is right for a loopback install and wrong for a public one.
+      BOOTSTRAP_ADMIN_USER: ${BOOTSTRAP_ADMIN_USER:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    # Bound to loopback by default: the panel has no business facing the
+    # internet directly. Put a TLS-terminating reverse proxy in front of it and
+    # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens
+    # it to the network, which only makes sense on a host nobody else reaches.
+    ports:
+      - "${PANEL_BIND:-127.0.0.1}:${PANEL_PORT:-8080}:8080"
     depends_on:
       postgres-mcp: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
@@ -144,7 +151,3 @@ volumes:
   rabbitmq_data:
   minio_data:
   postgres_mcp_data:
-
-networks:
-  dokploy-network:
-    external: true

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BrOrlandi/whatsapp-mcp/internal/auth"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/config"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
@@ -34,6 +35,22 @@ func main() {
 	defer db.Close()
 	state := health.NewState()
 	state.SetDatabase(true)
+
+	// An unattended installer creates the administrator here rather than leaving
+	// the panel's first-run form exposed on a public address, where whoever
+	// reaches it first would own the WhatsApp session. It is a no-op once an
+	// administrator exists, so re-running the installer changes nothing.
+	if cfg.BootstrapAdminPassword != "" {
+		hash, err := auth.HashPassword(cfg.BootstrapAdminPassword)
+		if err != nil {
+			logger.Error("hash bootstrap password", "error", err)
+			os.Exit(1)
+		}
+		if err := db.BootstrapAdmin(ctx, cfg.BootstrapAdminUser, hash); err != nil {
+			logger.Error("create bootstrap administrator", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	// The message index is a projection of the stored events, so a decoder fix
 	// repairs the past instead of leaving it unreadable. This checks on every

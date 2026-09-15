@@ -53,7 +53,24 @@ func (s *Store) Admin(ctx context.Context) (string, string, error) {
 }
 
 func (s *Store) CreateAdmin(ctx context.Context, username, hash string) error {
-	result, err := s.DB.ExecContext(ctx, `INSERT INTO control_panel_admin(singleton,username,password_hash) VALUES(TRUE,$1,$2) ON CONFLICT(singleton) DO NOTHING`, username, hash)
+	return s.createAdmin(ctx, username, hash, false)
+}
+
+// BootstrapAdmin creates the administrator non-interactively, for an installer
+// that has to invent the first password. The account is marked as needing a
+// password change, because a password printed to a terminal by a script is not
+// one the operator chose. It does nothing if an administrator already exists,
+// which is what makes re-running an installer safe.
+func (s *Store) BootstrapAdmin(ctx context.Context, username, hash string) error {
+	err := s.createAdmin(ctx, username, hash, true)
+	if errors.Is(err, ErrAdminExists) {
+		return nil
+	}
+	return err
+}
+
+func (s *Store) createAdmin(ctx context.Context, username, hash string, mustChange bool) error {
+	result, err := s.DB.ExecContext(ctx, `INSERT INTO control_panel_admin(singleton,username,password_hash,must_change_password) VALUES(TRUE,$1,$2,$3) ON CONFLICT(singleton) DO NOTHING`, username, hash, mustChange)
 	if err != nil {
 		return err
 	}
@@ -65,6 +82,24 @@ func (s *Store) CreateAdmin(ctx context.Context, username, hash string) error {
 		return ErrAdminExists
 	}
 	return nil
+}
+
+// AdminMustChangePassword reports whether the panel should refuse to do
+// anything else until the password is replaced.
+func (s *Store) AdminMustChangePassword(ctx context.Context) (bool, error) {
+	var must bool
+	err := s.DB.QueryRowContext(ctx, `SELECT must_change_password FROM control_panel_admin WHERE singleton=TRUE`).Scan(&must)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return must, err
+}
+
+// SetAdminPassword replaces the password and clears the rotation flag, which
+// are the same event and must not be able to happen separately.
+func (s *Store) SetAdminPassword(ctx context.Context, hash string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE control_panel_admin SET password_hash=$1, must_change_password=FALSE WHERE singleton=TRUE`, hash)
+	return err
 }
 
 func (s *Store) SelectedInstance(ctx context.Context) (string, error) {

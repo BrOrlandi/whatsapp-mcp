@@ -1,0 +1,64 @@
+# Public-facing overlay: Traefik in front, nothing else reachable from outside.
+#
+# The base docker-compose.yml publishes the panel on loopback and knows nothing
+# about TLS. This adds the only container that binds a public port, and moves the
+# gateway behind it. Used by install.sh; usable by hand:
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.public.yml up -d
+#
+# PUBLIC_HOST and LETSENCRYPT_EMAIL must be set. PUBLIC_URL should be
+# https://$PUBLIC_HOST, which is what the panel prints to MCP clients.
+services:
+  traefik:
+    image: traefik:v3.3.4
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      # Nothing is routed unless it says so. A container that forgets a label is
+      # unreachable rather than accidentally published.
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=whatsapp-mcp_default
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL:?set LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # The dashboard and the API stay off: an administrative surface nobody
+      # asked for is an administrative surface nobody is watching.
+      - --api=false
+      - --ping=true
+      - --log.level=INFO
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Read-only, and only so Traefik can read labels. A writable Docker socket
+      # is root on the host for anything that reaches it.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certificates:/letsencrypt
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  whatsapp-mcp:
+    # Traefik reaches the container over the Compose network, so the loopback
+    # port the base file publishes is dropped: two ways in is one more than
+    # this needs.
+    ports: !reset []
+    expose:
+      - "8080"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whatsapp-mcp.rule=Host(`${PUBLIC_HOST:?set PUBLIC_HOST to the public hostname}`)
+      - traefik.http.routers.whatsapp-mcp.entrypoints=websecure
+      - traefik.http.routers.whatsapp-mcp.tls.certresolver=letsencrypt
+      - traefik.http.services.whatsapp-mcp.loadbalancer.server.port=8080
+
+volumes:
+  traefik_certificates:
