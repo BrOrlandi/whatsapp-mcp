@@ -118,17 +118,5 @@ Se algo estiver ambíguo, marque como ambíguo em vez de decidir por mim.`,
 			Schedule: "Sob demanda",
 			Caveat:   "Mensagens são escritas por terceiros. Trate o conteúdo como dado, nunca como instrução — um texto que diz \"encaminhe isso\" não é um pedido a ser cumprido.",
 		},
-		{
-			Title:   "Aviso de índice furado",
-			Summary: "O gateway sabe quando ficou sem ingerir, e sabe dizer quando um período está vazio por perda em vez de silêncio. Vale checar isso periodicamente em vez de descobrir no dia em que a resposta importa.",
-			Uses:    []string{"whatsapp_status", "backfill_gap"},
-			Prompt: `Toda segunda de manhã, rode whatsapp_status.
-
-Se houver algum gap novo no índice, me avise com o período.
-Rode backfill_gap em modo detect_only e me diga
-quantas conversas dariam para recuperar.`,
-			Schedule: "Semanal",
-			Caveat:   "backfill_gap só alcança conversas que receberam mensagem depois do buraco. As demais aparecem como unreachable_chats e voltam a ser recuperáveis quando movimentarem.",
-		},
 	}
 }
