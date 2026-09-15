@@ -107,6 +107,21 @@ com get_poll_results e me diga a contagem.`,
 			Caveat:   "Sem guardar o message_id não há como apurar. Peça ao assistente para anotá-lo junto com a tarefa de leitura.",
 		},
 		{
+			Title:   "Resumo do dia de um grupo",
+			Summary: "Um grupo movimentado acumula centenas de mensagens que ninguém vai ler de cima a baixo. Pegar o dia inteiro e devolver o que importa é uma chamada de leitura mais um pedido de síntese.",
+			Uses:    []string{"list_groups", "get_chat_messages"},
+			Prompt: `Pegue as mensagens de hoje do grupo [nome] e me resuma.
+
+Quero: os assuntos que apareceram, o que ficou decidido,
+o que ficou em aberto e qualquer coisa endereçada a mim.
+
+Cite quem disse o quê nos pontos que importam.
+Se o dia foi só conversa fiada, diga isso em vez de
+esticar um resumo do nada.`,
+			Schedule: "Fim do dia, ou sob demanda",
+			Caveat:   "Use get_chat_messages com since e until do dia e order oldest, para ler em ordem cronológica. Áudio e imagem entram sem texto, então o resumo vai ter buracos onde a conversa foi por voz — peça para marcar isso em vez de fingir que não existiu.",
+		},
+		{
 			Title:   "Arquivo do que foi combinado",
 			Summary: "Transforma uma conversa longa em uma lista de compromissos, com quem prometeu o quê e quando.",
 			Uses:    []string{"get_chat_messages", "search_messages"},

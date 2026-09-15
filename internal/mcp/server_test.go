@@ -296,7 +296,7 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 		"whatsapp_status", "list_chats", "get_chat_messages", "search_messages",
 		"list_contacts", "list_groups", "get_group",
 		"send_text_message", "send_media_message", "download_media", "sync_history",
-		"backfill_gap", "delete_message", "edit_message", "react_to_message",
+		"delete_message", "edit_message", "react_to_message",
 		"check_numbers", "get_profile_picture", "send_location", "send_contact",
 		"send_poll", "get_poll_results", "organise_chat",
 	} {
@@ -520,85 +520,6 @@ func TestStatusAnswersWhileDegraded(t *testing.T) {
 	problems := payload["problems"].([]any)
 	if len(problems) == 0 {
 		t.Fatalf("status hid the problems: %#v", payload)
-	}
-}
-
-// A hole in the index is entered from its far side: WhatsApp only answers with
-// messages older than one it already knows, so the anchor has to be the first
-// message that landed after the hole, not the last one before it.
-func TestBackfillGapAnchorsAfterTheHole(t *testing.T) {
-	gapSince := time.Date(2026, 9, 12, 1, 34, 0, 0, time.UTC)
-	gapUntil := time.Date(2026, 9, 15, 3, 0, 0, 0, time.UTC)
-	index := &fakeIndex{
-		gaps: []store.Gap{{Since: gapSince, Until: gapUntil}},
-		anchors: []store.Message{
-			{MessageID: "AFTER1", ChatJID: "a@s.whatsapp.net", SentAt: gapUntil},
-			{MessageID: "AFTER2", ChatJID: "g@g.us", IsGroup: true, SentAt: gapUntil.Add(time.Minute)},
-		},
-		unreachable: 298,
-	}
-	live := &fakeLive{}
-	server := testServer(index, live, nil)
-
-	payload, isError := call(t, server, "backfill_gap", nil)
-	if isError {
-		t.Fatalf("backfill failed: %#v", payload)
-	}
-	if !index.anchorAfter.Equal(gapSince) {
-		t.Fatalf("anchors were looked for after %s, want the start of the hole %s", index.anchorAfter, gapSince)
-	}
-	if len(live.history) != 2 || live.history[0].MessageID != "AFTER1" || live.history[1].MessageID != "AFTER2" {
-		t.Fatalf("history requests = %+v", live.history)
-	}
-	if !live.history[1].IsGroup {
-		t.Fatal("the group anchor lost its group flag, which WhatsApp needs to resolve the chat")
-	}
-	if live.counts[0] != 100 {
-		t.Fatalf("count = %d, want the 100 default", live.counts[0])
-	}
-	// A repair that reached two conversations out of three hundred must not
-	// read as a repair of the whole index.
-	if unreachable, _ := payload["unreachable_chats"].(float64); unreachable != 298 {
-		t.Fatalf("unreachable_chats = %#v", payload["unreachable_chats"])
-	}
-}
-
-// Detection has to stand on its own: the caller may want to know a window was
-// lost without firing hundreds of history requests at WhatsApp.
-func TestBackfillGapDetectOnlyAsksForNothing(t *testing.T) {
-	index := &fakeIndex{
-		gaps:    []store.Gap{{Since: time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)}},
-		anchors: []store.Message{{MessageID: "AFTER1", ChatJID: "a@s.whatsapp.net"}},
-	}
-	live := &fakeLive{}
-	server := testServer(index, live, nil)
-
-	payload, isError := call(t, server, "backfill_gap", map[string]any{"detect_only": true})
-	if isError {
-		t.Fatalf("detection failed: %#v", payload)
-	}
-	if len(live.history) != 0 {
-		t.Fatalf("detect_only asked WhatsApp for %d histories", len(live.history))
-	}
-	if payload["detected_gaps"] == nil || payload["repairing"] == nil {
-		t.Fatalf("payload = %#v", payload)
-	}
-}
-
-// A clean index must not invent a hole, because a false alarm sends the caller
-// chasing messages that were never sent.
-func TestBackfillGapStaysQuietWithoutAHole(t *testing.T) {
-	live := &fakeLive{}
-	server := testServer(&fakeIndex{}, live, nil)
-	payload, isError := call(t, server, "backfill_gap", nil)
-	if isError {
-		t.Fatalf("backfill failed: %#v", payload)
-	}
-	if len(live.history) != 0 {
-		t.Fatal("a clean index still triggered history requests")
-	}
-	if !strings.Contains(payload["note"].(string), "nothing looks lost") {
-		t.Fatalf("payload = %#v", payload)
 	}
 }
 
@@ -883,5 +804,93 @@ func TestCheckNumbersReturnsTheAddressableJID(t *testing.T) {
 	first, _ := numbers[0].(map[string]any)
 	if first["jid"] != "5511999999999@s.whatsapp.net" || first["on_whatsapp"] != true {
 		t.Fatalf("entry = %#v", first)
+	}
+}
+
+// A thin period has to be entered from its far side: WhatsApp only answers with
+// messages older than one it already knows, so before anchors on the first
+// message indexed after that moment, not the last one before it.
+func TestSyncHistoryBeforeAnchorsAfterTheMoment(t *testing.T) {
+	moment := time.Date(2026, 9, 12, 1, 34, 0, 0, time.UTC)
+	index := &fakeIndex{
+		tokens:   map[string]string{"inst-1": "tok-1"},
+		selected: "inst-1",
+		anchors: []store.Message{
+			{MessageID: "AFTER1", ChatJID: "a@s.whatsapp.net", SentAt: moment.Add(time.Hour)},
+			{MessageID: "AFTER2", ChatJID: "g@g.us", IsGroup: true, SentAt: moment.Add(2 * time.Hour)},
+		},
+		unreachable: 298,
+	}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "sync_history", map[string]any{"before": "2026-09-12T01:34:00Z", "count": 100})
+	if isError {
+		t.Fatalf("sync failed: %#v", payload)
+	}
+	if !index.anchorAfter.Equal(moment) {
+		t.Fatalf("anchors were looked for after %s, want %s", index.anchorAfter, moment)
+	}
+	if len(live.history) != 2 || live.history[0].MessageID != "AFTER1" || live.history[1].MessageID != "AFTER2" {
+		t.Fatalf("history requests = %+v", live.history)
+	}
+	if !live.history[1].IsGroup {
+		t.Fatal("the group anchor lost its group flag, which WhatsApp needs to resolve the chat")
+	}
+	// A sync that reached two conversations out of three hundred must not read
+	// as having covered the whole index.
+	if unreachable, _ := payload["unreachable_chats"].(float64); unreachable != 298 {
+		t.Fatalf("unreachable_chats = %#v", payload["unreachable_chats"])
+	}
+}
+
+// Without before, the anchor stays the oldest indexed message: there is nothing
+// older on this side, so the beginning is the only place to page back from.
+func TestSyncHistoryWithoutBeforeKeepsTheOldestAnchor(t *testing.T) {
+	anchoredAt := time.Date(2019, 12, 11, 1, 39, 45, 0, time.UTC)
+	index := &fakeIndex{
+		tokens:   map[string]string{"inst-1": "tok-1"},
+		selected: "inst-1",
+		oldest:   store.Message{MessageID: "OLD1", ChatJID: "a@s.whatsapp.net", SentAt: anchoredAt},
+	}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "sync_history", nil)
+	if isError {
+		t.Fatalf("sync failed: %#v", payload)
+	}
+	if len(live.history) != 1 || live.history[0].MessageID != "OLD1" {
+		t.Fatalf("anchor = %+v", live.history)
+	}
+	if payload["unreachable_chats"] != nil {
+		t.Fatalf("the plain mode reported per-conversation bookkeeping: %#v", payload)
+	}
+}
+
+// A moment nothing was indexed after offers no foothold, and saying so is the
+// difference between an honest answer and a silent no-op.
+func TestSyncHistoryBeforeReportsNoAnchor(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "sync_history", map[string]any{"before": "2026-09-12T00:00:00Z"})
+	if isError {
+		t.Fatalf("sync failed: %#v", payload)
+	}
+	if len(live.history) != 0 {
+		t.Fatal("a moment with no anchor still reached WhatsApp")
+	}
+	if !strings.Contains(payload["note"].(string), "nothing to page back from") {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestSyncHistoryRejectsABadMoment(t *testing.T) {
+	server := testServer(&fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}, &fakeLive{}, nil)
+	payload, isError := call(t, server, "sync_history", map[string]any{"before": "semana passada"})
+	if !isError || !strings.Contains(payload["error"].(string), "RFC 3339") {
+		t.Fatalf("payload = %#v", payload)
 	}
 }

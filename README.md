@@ -73,11 +73,10 @@ Evolution Go exposes no route to list conversations or read message history — 
 | `send_text_message` | Evolution | send text |
 | `send_media_message` | Evolution | send image, video, audio or document from a URL |
 | `download_media` | Evolution | decode the media of an indexed message |
-| `sync_history` | Evolution | request messages older than the index holds |
+| `sync_history` | index + Evolution | request messages older than the index holds, from the start or from a given moment |
 | `delete_message` | index + Evolution | revoke one of the account's own messages for everyone |
 | `edit_message` | index + Evolution | replace the text of one of the account's own messages |
 | `react_to_message` | index + Evolution | react with an emoji, or clear the reaction |
-| `backfill_gap` | index + Evolution | find windows the index missed and try to refill them |
 | `check_numbers` | Evolution | which numbers have a WhatsApp account, and the JID to use |
 | `get_profile_picture` | Evolution | URL of a contact's or group's picture |
 | `send_location` | Evolution | send a point on the map |
@@ -94,9 +93,9 @@ Forwarding is not a tool either, because WhatsApp exposes no forwarding route. R
 
 ### Gaps
 
-An outage leaves a hole in the index that reads exactly like quiet days, and that is the failure worth guarding against: "he sent nothing" and "we failed to ingest what he sent" are the same empty answer. A window in which *no* conversation produced a single message is the shape an outage leaves, so the index reports those windows in its coverage, and `get_chat_messages` marks an empty period that falls inside one as unknown rather than empty. One quiet conversation is never a gap.
+A hole in the index reads exactly like quiet days, and that is the failure worth guarding against: "he sent nothing" and "we failed to ingest what he sent" are the same empty answer. A window in which *no* conversation produced a single message is the shape an outage leaves, so the index reports those windows in its coverage, and `get_chat_messages` marks an empty period that falls inside one as unknown rather than empty. One quiet conversation is never a gap, and the threshold clears a night: the largest ordinary windows in this account run six to eight hours and start between two and four in the morning.
 
-`backfill_gap` tries to repair a hole under the same constraint `sync_history` lives with, only from the other side: it anchors on the first message indexed *after* the hole and pages backwards into it, one conversation at a time. A conversation that has said nothing since the hole offers no anchor and cannot be reached at all — the tool counts those as `unreachable_chats` instead of reporting a partial repair as a complete one. Evolution Go exposes no route to read its own stored messages, so this anchor is the only handle available.
+`sync_history` can also be pointed at a moment. Given `before`, it anchors on the first message indexed *after* that moment in each conversation and pages backwards from there, which reaches into a period the index is thin on rather than further into the past. A conversation with nothing indexed after the moment offers no anchor at all and is counted as `unreachable_chats`, because a sync that reaches two conversations out of three hundred must not read as having covered the index. Both modes are the same request — Evolution Go exposes no route to read its own stored messages, so an anchor is the only handle available; they differ only in which message is chosen.
 
 ### Sending
 

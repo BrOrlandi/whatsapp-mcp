@@ -111,10 +111,12 @@ func toolDefinitions() []any {
 		},
 		map[string]any{
 			"name":        "sync_history",
-			"description": "Ask WhatsApp for messages older than the index currently holds. Returns immediately: the messages arrive asynchronously, so check back with whatsapp_status or the reading tools instead of expecting them here.",
+			"description": "Ask WhatsApp for messages older than the index holds. WhatsApp only ever answers with the messages immediately before one the account already knows, so every request is anchored on a message and works backwards from it. Without before, the anchor is the oldest message indexed, which reaches further into the past. With before, the anchor is the first message indexed after that moment in each conversation, which reaches back into a period the index is thin on. Returns immediately: the messages arrive asynchronously, so read them again in a moment rather than expecting them here.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
-				"chat_jid": stringSchema("Optional conversation to extend; without it the oldest message of the whole index is used as the anchor."),
-				"count":    map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "How many older messages to request. Defaults to 50."},
+				"chat_jid": stringSchema("Optional conversation to extend; without it the whole index is used."),
+				"before":   stringSchema("Optional RFC 3339 moment to work backwards from, for example 2026-09-12T00:00:00Z. Conversations with nothing indexed after this moment offer no anchor, and are counted rather than silently skipped."),
+				"count":    map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "How many older messages to request per conversation. Defaults to 50."},
+				"chats":    map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "With before, how many conversations to cover in one call. Defaults to 10; repeat the call to continue."},
 			}},
 		},
 		map[string]any{
@@ -202,18 +204,6 @@ func toolDefinitions() []any {
 				"action":   map[string]any{"type": "string", "enum": []string{"archive", "unarchive", "pin", "unpin", "mute", "unmute"}},
 			}, "required": []string{"chat_jid", "action"}},
 		},
-		map[string]any{
-			"name":        "backfill_gap",
-			"description": "Refill a window the index missed. An outage leaves a hole that reads exactly like quiet days, so when a period comes back empty, check here before concluding nothing was said. Called without arguments it reports the holes it can see and refills the most recent one. Refilling anchors on the first message indexed after the hole and pages backwards into it, one conversation at a time, so conversations with nothing after the hole cannot be reached and are reported as such. Returns immediately: the messages arrive asynchronously.",
-			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
-				"since":       stringSchema("Optional RFC 3339 start of the hole. Without it the most recent detected hole is used."),
-				"until":       stringSchema("Optional RFC 3339 end of the hole."),
-				"chat_jid":    stringSchema("Optional single conversation to refill, instead of every reachable one."),
-				"count":       map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "How many messages to request per conversation. Defaults to 100."},
-				"chats":       map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "How many conversations to refill in one call. Defaults to 10; repeat the call to continue."},
-				"detect_only": map[string]any{"type": "boolean", "description": "Report the holes without asking WhatsApp for anything."},
-			}},
-		},
 	}
 }
 
@@ -236,7 +226,7 @@ type arguments struct {
 	Limit      int      `json:"limit"`
 	Count      int      `json:"count"`
 	Chats      int      `json:"chats"`
-	DetectOnly bool     `json:"detect_only"`
+	Before     string   `json:"before"`
 	Emoji      string   `json:"emoji"`
 	Confirm    bool     `json:"confirm"`
 	Numbers    []string `json:"numbers"`
@@ -308,8 +298,6 @@ func (s *Server) call(ctx context.Context, params callParams) map[string]any {
 		return s.pollResults(ctx, session, args)
 	case "organise_chat":
 		return s.organiseChat(ctx, session, args)
-	case "backfill_gap":
-		return s.backfillGap(ctx, session, args)
 	}
 	return toolError("unknown tool %q", params.Name)
 }
@@ -642,23 +630,30 @@ func (s *Server) downloadMedia(ctx context.Context, session Session, args argume
 }
 
 func (s *Server) syncHistory(ctx context.Context, session Session, args arguments) map[string]any {
-	anchor, err := s.index.OldestMessage(ctx, session.InstanceID, args.ChatJID)
+	before, err := parseMoment(args.Before)
 	if err != nil {
-		return toolError("there is no indexed message to page back from%s; WhatsApp only returns messages older than one it already knows, so wait for the first messages to arrive or pair the instance again",
-			chatSuffix(args.ChatJID))
-	}
-	request := evolution.Anchor{
-		MessageID: anchor.MessageID,
-		ChatJID:   anchor.ChatJID,
-		FromMe:    anchor.FromMe,
-		IsGroup:   anchor.IsGroup,
-		Timestamp: anchor.SentAt,
+		return toolError("before is not a valid RFC 3339 timestamp: %v", err)
 	}
 	count := args.Count
 	if count <= 0 {
 		count = 50
 	}
-	if err := s.live.RequestHistory(ctx, session.Token, request, count); err != nil {
+	if before.IsZero() {
+		return s.pageBackFromTheStart(ctx, session, args, count)
+	}
+	return s.pageBackFrom(ctx, session, args, before, count)
+}
+
+// pageBackFromTheStart extends the index further into the past, anchored on the
+// oldest message it holds. This is the plain case: there is nothing older on
+// this side, so the only place to page back from is the beginning.
+func (s *Server) pageBackFromTheStart(ctx context.Context, session Session, args arguments, count int) map[string]any {
+	anchor, err := s.index.OldestMessage(ctx, session.InstanceID, args.ChatJID)
+	if err != nil {
+		return toolError("there is no indexed message to page back from%s; WhatsApp only returns messages older than one it already knows, so wait for the first messages to arrive or pair the instance again",
+			chatSuffix(args.ChatJID))
+	}
+	if err := s.live.RequestHistory(ctx, session.Token, anchorOf(anchor), count); err != nil {
 		return liveError(err)
 	}
 	return textResult(map[string]any{
@@ -667,6 +662,65 @@ func (s *Server) syncHistory(ctx context.Context, session Session, args argument
 		"chat_jid":    anchor.ChatJID,
 		"note":        "WhatsApp answers asynchronously: the messages arrive on the history queue and are indexed as they land. Read them with get_chat_messages in a moment, and repeat this call to page further back.",
 	}, false)
+}
+
+// pageBackFrom works backwards from a given moment, one conversation at a time.
+//
+// The protocol allows only one move — WhatsApp returns the messages immediately
+// before a message it already knows — so a thin period has to be entered from
+// its far side, anchored on the first message that landed after it. That also
+// means a conversation which has said nothing since offers no foothold at all.
+// Those are counted and reported rather than quietly dropped, because a sync
+// that reaches half the conversations and reads as complete is worse than one
+// that says what it could not reach.
+func (s *Server) pageBackFrom(ctx context.Context, session Session, args arguments, before time.Time, count int) map[string]any {
+	anchors, err := s.index.GapAnchors(ctx, session.InstanceID, args.ChatJID, before, args.Chats)
+	if err != nil {
+		return toolError("could not find the messages to page back from: %v", err)
+	}
+	if len(anchors) == 0 {
+		return textResult(map[string]any{
+			"before":    before,
+			"requested": 0,
+			"note":      "No conversation holds a message indexed after this moment, so there is nothing to page back from. WhatsApp only answers with messages older than one it already knows; once newer messages arrive, this becomes reachable.",
+		}, false)
+	}
+	unreachable, err := s.index.ChatsWithoutAnchor(ctx, session.InstanceID, before)
+	if err != nil {
+		return toolError("could not count the conversations left out: %v", err)
+	}
+	requested := make([]map[string]any, 0, len(anchors))
+	failures := make([]map[string]any, 0)
+	for _, anchor := range anchors {
+		if err := s.live.RequestHistory(ctx, session.Token, anchorOf(anchor), count); err != nil {
+			failures = append(failures, map[string]any{"chat_jid": anchor.ChatJID, "error": err.Error()})
+			continue
+		}
+		requested = append(requested, map[string]any{"chat_jid": anchor.ChatJID, "anchored_at": anchor.SentAt})
+	}
+	report := map[string]any{
+		"before":            before,
+		"requested":         requested,
+		"messages_per_chat": count,
+		"unreachable_chats": unreachable,
+		"note":              "WhatsApp answers asynchronously: the messages arrive on the history queue and are indexed as they land. Read the period again in a moment, and repeat this call to cover more conversations. unreachable_chats have nothing indexed after this moment and cannot be paged back into.",
+	}
+	if len(failures) > 0 {
+		report["failed"] = failures
+	}
+	return textResult(report, false)
+}
+
+// anchorOf is the message a history request pages back from, in the shape
+// Evolution wants it.
+func anchorOf(message store.Message) evolution.Anchor {
+	return evolution.Anchor{
+		MessageID: message.MessageID,
+		ChatJID:   message.ChatJID,
+		FromMe:    message.FromMe,
+		IsGroup:   message.IsGroup,
+		Timestamp: message.SentAt,
+	}
 }
 
 func chatSuffix(chatJID string) string {
@@ -709,84 +763,6 @@ func parseMoment(value string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return parsed.UTC(), nil
-}
-
-// backfillGap repairs a window the index missed.
-//
-// The protocol allows only one move: WhatsApp returns the messages immediately
-// before a message it already knows. A hole therefore has to be entered from
-// its far side, anchored on the first message that landed after it, and worked
-// backwards — which also means a conversation that has said nothing since the
-// hole offers no foothold at all. Those are counted and reported rather than
-// quietly skipped, because a repair that reaches half the conversations and
-// claims success is worse than one that says what it could not reach.
-func (s *Server) backfillGap(ctx context.Context, session Session, args arguments) map[string]any {
-	since, err := parseMoment(args.Since)
-	if err != nil {
-		return toolError("since is not a valid RFC 3339 timestamp: %v", err)
-	}
-	until, err := parseMoment(args.Until)
-	if err != nil {
-		return toolError("until is not a valid RFC 3339 timestamp: %v", err)
-	}
-	gaps, err := s.index.IndexGaps(ctx, session.InstanceID, store.Silence, 10)
-	if err != nil {
-		return toolError("could not look for holes in the index: %v", err)
-	}
-	report := map[string]any{"detected_gaps": gaps}
-	if len(gaps) == 0 && since.IsZero() {
-		report["note"] = "The index has no window longer than 24h without a single message, so nothing looks lost. A conversation can still be quiet on its own: that is not a gap."
-		return textResult(report, false)
-	}
-	if since.IsZero() {
-		since, until = gaps[0].Since, gaps[0].Until
-	}
-	report["repairing"] = store.Gap{Since: since, Until: until}
-	if args.DetectOnly {
-		return textResult(report, false)
-	}
-
-	anchors, err := s.index.GapAnchors(ctx, session.InstanceID, args.ChatJID, since, args.Chats)
-	if err != nil {
-		return toolError("could not find the messages to page back from: %v", err)
-	}
-	if len(anchors) == 0 {
-		report["note"] = "No conversation holds a message after this window, so there is nothing to page back from and WhatsApp cannot be asked to refill it. Once new messages arrive in a conversation, it becomes reachable again."
-		return textResult(report, false)
-	}
-	unreachable, err := s.index.ChatsWithoutAnchor(ctx, session.InstanceID, since)
-	if err != nil {
-		return toolError("could not count the conversations left out: %v", err)
-	}
-
-	count := args.Count
-	if count <= 0 {
-		count = 100
-	}
-	requested := make([]map[string]any, 0, len(anchors))
-	failures := make([]map[string]any, 0)
-	for _, anchor := range anchors {
-		request := evolution.Anchor{
-			MessageID: anchor.MessageID,
-			ChatJID:   anchor.ChatJID,
-			FromMe:    anchor.FromMe,
-			IsGroup:   anchor.IsGroup,
-			Timestamp: anchor.SentAt,
-		}
-		if err := s.live.RequestHistory(ctx, session.Token, request, count); err != nil {
-			failures = append(failures, map[string]any{"chat_jid": anchor.ChatJID, "error": err.Error()})
-			continue
-		}
-		requested = append(requested, map[string]any{"chat_jid": anchor.ChatJID, "anchored_at": anchor.SentAt})
-	}
-	report["requested"] = requested
-	report["messages_per_chat"] = count
-	if len(failures) > 0 {
-		report["failed"] = failures
-	}
-	report["unreachable_chats"] = unreachable
-	report["note"] = "WhatsApp answers asynchronously: the messages arrive on the history queue and are indexed as they land. Read the window again in a moment, and repeat this call to cover more conversations. unreachable_chats have said nothing since the window and cannot be paged back into."
-	return textResult(report, false)
 }
 
 // target resolves the message a destructive tool was pointed at.

@@ -17,8 +17,8 @@ func TestDocsAndRecipesRender(t *testing.T) {
 		data any
 		want []string
 	}{
-		{"documentacao", docsPage{layout: layout{Title: "Doc", Active: "documentacao"}, Tools: mcp.Catalogue(), Count: len(mcp.Catalogue())}, []string{"delete_message", "confirm", "obrigatório", "backfill_gap"}},
-		{"receitas", recipesPage{layout: layout{Title: "R", Active: "receitas"}, Recipes: recipeBook()}, []string{"Agendar uma mensagem", "search_messages", "Vigiar palavras-chave"}},
+		{"documentacao", docsPage{layout: layout{Title: "Doc", Active: "documentacao"}, Tools: mcp.Catalogue(), Count: len(mcp.Catalogue())}, []string{"delete_message", "confirm", "obrigatório", "sync_history", "before"}},
+		{"receitas", recipesPage{layout: layout{Title: "R", Active: "receitas"}, Recipes: recipeBook()}, []string{"Agendar uma mensagem", "search_messages", "Vigiar palavras-chave", "Resumo do dia de um grupo"}},
 	} {
 		var out strings.Builder
 		if err := app.templates.ExecuteTemplate(&out, tc.name, tc.data); err != nil {
