@@ -312,3 +312,30 @@ func (s *Store) ChatsWithoutAnchor(ctx context.Context, instanceID string, after
                 ) AS stale`, instanceID, after).Scan(&total)
 	return total, err
 }
+
+// MessageByID returns one indexed message.
+//
+// It is what lets a destructive tool describe its target before acting: the
+// caller names an opaque id, and the only way to show a human what that id
+// actually refers to — which conversation, whose words, when — is to look it up
+// first. It is also where authorship is settled, since the index records who
+// sent a message and the caller's own claim about it cannot be trusted.
+func (s *Store) MessageByID(ctx context.Context, instanceID, messageID string) (Message, error) {
+	if instanceID == "" || messageID == "" {
+		return Message{}, errors.New("an instance and a message are both required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at
+                FROM messages WHERE instance_id = $1 AND message_id = $2 LIMIT 1`, instanceID, messageID)
+	if err != nil {
+		return Message{}, err
+	}
+	defer rows.Close()
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return Message{}, err
+	}
+	if len(messages) == 0 {
+		return Message{}, sql.ErrNoRows
+	}
+	return messages[0], nil
+}

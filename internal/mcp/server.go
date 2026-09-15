@@ -27,6 +27,7 @@ type Index interface {
 	ListChats(context.Context, string, string, int) ([]store.Chat, error)
 	Messages(context.Context, string, store.MessageQuery) ([]store.Message, error)
 	OldestMessage(context.Context, string, string) (store.Message, error)
+	MessageByID(context.Context, string, string) (store.Message, error)
 	IndexGaps(context.Context, string, time.Duration, int) ([]store.Gap, error)
 	GapAnchors(context.Context, string, string, time.Time, int) ([]store.Message, error)
 	ChatsWithoutAnchor(context.Context, string, time.Time) (int64, error)
@@ -43,6 +44,9 @@ type Live interface {
 	SendMedia(context.Context, string, string, string, string, string, string) (evolution.SentMessage, error)
 	WarmSession(context.Context, string, string) error
 	Delivered(context.Context, string, string) (evolution.Delivery, error)
+	DeleteMessage(context.Context, string, string, string) (evolution.SentMessage, error)
+	EditMessage(context.Context, string, string, string, string) (evolution.SentMessage, error)
+	React(context.Context, string, string, string, string, bool, string) (evolution.SentMessage, error)
 	DownloadMedia(context.Context, string, json.RawMessage) (evolution.Media, error)
 	RequestHistory(context.Context, string, evolution.Anchor, int) error
 }

@@ -66,6 +66,14 @@ func (f *fakeIndex) GapAnchors(_ context.Context, _ string, _ string, after time
 func (f *fakeIndex) ChatsWithoutAnchor(context.Context, string, time.Time) (int64, error) {
 	return f.unreachable, nil
 }
+func (f *fakeIndex) MessageByID(_ context.Context, _ string, id string) (store.Message, error) {
+	for _, m := range f.messages {
+		if m.MessageID == id {
+			return m, nil
+		}
+	}
+	return store.Message{}, errors.New("no rows")
+}
 func (f *fakeIndex) RawMessage(context.Context, string, string) ([]byte, error) {
 	return f.raw, f.rawErr
 }
@@ -86,6 +94,9 @@ type fakeLive struct {
 	delivery    evolution.Delivery
 	deliveryErr error
 	sentID      string
+	deleted     []string
+	edited      []string
+	reactions   []string
 }
 
 func (f *fakeLive) WarmSession(_ context.Context, token, recipient string) error {
@@ -97,6 +108,31 @@ func (f *fakeLive) Delivered(_ context.Context, token, id string) (evolution.Del
 	f.note(token)
 	f.statusFor = append(f.statusFor, id)
 	return f.delivery, f.deliveryErr
+}
+
+func (f *fakeLive) DeleteMessage(_ context.Context, token, chat, id string) (evolution.SentMessage, error) {
+	f.note(token)
+	if f.err != nil {
+		return evolution.SentMessage{}, f.err
+	}
+	f.deleted = append(f.deleted, chat+"|"+id)
+	return evolution.SentMessage{ID: "REVOKE1"}, nil
+}
+func (f *fakeLive) EditMessage(_ context.Context, token, chat, id, text string) (evolution.SentMessage, error) {
+	f.note(token)
+	if f.err != nil {
+		return evolution.SentMessage{}, f.err
+	}
+	f.edited = append(f.edited, id+"|"+text)
+	return evolution.SentMessage{ID: id}, nil
+}
+func (f *fakeLive) React(_ context.Context, token, chat, id, emoji string, fromMe bool, participant string) (evolution.SentMessage, error) {
+	f.note(token)
+	if f.err != nil {
+		return evolution.SentMessage{}, f.err
+	}
+	f.reactions = append(f.reactions, id+"|"+emoji+"|"+participant)
+	return evolution.SentMessage{ID: "REACT1"}, nil
 }
 
 func (f *fakeLive) note(token string) { f.tokensUsed = append(f.tokensUsed, token) }
@@ -206,7 +242,7 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 		"whatsapp_status", "list_chats", "get_chat_messages", "search_messages",
 		"list_contacts", "list_groups", "get_group",
 		"send_text_message", "send_media_message", "download_media", "sync_history",
-		"backfill_gap",
+		"backfill_gap", "delete_message", "edit_message", "react_to_message",
 	} {
 		if !strings.Contains(response, `"`+tool+`"`) {
 			t.Errorf("tools/list is missing %s", tool)
@@ -607,5 +643,105 @@ func TestSendProceedsWhenWarmingFails(t *testing.T) {
 	}
 	if payload["delivery"] != "Delivered" {
 		t.Fatalf("delivery = %#v", payload["delivery"])
+	}
+}
+
+// Revoking is irreversible and reaches other people's phones, so a first call
+// must change nothing and show what it is pointed at. An id alone is unreadable
+// to the human who has to approve the act.
+func TestDeleteMessagePreviewsBeforeDestroying(t *testing.T) {
+	mine := store.Message{MessageID: "M1", ChatJID: "a@s.whatsapp.net", FromMe: true, Text: "Teste 2", SentAt: time.Date(2026, 9, 15, 3, 44, 0, 0, time.UTC)}
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1", messages: []store.Message{mine}}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "delete_message", map[string]any{"message_id": "M1"})
+	if isError {
+		t.Fatalf("preview failed: %#v", payload)
+	}
+	if len(live.deleted) != 0 {
+		t.Fatalf("an unconfirmed call deleted anyway: %v", live.deleted)
+	}
+	preview, _ := payload["would_delete"].(map[string]any)
+	if preview == nil || preview["text"] != "Teste 2" || preview["chat_jid"] != "a@s.whatsapp.net" {
+		t.Fatalf("the preview does not identify the message: %#v", payload)
+	}
+
+	payload, isError = call(t, server, "delete_message", map[string]any{"message_id": "M1", "confirm": true})
+	if isError {
+		t.Fatalf("confirmed delete failed: %#v", payload)
+	}
+	if len(live.deleted) != 1 || live.deleted[0] != "a@s.whatsapp.net|M1" {
+		t.Fatalf("delete = %v", live.deleted)
+	}
+	if payload["revocation_id"] != "REVOKE1" {
+		t.Fatalf("the revocation id was not reported: %#v", payload)
+	}
+}
+
+// Someone else's message is not this account's to revoke or rewrite, and the
+// refusal belongs here rather than as an opaque error from WhatsApp.
+func TestDeleteAndEditRefuseSomeoneElsesMessage(t *testing.T) {
+	theirs := store.Message{MessageID: "M2", ChatJID: "a@s.whatsapp.net", FromMe: false, Text: "oi", SenderName: "Lucas"}
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1", messages: []store.Message{theirs}}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"delete_message", map[string]any{"message_id": "M2", "confirm": true}},
+		{"edit_message", map[string]any{"message_id": "M2", "text": "outro"}},
+	} {
+		payload, isError := call(t, server, tc.tool, tc.args)
+		if !isError {
+			t.Fatalf("%s acted on someone else's message: %#v", tc.tool, payload)
+		}
+		if !strings.Contains(payload["error"].(string), "not sent by this account") {
+			t.Fatalf("%s error = %#v", tc.tool, payload)
+		}
+	}
+	if len(live.deleted) != 0 || len(live.edited) != 0 {
+		t.Fatalf("something reached WhatsApp: deleted=%v edited=%v", live.deleted, live.edited)
+	}
+}
+
+// Reacting is meant for other people's messages, so it must not inherit the
+// authorship guard — and in a group WhatsApp needs to know who sent the target.
+func TestReactWorksOnOtherPeopleAndCarriesTheParticipant(t *testing.T) {
+	theirs := store.Message{MessageID: "M3", ChatJID: "g@g.us", IsGroup: true, FromMe: false, SenderJID: "lucas@s.whatsapp.net", Text: "oi"}
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1", messages: []store.Message{theirs}}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "react_to_message", map[string]any{"message_id": "M3", "emoji": "👍"})
+	if isError {
+		t.Fatalf("react failed: %#v", payload)
+	}
+	if len(live.reactions) != 1 || live.reactions[0] != "M3|👍|lucas@s.whatsapp.net" {
+		t.Fatalf("reaction = %v", live.reactions)
+	}
+
+	// An empty emoji is a removal, not a malformed reaction.
+	payload, _ = call(t, server, "react_to_message", map[string]any{"message_id": "M3", "emoji": ""})
+	if payload["removed"] != true {
+		t.Fatalf("clearing the reaction was not reported: %#v", payload)
+	}
+}
+
+// An id that is not in the index cannot be described, and acting on it blind is
+// exactly what the preview exists to prevent.
+func TestDestructiveToolsRejectAnUnknownMessage(t *testing.T) {
+	index := &fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}
+	live := &fakeLive{}
+	server := testServer(index, live, nil)
+
+	payload, isError := call(t, server, "delete_message", map[string]any{"message_id": "NOPE", "confirm": true})
+	if !isError || !strings.Contains(payload["error"].(string), "no indexed message") {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if len(live.deleted) != 0 {
+		t.Fatal("an unknown id still reached WhatsApp")
 	}
 }

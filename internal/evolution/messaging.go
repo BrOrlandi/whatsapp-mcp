@@ -183,6 +183,7 @@ type sendResult struct {
 	} `json:"Info"`
 	ID        string `json:"ID"`
 	LowerID   string `json:"id"`
+	MessageID string `json:"messageId"`
 	Timestamp string `json:"Timestamp"`
 	LowerTime string `json:"timestamp"`
 }
@@ -311,4 +312,56 @@ func (c *Client) WarmSession(ctx context.Context, token, jid string) error {
 		return errors.New("a recipient is required")
 	}
 	return classify(c.call(ctx, http.MethodPost, "/user/info", token, map[string]any{"number": []string{jid}}, nil))
+}
+
+// DeleteMessage revokes a message for everyone. WhatsApp models this as a new
+// message rather than an edit of the old one, so the returned id belongs to the
+// revocation, not to the message that was removed.
+func (c *Client) DeleteMessage(ctx context.Context, token, chatJID, messageID string) (SentMessage, error) {
+	if chatJID == "" || messageID == "" {
+		return SentMessage{}, errors.New("a chat and a message are both required")
+	}
+	var result sendResult
+	body := map[string]any{"chat": chatJID, "messageId": messageID}
+	if err := c.call(ctx, http.MethodPost, "/message/delete", token, body, &result); err != nil {
+		return SentMessage{}, classify(err)
+	}
+	sent := result.toSent()
+	if sent.ID == "" {
+		sent.ID = result.MessageID
+	}
+	return sent, nil
+}
+
+// EditMessage replaces the text of a message already sent. WhatsApp only allows
+// this for the account's own messages and only for a while after sending, so a
+// refusal here is usually the window having closed rather than a broken call.
+func (c *Client) EditMessage(ctx context.Context, token, chatJID, messageID, text string) (SentMessage, error) {
+	if chatJID == "" || messageID == "" || text == "" {
+		return SentMessage{}, errors.New("a chat, a message and the new text are all required")
+	}
+	var result sendResult
+	body := map[string]any{"chat": chatJID, "messageId": messageID, "message": text}
+	if err := c.call(ctx, http.MethodPost, "/message/edit", token, body, &result); err != nil {
+		return SentMessage{}, classify(err)
+	}
+	return result.toSent(), nil
+}
+
+// React attaches an emoji to a message, or removes the account's reaction when
+// the emoji is empty. The reaction is addressed by the message's own key, which
+// is why it needs to know whether the target was sent by this account.
+func (c *Client) React(ctx context.Context, token, chatJID, messageID, emoji string, fromMe bool, participant string) (SentMessage, error) {
+	if chatJID == "" || messageID == "" {
+		return SentMessage{}, errors.New("a chat and a message are both required")
+	}
+	var result sendResult
+	body := map[string]any{"number": chatJID, "id": messageID, "reaction": emoji, "fromMe": fromMe}
+	if participant != "" {
+		body["participant"] = participant
+	}
+	if err := c.call(ctx, http.MethodPost, "/message/react", token, body, &result); err != nil {
+		return SentMessage{}, classify(err)
+	}
+	return result.toSent(), nil
 }

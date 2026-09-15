@@ -51,6 +51,9 @@ func (f fakeIndex) GapAnchors(context.Context, string, string, time.Time, int) (
 func (f fakeIndex) ChatsWithoutAnchor(context.Context, string, time.Time) (int64, error) {
 	return 0, nil
 }
+func (f fakeIndex) MessageByID(context.Context, string, string) (store.Message, error) {
+	return store.Message{}, errors.New("empty")
+}
 func (f fakeIndex) RawMessage(context.Context, string, string) ([]byte, error) {
 	return nil, errors.New("empty")
 }
@@ -76,6 +79,15 @@ func (f *fakeLive) DownloadMedia(context.Context, string, json.RawMessage) (evol
 }
 func (f *fakeLive) RequestHistory(context.Context, string, evolution.Anchor, int) error { return nil }
 func (f *fakeLive) WarmSession(context.Context, string, string) error                   { return nil }
+func (f *fakeLive) DeleteMessage(context.Context, string, string, string) (evolution.SentMessage, error) {
+	return evolution.SentMessage{}, nil
+}
+func (f *fakeLive) EditMessage(context.Context, string, string, string, string) (evolution.SentMessage, error) {
+	return evolution.SentMessage{}, nil
+}
+func (f *fakeLive) React(context.Context, string, string, string, string, bool, string) (evolution.SentMessage, error) {
+	return evolution.SentMessage{}, nil
+}
 func (f *fakeLive) Delivered(context.Context, string, string) (evolution.Delivery, error) {
 	return evolution.Delivery{Status: "Delivered"}, nil
 }

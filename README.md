@@ -74,6 +74,9 @@ Evolution Go exposes no route to list conversations or read message history — 
 | `send_media_message` | Evolution | send image, video, audio or document from a URL |
 | `download_media` | Evolution | decode the media of an indexed message |
 | `sync_history` | Evolution | request messages older than the index holds |
+| `delete_message` | index + Evolution | revoke one of the account's own messages for everyone |
+| `edit_message` | index + Evolution | replace the text of one of the account's own messages |
+| `react_to_message` | index + Evolution | react with an emoji, or clear the reaction |
 | `backfill_gap` | index + Evolution | find windows the index missed and try to refill them |
 
 Summarising is not a tool: `get_chat_messages` returns the period and the client summarises it, which avoids an LLM credential and a per-call cost in the backend.
@@ -93,6 +96,12 @@ An outage leaves a hole in the index that reads exactly like quiet days, and tha
 A send is not finished when the call returns. Evolution reports success even when whatsmeow silently skipped a recipient device it had no encryption session for, and the recipient is then left with a message that never decrypts — WhatsApp shows it as "waiting for this message" indefinitely, and only a resend clears it. This is most likely on the first message a freshly paired instance sends to a device it has never talked to.
 
 So the send tools do two things the API does not. They refresh the recipient's device list before encrypting, which is the only lever against the missing session; and they ask WhatsApp afterwards whether the message actually arrived, reporting `delivery` alongside the acknowledgement. A message with no delivery record is reported as `unconfirmed` rather than as either success or failure, because an offline recipient and a dropped message look identical from here.
+
+### Acting on a message
+
+Revoking a message is irreversible and it reaches other people's phones, so `delete_message` is two-step by construction. A call without `confirm` changes nothing and returns the conversation, the timestamp and the text, because the caller names an opaque id and nobody can approve an id they cannot read. Only the confirmed call deletes.
+
+`delete_message` and `edit_message` also refuse a message this account did not send. WhatsApp would refuse it too, but refusing here means the caller is told plainly rather than handed an opaque API error — and it settles the question from the index, which records who sent what, rather than from the caller's own claim. `react_to_message` carries no such guard: reacting to other people is the point of it.
 
 ### Untrusted content
 

@@ -118,6 +118,30 @@ func toolDefinitions() []any {
 			}},
 		},
 		map[string]any{
+			"name":        "delete_message",
+			"description": "Revoke a message for everyone, so it shows as deleted for the recipient too. Only the account's own messages can be revoked. The call is deliberately two-step: without confirm it acts as a preview, returning the conversation, the timestamp and the text so a human can check the target before it is destroyed. Call it again with confirm true to actually delete. This cannot be undone.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"message_id": stringSchema("Message id, as returned by the reading tools."),
+				"confirm":    map[string]any{"type": "boolean", "description": "Must be true to delete. Omitted or false returns a preview of what would be deleted, without touching anything."},
+			}, "required": []string{"message_id"}},
+		},
+		map[string]any{
+			"name":        "edit_message",
+			"description": "Replace the text of a message already sent. WhatsApp allows this only for the account's own messages and only for a limited time after sending, so a refusal usually means that window has closed.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"message_id": stringSchema("Message id, as returned by the reading tools."),
+				"text":       stringSchema("The new text, replacing the old one entirely."),
+			}, "required": []string{"message_id", "text"}},
+		},
+		map[string]any{
+			"name":        "react_to_message",
+			"description": "React to a message with an emoji, on any message in a conversation the account can see. Sending an empty emoji removes the account's own reaction.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"message_id": stringSchema("Message id, as returned by the reading tools."),
+				"emoji":      stringSchema("A single emoji, or an empty string to remove the reaction."),
+			}, "required": []string{"message_id"}},
+		},
+		map[string]any{
 			"name":        "backfill_gap",
 			"description": "Refill a window the index missed. An outage leaves a hole that reads exactly like quiet days, so when a period comes back empty, check here before concluding nothing was said. Called without arguments it reports the holes it can see and refills the most recent one. Refilling anchors on the first message indexed after the hole and pages backwards into it, one conversation at a time, so conversations with nothing after the hole cannot be reached and are reported as such. Returns immediately: the messages arrive asynchronously.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
@@ -152,6 +176,8 @@ type arguments struct {
 	Count      int    `json:"count"`
 	Chats      int    `json:"chats"`
 	DetectOnly bool   `json:"detect_only"`
+	Emoji      string `json:"emoji"`
+	Confirm    bool   `json:"confirm"`
 }
 
 func (s *Server) call(ctx context.Context, params callParams) map[string]any {
@@ -189,6 +215,12 @@ func (s *Server) call(ctx context.Context, params callParams) map[string]any {
 		return s.downloadMedia(ctx, session, args)
 	case "sync_history":
 		return s.syncHistory(ctx, session, args)
+	case "delete_message":
+		return s.deleteMessage(ctx, session, args)
+	case "edit_message":
+		return s.editMessage(ctx, session, args)
+	case "react_to_message":
+		return s.reactToMessage(ctx, session, args)
 	case "backfill_gap":
 		return s.backfillGap(ctx, session, args)
 	}
@@ -668,4 +700,132 @@ func (s *Server) backfillGap(ctx context.Context, session Session, args argument
 	report["unreachable_chats"] = unreachable
 	report["note"] = "WhatsApp answers asynchronously: the messages arrive on the history queue and are indexed as they land. Read the window again in a moment, and repeat this call to cover more conversations. unreachable_chats have said nothing since the window and cannot be paged back into."
 	return textResult(report, false)
+}
+
+// target resolves the message a destructive tool was pointed at.
+//
+// Every one of these tools takes an opaque id, and an id says nothing about
+// what it refers to. Looking it up in the index is what lets the tool describe
+// its target, refuse one that does not exist, and settle authorship from the
+// record rather than from the caller's say-so.
+func (s *Server) target(ctx context.Context, session Session, messageID string) (store.Message, map[string]any) {
+	if messageID == "" {
+		return store.Message{}, toolError("message_id is required; the reading tools return it with every message")
+	}
+	message, err := s.index.MessageByID(ctx, session.InstanceID, messageID)
+	if err != nil {
+		return store.Message{}, toolError("no indexed message has the id %q; it may predate the index, in which case there is nothing here to act on", messageID)
+	}
+	return message, nil
+}
+
+// describe renders a message as something a human can check before a
+// destructive act. Media carries no text, so the kind stands in for it rather
+// than leaving the preview blank.
+func describe(message store.Message) map[string]any {
+	preview := map[string]any{
+		"message_id": message.MessageID,
+		"chat_jid":   message.ChatJID,
+		"from_me":    message.FromMe,
+		"sent_at":    message.SentAt,
+	}
+	if message.Text != "" {
+		preview["text"] = message.Text
+	}
+	if message.MediaType != "" && message.MediaType != "text" {
+		preview["media_type"] = message.MediaType
+	}
+	if message.SenderName != "" {
+		preview["sender_name"] = message.SenderName
+	}
+	return preview
+}
+
+// deleteMessage revokes a message for everyone.
+//
+// Two guards stand in front of it, because the act is irreversible and reaches
+// other people's phones. The first is authorship: only the account's own
+// messages can be revoked. WhatsApp would refuse anything else anyway, but
+// refusing here means the caller is told plainly instead of receiving an opaque
+// API error, and it removes any question of this tool being pointed at someone
+// else's words. The second is confirmation: a call without it changes nothing
+// and returns what would be destroyed, so the decision is made against the
+// actual message rather than against an id nobody can read.
+func (s *Server) deleteMessage(ctx context.Context, session Session, args arguments) map[string]any {
+	message, failure := s.target(ctx, session, args.MessageID)
+	if failure != nil {
+		return failure
+	}
+	preview := describe(message)
+	if !message.FromMe {
+		return toolError("this message was not sent by this account, and only your own messages can be revoked; deleting it for everyone is not something WhatsApp allows")
+	}
+	if !args.Confirm {
+		return textResult(map[string]any{
+			"would_delete":    preview,
+			"confirmed":       false,
+			"content_warning": UntrustedContent,
+			"note":            "Nothing was deleted. Check the message above, then call delete_message again with confirm set to true. Revoking is permanent and the recipient sees that a message was deleted.",
+		}, false)
+	}
+	revocation, err := s.live.DeleteMessage(ctx, session.Token, message.ChatJID, message.MessageID)
+	if err != nil {
+		return liveError(err)
+	}
+	return textResult(map[string]any{
+		"deleted":       preview,
+		"revocation_id": revocation.ID,
+		"note":          "WhatsApp models a revocation as its own message, so revocation_id is a new id rather than the deleted one. The recipient now sees that a message was deleted.",
+	}, false)
+}
+
+// editMessage replaces the text of a message the account already sent.
+func (s *Server) editMessage(ctx context.Context, session Session, args arguments) map[string]any {
+	if strings.TrimSpace(args.Text) == "" {
+		return toolError("text is required; editing a message to nothing is not the same as deleting it, which delete_message does")
+	}
+	message, failure := s.target(ctx, session, args.MessageID)
+	if failure != nil {
+		return failure
+	}
+	if !message.FromMe {
+		return toolError("this message was not sent by this account, and WhatsApp only allows editing your own messages")
+	}
+	edited, err := s.live.EditMessage(ctx, session.Token, message.ChatJID, message.MessageID, args.Text)
+	if err != nil {
+		return liveError(err)
+	}
+	return textResult(map[string]any{
+		"edited":   describe(message),
+		"new_text": args.Text,
+		"sent":     edited,
+		"note":     "WhatsApp only accepts an edit for a while after sending. If this failed, that window has closed and the original text stands.",
+	}, false)
+}
+
+// reactToMessage attaches an emoji to a message, or clears the reaction.
+//
+// Unlike editing and revoking, reacting is meant for other people's messages,
+// so authorship is passed through rather than enforced: WhatsApp addresses a
+// reaction by the target's key, which includes who sent it.
+func (s *Server) reactToMessage(ctx context.Context, session Session, args arguments) map[string]any {
+	message, failure := s.target(ctx, session, args.MessageID)
+	if failure != nil {
+		return failure
+	}
+	participant := ""
+	if message.IsGroup && !message.FromMe {
+		participant = message.SenderJID
+	}
+	reaction, err := s.live.React(ctx, session.Token, message.ChatJID, message.MessageID, args.Emoji, message.FromMe, participant)
+	if err != nil {
+		return liveError(err)
+	}
+	payload := map[string]any{"reacted_to": describe(message), "sent": reaction}
+	if args.Emoji == "" {
+		payload["removed"] = true
+	} else {
+		payload["emoji"] = args.Emoji
+	}
+	return textResult(payload, false)
 }
