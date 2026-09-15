@@ -74,12 +74,19 @@ Evolution Go exposes no route to list conversations or read message history — 
 | `send_media_message` | Evolution | send image, video, audio or document from a URL |
 | `download_media` | Evolution | decode the media of an indexed message |
 | `sync_history` | Evolution | request messages older than the index holds |
+| `backfill_gap` | index + Evolution | find windows the index missed and try to refill them |
 
 Summarising is not a tool: `get_chat_messages` returns the period and the client summarises it, which avoids an LLM credential and a per-call cost in the backend.
 
 Forwarding is not a tool either, because WhatsApp exposes no forwarding route. Resending the content with `send_text_message` or `send_media_message` is what "forward" means here, and the tool names say so rather than implying otherwise.
 
 `sync_history` returns immediately. WhatsApp answers asynchronously: it returns the messages immediately *before* one the account already knows, they arrive on the history queue, and each call pages further back. An instance with nothing indexed has no anchor to page from.
+
+### Gaps
+
+An outage leaves a hole in the index that reads exactly like quiet days, and that is the failure worth guarding against: "he sent nothing" and "we failed to ingest what he sent" are the same empty answer. A window in which *no* conversation produced a single message is the shape an outage leaves, so the index reports those windows in its coverage, and `get_chat_messages` marks an empty period that falls inside one as unknown rather than empty. One quiet conversation is never a gap.
+
+`backfill_gap` tries to repair a hole under the same constraint `sync_history` lives with, only from the other side: it anchors on the first message indexed *after* the hole and pages backwards into it, one conversation at a time. A conversation that has said nothing since the hole offers no anchor and cannot be reached at all — the tool counts those as `unreachable_chats` instead of reporting a partial repair as a complete one. Evolution Go exposes no route to read its own stored messages, so this anchor is the only handle available.
 
 ### Untrusted content
 

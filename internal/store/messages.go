@@ -242,7 +242,7 @@ func (s *Store) IndexGaps(ctx context.Context, instanceID string, silence time.D
                     WHERE instance_id = $1 AND sent_at IS NOT NULL
                 )
                 SELECT previous, sent_at FROM ordered
-                WHERE previous IS NOT NULL AND sent_at - previous > $2 * interval '1 second'
+                WHERE previous IS NOT NULL AND sent_at - previous > make_interval(secs => $2::double precision)
                 ORDER BY sent_at DESC
                 LIMIT $3`, instanceID, silence.Seconds(), limit)
 	if err != nil {
