@@ -53,7 +53,8 @@ const (
 	AuthorURL = "https://github.com/BrOrlandi"
 	// RepositoryURL is the source, which the licence expects to stay reachable.
 	RepositoryURL = "https://github.com/BrOrlandi/whatsapp-mcp"
-	// SupportURL takes a voluntary payment of any amount. Empty hides the
-	// button entirely rather than linking somewhere broken.
-	SupportURL = ""
+	// SupportURL takes a voluntary payment of any amount, suggested at ten
+	// dollars. Empty hides the button entirely rather than linking somewhere
+	// broken, which is what it was until there was a link to point at.
+	SupportURL = "https://donate.stripe.com/8x200jdhA6c1d375jF9Ve06"
 )
