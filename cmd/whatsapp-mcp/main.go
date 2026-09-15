@@ -17,6 +17,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/mcp"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/mcphttp"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/rabbit"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/repair"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
@@ -33,6 +34,13 @@ func main() {
 	defer db.Close()
 	state := health.NewState()
 	state.SetDatabase(true)
+
+	// The message index is a projection of the stored events, so a decoder fix
+	// repairs the past instead of leaving it unreadable. This checks on every
+	// start and does nothing when the projection is already current.
+	go repair.RunIfStale(ctx, db, func(report repair.Report, running bool) {
+		state.SetReprojection(running, report.Events, report.Messages, report.OrphansAfter)
+	}, logger)
 
 	evolutionClient := evolution.New(cfg.EvolutionURL, cfg.EvolutionAPIKey, cfg.EvolutionTimeout)
 	sessionKey, err := httpapi.NewSessionKey()

@@ -19,6 +19,19 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
+// DecoderVersion identifies the shape this package reads. Raise it whenever a
+// fix changes what Decode produces from the same bytes: the gateway compares it
+// against the version stamped in the database and rebuilds the message
+// projection when they differ, so a decoder correction repairs the past on its
+// own rather than leaving a hole only someone who noticed would fix.
+//
+// 1: read the Evolution API v2 shape, which Evolution Go does not publish, so
+//
+//	every live message landed without instance, chat, sender or timestamp.
+//
+// 2: reads whatsmeow's own structs, and walks history sync conversations.
+const DecoderVersion = 2
+
 // Kind classifies a decoded event so the consumer knows what it changes: the
 // message index, the connection state, or neither.
 type Kind string

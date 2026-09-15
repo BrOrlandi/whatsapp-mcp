@@ -32,15 +32,26 @@ type Queue struct {
 	LastError   string    `json:"last_error,omitempty"`
 }
 
+// Reprojection is the state of the self-healing pass that rebuilds the message
+// index from the stored payloads after a decoder fix.
+type Reprojection struct {
+	Running    bool      `json:"running"`
+	Events     int       `json:"events,omitempty"`
+	Messages   int       `json:"messages,omitempty"`
+	Orphans    int64     `json:"orphans_remaining,omitempty"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
+}
+
 type Snapshot struct {
-	EvolutionConnected bool      `json:"evolution_connected"`
-	LastEventAt        time.Time `json:"last_event_at,omitempty"`
-	LastMessageAt      time.Time `json:"last_message_at,omitempty"`
-	LastHistoryAt      time.Time `json:"last_history_at,omitempty"`
-	RabbitConnected    bool      `json:"rabbit_connected"`
-	DatabaseConnected  bool      `json:"database_connected"`
-	WhatsApp           WhatsApp  `json:"whatsapp"`
-	Queues             []Queue   `json:"queues,omitempty"`
+	EvolutionConnected bool         `json:"evolution_connected"`
+	LastEventAt        time.Time    `json:"last_event_at,omitempty"`
+	LastMessageAt      time.Time    `json:"last_message_at,omitempty"`
+	LastHistoryAt      time.Time    `json:"last_history_at,omitempty"`
+	RabbitConnected    bool         `json:"rabbit_connected"`
+	DatabaseConnected  bool         `json:"database_connected"`
+	WhatsApp           WhatsApp     `json:"whatsapp"`
+	Queues             []Queue      `json:"queues,omitempty"`
+	Reprojection       Reprojection `json:"reprojection,omitzero"`
 }
 
 const FreshnessWarning = "message freshness is not trustworthy; results may be incomplete"
@@ -85,6 +96,12 @@ func (s Snapshot) Problems() []string {
 	}
 	if s.WhatsApp.Reason != "" {
 		problems = append(problems, "motivo informado: "+s.WhatsApp.Reason)
+	}
+	if s.Reprojection.Running {
+		problems = append(problems, "o índice está sendo reconstruído a partir dos eventos guardados; mensagens podem faltar até terminar")
+	}
+	if s.Reprojection.Orphans > 0 && !s.Reprojection.Running {
+		problems = append(problems, "ainda há mensagens gravadas que nenhuma consulta alcança; a reconstrução não as recuperou")
 	}
 	for _, queue := range s.Queues {
 		if !queue.Consuming {
@@ -189,6 +206,17 @@ func (s *State) ReconcileWhatsApp(connected bool) {
 	case current.State == "" || current.State == "connected":
 		current.State = "disconnected"
 		current.ChangedAt = time.Now().UTC()
+	}
+}
+
+// SetReprojection records what the repair pass is doing, so a long rebuild is
+// visible rather than looking like a stall.
+func (s *State) SetReprojection(running bool, events, messages int, orphans int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.Reprojection = Reprojection{Running: running, Events: events, Messages: messages, Orphans: orphans}
+	if !running {
+		s.snapshot.Reprojection.FinishedAt = time.Now().UTC()
 	}
 }
 
