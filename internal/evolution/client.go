@@ -55,6 +55,12 @@ func (c *Client) FetchInstances(ctx context.Context) ([]Instance, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// A 503 from an unactivated Evolution is not an outage and must not be
+		// reported as one: every route answers 503 until a licence is
+		// registered, and waiting changes nothing.
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return nil, fmt.Errorf("%w", ErrNotActivated)
+		}
 		return nil, fmt.Errorf("Evolution instances returned HTTP %d", resp.StatusCode)
 	}
 	var envelope struct {

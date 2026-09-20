@@ -274,6 +274,12 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .colophon__sep{color:var(--border-strong)}
 .colophon__support{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:var(--brand-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;text-decoration:none}
 .colophon__support:hover{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+/* ---- password reveal ---- */
+.reveal{position:relative;display:block}
+.reveal input{width:100%;padding-right:44px}
+.reveal__toggle{position:absolute;top:50%;right:6px;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer}
+.reveal__toggle:hover{color:var(--text);background:var(--surface-sunken)}
+.reveal__toggle:focus-visible{outline:3px solid var(--ring);outline-offset:1px}
 </style></head><body><div class="shell">{{end}}
 
 {{define "foot"}}
@@ -286,7 +292,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <a class="colophon__support" href="{{.}}" rel="noopener noreferrer" target="_blank">Apoie o projeto</a>{{end}}
 </p>
 </footer>
-<script src="/assets/app.js" defer></script></div></body></html>{{end}}
+<script src="/assets/app.js" defer></script><script src="/assets/password.js" defer></script></div></body></html>{{end}}
 
 {{define "githubmark"}}<svg class="colophon__icon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>{{end}}
 
@@ -477,6 +483,14 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <div class="card__head"><h2>Instâncias disponíveis</h2><a class="btn btn--ghost btn--small" href="#nova-instancia">Adicionar instância</a></div>
 <div class="card__body">
 {{if .Unavailable}}<p class="alert" role="alert">{{.Notice}}</p>
+{{if .NeedsActivation}}<div class="card" style="margin-bottom:14px"><div class="card__body">
+<h3 style="margin-bottom:8px">Ativar a Evolution Go</h3>
+<p class="muted">A Evolution Go &eacute; a camada que mant&eacute;m a sess&atilde;o do WhatsApp, e ela exige uma licen&ccedil;a pr&oacute;pria. &Eacute; uma etapa &uacute;nica: depois de registrada, nada aqui volta a pedir isso.</p>
+{{if .RegisterURL}}<div class="actions" style="margin-top:12px"><a class="btn" href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Registrar a licen&ccedil;a</a></div>
+<p class="muted" style="margin-top:10px">O link vem da pr&oacute;pria Evolution desta instala&ccedil;&atilde;o. Depois de registrar, recarregue esta p&aacute;gina.</p>
+{{else}}<p class="muted" style="margin-top:10px">N&atilde;o foi poss&iacute;vel obter o link de registro agora. Ele tamb&eacute;m sai no servidor com:</p>
+<pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}
+</div></div>{{end}}
 {{else if .Instances}}
 <form method="post" action="/instancias/selecionar">
 <ul class="rows">

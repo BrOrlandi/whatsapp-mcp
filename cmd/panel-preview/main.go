@@ -87,6 +87,9 @@ func (f *fakeEvo) QRCode(context.Context, string) (evolution.QRCode, error) {
 	return evolution.QRCode{Image: "data:image/png;base64," + sampleQR, Code: "2@AbCdEf"}, nil
 }
 func (f *fakeEvo) RequestHistory(context.Context, string, evolution.Anchor, int) error { return nil }
+func (f *fakeEvo) License(context.Context) (evolution.License, error) {
+	return evolution.License{Status: "active"}, nil
+}
 
 const (
 	previewUser     = "admin"

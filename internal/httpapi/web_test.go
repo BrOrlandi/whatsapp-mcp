@@ -159,6 +159,8 @@ type fakeEvolution struct {
 	tokens     []string
 	anchors    []evolution.Anchor
 	historyErr error
+	license    evolution.License
+	licenseErr error
 }
 
 func (f *fakeEvolution) record(call, token string) {
@@ -224,6 +226,9 @@ func (f *fakeEvolution) RequestHistory(_ context.Context, token string, anchor e
 	defer f.mu.Unlock()
 	f.anchors = append(f.anchors, anchor)
 	return f.historyErr
+}
+func (f *fakeEvolution) License(context.Context) (evolution.License, error) {
+	return f.license, f.licenseErr
 }
 func (f *fakeEvolution) QRCode(_ context.Context, token string) (evolution.QRCode, error) {
 	f.record("qr", token)
@@ -1201,4 +1206,33 @@ func TestSetupNeedsTheInstallerToken(t *testing.T) {
 	if must, _ := repo.AdminMustChangePassword(context.Background()); must {
 		t.Fatal("a password the operator chose was marked as needing a change")
 	}
+}
+
+// An Evolution with no licence answers 503 on every route. That is not an
+// outage and must not be reported as one: waiting changes nothing, so the page
+// has to name the real cause and carry the link that fixes it.
+func TestUnactivatedEvolutionIsNotReportedAsAnOutage(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{
+		err:     evolution.ErrNotActivated,
+		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+	}
+	ts, client := signedIn(t, repo, evo)
+
+	page := fetch(t, client, ts.URL+"/instancias")
+	mustContain(t, page, "instancias", "ainda não foi ativada", "Ativar a Evolution Go", "https://license.example/register?token=abc")
+	if strings.Contains(page, "Tente novamente em instantes") {
+		t.Fatal("a missing licence is described as a transient outage")
+	}
+
+	// Creating an instance says the same thing rather than leaking the raw
+	// Evolution error at the operator.
+	evo.createErr = evolution.ErrNotActivated
+	r, err := client.PostForm(ts.URL+"/instancias", url.Values{"name": {"pessoal"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "instancias", "ainda não foi ativada")
 }

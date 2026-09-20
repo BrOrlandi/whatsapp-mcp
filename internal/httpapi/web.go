@@ -67,6 +67,7 @@ type EvolutionAPI interface {
 	DisconnectInstance(context.Context, string) error
 	LogoutInstance(context.Context, string) error
 	QRCode(context.Context, string) (evolution.QRCode, error)
+	License(context.Context) (evolution.License, error)
 	RequestHistory(context.Context, string, evolution.Anchor, int) error
 }
 
@@ -489,8 +490,12 @@ type selection struct {
 	SelectedName string
 	Notice       string
 	Unavailable  bool
-	Ready        bool
-	NeedsPairing bool
+	// NeedsActivation separates the one unavailability that waiting will not
+	// fix. RegisterURL is where the operator fixes it.
+	NeedsActivation bool
+	RegisterURL     string
+	Ready           bool
+	NeedsPairing    bool
 }
 
 // readSelection lists the instances and works out which one the MCP is using.
@@ -504,6 +509,17 @@ func (a *webApp) readSelection(r *http.Request) selection {
 	state := selection{Selected: selected, Unavailable: err != nil}
 	if err != nil {
 		state.Notice = "A API do WhatsApp está indisponível no momento. Tente novamente em instantes."
+		// "Try again in a moment" is the wrong thing to say when nothing is
+		// going to change on its own. An Evolution without a licence answers
+		// 503 on every route until somebody registers it, so say that, and
+		// carry the link that does it.
+		if errors.Is(err, evolution.ErrNotActivated) {
+			state.NeedsActivation = true
+			state.Notice = "A Evolution Go ainda não foi ativada. Ela exige uma licença e responde 503 em todas as rotas até ser registrada — esperar não resolve."
+			if license, licenseErr := a.evolution.License(r.Context()); licenseErr == nil {
+				state.RegisterURL = license.RegisterURL
+			}
+		}
 		return state
 	}
 	for _, instance := range instances {
@@ -688,6 +704,10 @@ func (a *webApp) createInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := a.evolution.CreateInstance(r.Context(), name, token)
 	if err != nil {
+		if errors.Is(err, evolution.ErrNotActivated) {
+			a.fail(w, r, "/instancias", "A Evolution Go ainda não foi ativada. Registre a licença dela e tente de novo.")
+			return
+		}
 		a.fail(w, r, "/instancias", "O WhatsApp recusou a criação da instância: "+err.Error())
 		return
 	}
@@ -713,6 +733,10 @@ func (a *webApp) selectInstance(w http.ResponseWriter, r *http.Request) {
 	id := r.FormValue("instance_id")
 	instances, err := a.evolution.FetchInstances(r.Context())
 	if err != nil {
+		if errors.Is(err, evolution.ErrNotActivated) {
+			a.fail(w, r, "/instancias", "A Evolution Go ainda não foi ativada; registre a licença antes de criar uma instância.")
+			return
+		}
 		a.fail(w, r, "/instancias", "A API do WhatsApp está indisponível no momento.")
 		return
 	}

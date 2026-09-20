@@ -13,6 +13,7 @@ import (
 //
 //go:embed assets/app.js
 //go:embed assets/theme.js
+//go:embed assets/password.js
 var assets embed.FS
 
 // assetHandler serves the embedded files.
