@@ -25,12 +25,16 @@ flowchart TD
     MQ[("RabbitMQ<br/>durable quorum queues")]
     GW["whatsapp-mcp<br/>ingestion · index · MCP tools · panel"]
     DB[("PostgreSQL<br/>the message index")]
+    EVODB[("PostgreSQL<br/>Evolution's auth and users")]
+    MINIO[("MinIO<br/>media objects")]
     CLIENT(["MCP client<br/>Claude, Cursor, …"])
 
     WA <-->|"multi-device link (whatsmeow)"| EVO
     EVO -->|"every event"| MQ
     MQ -->|"consume, then commit"| GW
     EVO <-->|"REST: live reads, sending, lifecycle"| GW
+    EVO <--> EVODB
+    EVO <-->|"stores and serves media"| MINIO
     GW <--> DB
     CLIENT -->|"POST /mcp · Bearer API key"| GW
 ```

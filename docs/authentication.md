@@ -40,7 +40,14 @@ Sessions use signed, HttpOnly, SameSite cookies with concurrency-safe
 server-side state. A process restart intentionally invalidates active sessions.
 
 The first visit to a fresh install creates the account. There is no default
-password.
+password, and you choose the username as well.
+
+Where that form is reachable from the internet it is guarded by `SETUP_TOKEN`:
+it opens only at `/setup?token=<value>` and answers 403 without it, throttled
+per source address like every other credential check here. The installer
+generates the token and prints the finished link. The window it closes is small
+but real — an address that exists and has no administrator yet belongs to
+whoever asks first.
 
 ## The instance token
 

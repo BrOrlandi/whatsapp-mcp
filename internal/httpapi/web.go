@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -120,8 +121,11 @@ type webApp struct {
 	evolution EvolutionAPI
 	status    StatusReader
 	publicURL string
-	sessions  *sessions
-	templates *template.Template
+	// setupToken guards the first-run form. Empty leaves it unguarded, which is
+	// right for loopback and wrong for anything the installer published.
+	setupToken string
+	sessions   *sessions
+	templates  *template.Template
 	// logins throttles password guessing. The administrator password is the
 	// weakest credential the gateway holds — a person chose it — and it opens
 	// the panel that owns the WhatsApp session, so the login form needs the same
@@ -135,8 +139,8 @@ const (
 	loginLockout  = 5 * time.Minute
 )
 
-func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL string) http.Handler {
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string) http.Handler {
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -320,17 +324,54 @@ func (a *webApp) setupPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", 303)
 		return
 	}
-	a.render(w, "setup", layout{Title: "Configuração inicial"})
+	// The token arrives in the link the installer printed, so there is nothing
+	// for anyone to copy or keep. It lives in the query only for this first
+	// request: the form carries it in a hidden field so the POST does not put
+	// it back in the address bar, and Referrer-Policy keeps it out of any
+	// outbound request. It stops meaning anything the moment an administrator
+	// exists, which is the request right after this one.
+	page := setupPageData{layout: layout{Title: "Configuração inicial"}}
+	if a.setupToken != "" {
+		presented := strings.TrimSpace(r.URL.Query().Get("token"))
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(a.setupToken)) != 1 {
+			page.Locked = true
+			w.WriteHeader(http.StatusForbidden)
+			a.render(w, "setup", page)
+			return
+		}
+		page.Token = a.setupToken
+	}
+	a.render(w, "setup", page)
 }
 func (a *webApp) setup(w http.ResponseWriter, r *http.Request) {
 	if _, _, err := a.admin(r); err == nil {
 		http.Error(w, "O administrador já existe.", 409)
 		return
 	}
+	// The token is what closes the window between the installer printing a
+	// public URL and the operator reaching it. Without this, whoever arrives
+	// first becomes the administrator of somebody else's WhatsApp session.
+	if a.setupToken != "" {
+		source := ratelimit.ClientIP(r)
+		if !a.logins.Allow(source) {
+			w.Header().Set("Retry-After", "300")
+			w.WriteHeader(http.StatusTooManyRequests)
+			a.render(w, "setup", setupPageData{layout: layout{Title: "Configuração inicial", Error: "Tentativas demais. Espere alguns minutos e tente de novo."}, Locked: true})
+			return
+		}
+		presented := strings.TrimSpace(r.FormValue("setup_token"))
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(a.setupToken)) != 1 {
+			a.logins.Fail(source)
+			w.WriteHeader(http.StatusForbidden)
+			a.render(w, "setup", setupPageData{layout: layout{Title: "Configuração inicial", Error: "O link de instalação não confere. Use o link completo que o instalador imprimiu."}, Locked: true})
+			return
+		}
+		a.logins.Succeed(source)
+	}
 	u := strings.TrimSpace(r.FormValue("username"))
 	p := r.FormValue("password")
 	if u == "" || len(p) < 10 || len([]byte(p)) > 72 {
-		a.render(w, "setup", layout{Title: "Configuração inicial", Error: "Use um usuário e uma senha com pelo menos 10 caracteres."})
+		a.render(w, "setup", setupPageData{layout: layout{Title: "Configuração inicial", Error: "Use um usuário e uma senha com pelo menos 10 caracteres."}, Token: a.setupToken})
 		return
 	}
 	h, err := auth.HashPassword(p)
@@ -397,6 +438,16 @@ type layout struct {
 	Refresh      bool
 	SessionLabel string
 	SessionTone  string
+}
+
+// setupPageData tells the first-run form whether to ask for the token.
+type setupPageData struct {
+	layout
+	// Token is echoed into a hidden field so the POST carries it without the
+	// address bar doing so. Locked means the visitor arrived without the link
+	// the installer printed, and the form is not offered at all.
+	Token  string
+	Locked bool
 }
 
 // passwordPageData is the password page's own shape rather than two more

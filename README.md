@@ -121,11 +121,9 @@ by printing where to go:
 URL:
   https://a83f12c9.18-228-123-45.sslip.io
 
-Administrator:
-  admin
+Open this to create your administrator:
 
-Temporary password:
-  XXXXXXXXXXXXXXXX
+  https://a83f12c9.18-228-123-45.sslip.io/setup?token=7f3ac921d4e8
 ```
 
 That URL is your panel and your MCP endpoint — no domain to buy, no DNS record

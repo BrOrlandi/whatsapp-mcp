@@ -56,19 +56,6 @@ func (s *Store) CreateAdmin(ctx context.Context, username, hash string) error {
 	return s.createAdmin(ctx, username, hash, false)
 }
 
-// BootstrapAdmin creates the administrator non-interactively, for an installer
-// that has to invent the first password. The account is marked as needing a
-// password change, because a password printed to a terminal by a script is not
-// one the operator chose. It does nothing if an administrator already exists,
-// which is what makes re-running an installer safe.
-func (s *Store) BootstrapAdmin(ctx context.Context, username, hash string) error {
-	err := s.createAdmin(ctx, username, hash, true)
-	if errors.Is(err, ErrAdminExists) {
-		return nil
-	}
-	return err
-}
-
 func (s *Store) createAdmin(ctx context.Context, username, hash string, mustChange bool) error {
 	result, err := s.DB.ExecContext(ctx, `INSERT INTO control_panel_admin(singleton,username,password_hash,must_change_password) VALUES(TRUE,$1,$2,$3) ON CONFLICT(singleton) DO NOTHING`, username, hash, mustChange)
 	if err != nil {

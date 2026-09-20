@@ -73,6 +73,20 @@ Open the panel — `http://127.0.0.1:8080/` by default. The first visit asks you
 to create the administrator account; there is no default password to forget to
 change.
 
+On a panel that is reachable from the internet, that form needs guarding: in the
+seconds between the address existing and you reaching it, whoever arrives first
+becomes the administrator of your WhatsApp session. `SETUP_TOKEN` in the
+environment is what closes that — the form then opens only at
+`/setup?token=<the token>` and refuses everything else. `install.sh` generates
+one and prints the finished link, so there is nothing to copy. Set it yourself
+if you publish the panel some other way:
+
+```sh
+SETUP_TOKEN=$(openssl rand -hex 12)
+```
+
+Leave it empty for a panel bound to loopback, where there is no race to lose.
+
 Then, in **Instâncias**, create an instance by name. The panel registers it with
 Evolution, subscribes it to the `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` and
 `CONNECTION` event queues, starts the client and shows a QR code. Scan it from

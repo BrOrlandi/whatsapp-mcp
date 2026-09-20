@@ -139,11 +139,11 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-whatsapp}
       DATABASE_URL: postgres://${MCP_DB_USER}:${MCP_DB_PASSWORD}@postgres-mcp:5432/${MCP_DB_NAME:-whatsapp_mcp}?sslmode=disable
       FRESHNESS_WINDOW: ${FRESHNESS_WINDOW:-5m}
-      # Set by the installer so the first administrator exists before the panel
-      # is reachable. Empty means the panel asks for one on first visit, which
-      # is right for a loopback install and wrong for a public one.
-      BOOTSTRAP_ADMIN_USER: ${BOOTSTRAP_ADMIN_USER:-admin}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Guards the first-run form. The installer generates one because it
+      # publishes a URL to the internet, where whoever reaches /setup first
+      # would otherwise become the administrator. Empty leaves the form open,
+      # which is right for a panel bound to loopback.
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
     # Bound to loopback by default: the panel has no business facing the
     # internet directly. Put a TLS-terminating reverse proxy in front of it and
     # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens

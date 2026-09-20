@@ -105,7 +105,7 @@ func main() {
 	}
 	st := &fakeStore{hash: hash, used: os.Getenv("PREVIEW_CONNECTED") == "true"}
 	_ = st.CreateAPIKey(context.Background(), "Claude Code no notebook", "inst-1", "d", "wamcp-a1B2c3")
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: true}, state, []byte("preview-session-key-preview-session-key"), "https://whatsapp-mcp.example.com")
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: true}, state, []byte("preview-session-key-preview-session-key"), "https://whatsapp-mcp.example.com", "")
 	log.Printf("painel de demonstração em http://127.0.0.1:8090 — usuário %q, senha %q", previewUser, previewPassword)
 	_ = http.ListenAndServe("127.0.0.1:8090", handler)
 }

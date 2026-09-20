@@ -62,6 +62,7 @@ Read by the `whatsapp-mcp` binary:
 | `EVOLUTION_TIMEOUT` | `5s` | Per-request timeout against Evolution. |
 | `FRESHNESS_WINDOW` | `5m` | How old the newest persisted event may be before `/readyz` reports 503. |
 | `STATUS_POLL_INTERVAL` | `15s` | How often the gateway reconciles session state with Evolution. |
+| `SETUP_TOKEN` | unset | Guards the first-run form: it opens only at `/setup?token=<value>`. Set it whenever the panel is reachable from the internet; leave it empty on loopback. Stops mattering once an administrator exists. |
 | `MCP_STDIO` | unset | `true` enables the stdio transport. Development only — it carries no credential. |
 
 The Compose stack adds the credentials for the services it runs

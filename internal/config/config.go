@@ -19,11 +19,12 @@ type Config struct {
 	FreshnessWindow    time.Duration
 	StatusPollInterval time.Duration
 	StdioEnabled       bool
-	// The installer has to create the first administrator without a person at a
-	// keyboard. Both are read once at start and never stored anywhere but the
-	// hashed password in PostgreSQL.
-	BootstrapAdminUser     string
-	BootstrapAdminPassword string
+	// SetupToken guards the first-run form. An installer that publishes a URL
+	// to the internet cannot leave "create the administrator" open to whoever
+	// reaches it first, so it generates a token and prints it; the form refuses
+	// to create anything without it. Empty means unguarded, which is the right
+	// default for a panel bound to loopback.
+	SetupToken string
 }
 
 func Load() Config {
@@ -43,9 +44,8 @@ func Load() Config {
 		// The stdio transport is a local development convenience. The supported
 		// path is the authenticated HTTP endpoint, so stdio stays off unless asked
 		// for: a server process reading stdin has no client on the other end.
-		StdioEnabled:           os.Getenv("MCP_STDIO") == "true",
-		BootstrapAdminUser:     env("BOOTSTRAP_ADMIN_USER", "admin"),
-		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
+		StdioEnabled: os.Getenv("MCP_STDIO") == "true",
+		SetupToken:   os.Getenv("SETUP_TOKEN"),
 	}
 }
 

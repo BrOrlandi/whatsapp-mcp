@@ -243,7 +243,7 @@ func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution) (*httptest.Serve
 	repo.mu.Lock()
 	repo.user, repo.hash = "admin", hash
 	repo.mu.Unlock()
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example"))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -292,7 +292,7 @@ func mustNotContain(t *testing.T, page, name string, unwanted ...string) {
 
 func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -340,7 +340,7 @@ func TestEveryPageInlinesTheBrandLogo(t *testing.T) {
 	if !strings.HasPrefix(logo, "<svg") {
 		t.Fatalf("brand.LogoSVG is not inline SVG: %q", logo)
 	}
-	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	defer fresh.Close()
 	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="username"`, `name="password"`)
 
@@ -567,7 +567,7 @@ func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
 // The pairing QR arrives as a data: URI, so the policy must allow it for images
 // and for nothing else.
 func TestContentSecurityPolicyAllowsInlineQRImages(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/login")
 	if err != nil {
@@ -622,7 +622,7 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.user, repo.hash = "admin", hash
-	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example"))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", ""))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -842,7 +842,7 @@ func TestKeyRequiresAName(t *testing.T) {
 // The copy helper is served from the panel itself, which is what lets the
 // content security policy stay at 'self'.
 func TestPanelServesItsOwnScript(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/assets/app.js")
 	if err != nil {
@@ -1004,7 +1004,7 @@ func TestProgressEndpointReportsTheChecklistAndNothingElse(t *testing.T) {
 // logged in: a browser asks for it on the login page, and an icon behind the
 // session cookie would just 302 into the login form forever.
 func TestPanelServesItsOwnIcons(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example"))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	defer ts.Close()
 	for path, wantType := range map[string]string{
 		"/favicon.svg":          "image/svg+xml",
@@ -1133,4 +1133,72 @@ func newJar(t *testing.T) *cookiejar.Jar {
 		t.Fatal(err)
 	}
 	return jar
+}
+
+// The installer publishes a URL to the internet, so "create the administrator"
+// cannot be open to whoever reaches it first. The token in the link the
+// installer printed is what closes that window — and the link is the only way
+// in, so the form is not even offered without it.
+func TestSetupNeedsTheInstallerToken(t *testing.T) {
+	const token = "9f2c1ab4d0e7"
+	repo := newRepo()
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token))
+	defer ts.Close()
+	client := &http.Client{Jar: newJar(t)}
+
+	// No token: no form at all.
+	r, err := client.Get(ts.URL + "/setup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("bare /setup returned %d", r.StatusCode)
+	}
+	if strings.Contains(string(body), `name="username"`) {
+		t.Fatal("the form was offered without the token")
+	}
+
+	// A wrong token is refused the same way.
+	r, err = client.Get(ts.URL + "/setup?token=wrong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("a wrong token returned %d", r.StatusCode)
+	}
+
+	// Posting straight past the page is refused too.
+	r, err = client.PostForm(ts.URL+"/setup", url.Values{"username": {"intruso"}, "password": {"uma senha longa"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST without the token returned %d", r.StatusCode)
+	}
+	if repo.user != "" {
+		t.Fatalf("an administrator was created without the token: %q", repo.user)
+	}
+
+	// The link works, and the operator picks both the name and the password.
+	page := fetch(t, client, ts.URL+"/setup?token="+token)
+	mustContain(t, page, "setup", `name="username"`, `name="setup_token"`, token)
+
+	r, err = client.PostForm(ts.URL+"/setup", url.Values{
+		"setup_token": {token}, "username": {"bruno"}, "password": {"uma senha bem longa"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if repo.user != "bruno" {
+		t.Fatalf("administrator = %q, want the name the operator chose", repo.user)
+	}
+	// And it is a real sign-in, not a password waiting to be replaced.
+	if must, _ := repo.AdminMustChangePassword(context.Background()); must {
+		t.Fatal("a password the operator chose was marked as needing a change")
+	}
 }

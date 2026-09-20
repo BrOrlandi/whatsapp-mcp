@@ -651,15 +651,20 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <section class="card">
 <div class="card__head"><h2>Configuração inicial</h2></div>
 <div class="card__body">
-<p class="lead">Crie o único administrador deste painel. Depois disso esta página deixa de aceitar cadastros.</p>
+{{if .Locked}}<p class="lead">Esta p&aacute;gina s&oacute; abre pelo link que o instalador imprimiu no fim da instala&ccedil;&atilde;o, com o token no fim dele.</p>
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+<p class="muted">Perdeu o link? Ele pode ser remontado no servidor:</p>
+<pre><code>echo "$(cat /opt/whatsapp-mcp/hostname | sed 's|^|https://|')/setup?token=$(sed -n 's/^SETUP_TOKEN=//p' /opt/whatsapp-mcp/.env)"</code></pre>
+{{else}}<p class="lead">Crie o único administrador deste painel. Depois disso esta página deixa de aceitar cadastros.</p>
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 <form method="post">
+{{with .Token}}<input type="hidden" name="setup_token" value="{{.}}">{{end}}
 <label class="field" for="username"><span class="field__label">Usuário</span></label>
 <input id="username" type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false">
 <label class="field" for="password"><span class="field__label">Senha<span class="field__hint">Mínimo de 10 caracteres.</span></span></label>
 <input id="password" type="password" name="password" minlength="10" required autocomplete="new-password">
 <div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Criar administrador</button></div>
-</form>
+</form>{{end}}
 </div></section>
 <p class="muted" style="text-align:center">As senhas são guardadas com bcrypt e nunca aparecem nos logs.</p>
 </div>
