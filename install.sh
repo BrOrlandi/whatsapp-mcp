@@ -236,21 +236,26 @@ grep -q "^PUBLIC_URL=https://${PUBLIC_HOST}$" .env || sed -i "s|^PUBLIC_URL=.*|P
 # ---------------------------------------------------------------- firewall
 
 CURRENT_STEP="configuring the firewall"
-step "Configuring the firewall"
+step "Ports"
+info "this stack publishes 80 and 443, and nothing else"
+# The rules are registered so that enabling ufw later does not lock anyone out,
+# but ufw is deliberately not enabled. Docker writes its own DNAT rules into
+# the nat table, which is evaluated before ufw's filter rules, so ufw does not
+# govern a published container port at all: `ufw deny 80` leaves 80 open. The
+# only thing it would actually filter here is sshd — the one service you need.
+# Enabling it would buy the appearance of a firewall and not the substance.
 if command -v ufw >/dev/null 2>&1; then
-    # SSH first and always: a firewall that locks the operator out of their own
-    # machine is worse than no firewall.
     ufw allow 22/tcp  >/dev/null 2>&1 || true
     ufw allow 80/tcp  >/dev/null 2>&1 || true
     ufw allow 443/tcp >/dev/null 2>&1 || true
-    if ufw status | head -1 | grep -q inactive; then
-        info "ufw is installed but inactive; leaving it that way. Enable it with: ufw enable"
+    if ufw status 2>/dev/null | head -1 | grep -q inactive; then
+        info "ufw rules registered for 22, 80 and 443; ufw left inactive on purpose"
     else
         info "ufw: 22, 80 and 443 allowed"
     fi
-else
-    info "ufw is not installed; skipping. Only 80 and 443 are published by the stack."
 fi
+info "filter at your provider instead — it sits in front of the machine, where"
+info "Docker cannot route around it"
 
 # ---------------------------------------------------------------- DNS check
 
@@ -340,6 +345,10 @@ printf '  whatsapp-mcp status\n'
 printf '  whatsapp-mcp logs\n'
 printf '  whatsapp-mcp restart\n'
 printf '  whatsapp-mcp update\n\n'
+printf 'Ports: this stack needs 80 and 443 open, and nothing else. Keep your\n'
+printf 'provider firewall (DigitalOcean Cloud Firewall, AWS security group, and\n'
+printf 'so on) to 80, 443 and whichever port you reach SSH on. Never publish the\n'
+printf 'databases, RabbitMQ, MinIO or Evolution.\n\n'
 printf 'Next:\n'
 printf '  1. Open the link above and create your administrator.\n'
 printf '  2. Activate Evolution Go - it requires a licence and answers 503\n'

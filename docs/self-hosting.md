@@ -130,6 +130,40 @@ account. If you expose it, expose it behind TLS.
 Never publish Evolution Go, RabbitMQ, MinIO or either PostgreSQL. The gateway is
 the only service that belongs on a public address.
 
+## Ports and the firewall
+
+**The application needs exactly two public ports: 80 and 443.** Everything else
+should be closed, including everything this stack runs internally.
+
+| Port | Why it has to be public |
+|---|---|
+| `443/tcp` | The panel and the MCP endpoint. This is the one clients use. |
+| `80/tcp` | Let's Encrypt answers its HTTP challenge here, so the certificate cannot be issued or renewed without it. It also redirects to 443; nothing is served in the clear. |
+| your SSH port | Not the application's — yours. Keep it reachable only from where you administer the machine. |
+
+Nothing else belongs on a public address. Evolution Go, RabbitMQ, MinIO and both
+PostgreSQL instances stay on the Compose network; the RabbitMQ and MinIO
+management ports bind to `127.0.0.1` and are reachable only through an SSH
+tunnel.
+
+### Filter at your provider, not with ufw
+
+Which tool you use depends on the provider — DigitalOcean Cloud Firewall, AWS
+security groups, Hetzner Firewall, Oracle security lists — but the rule is the
+same everywhere: allow 80, 443 and your SSH port, deny the rest.
+
+Do that at the provider rather than with `ufw` on the machine, because **`ufw`
+does not govern a published container port.** Docker writes its own DNAT rules
+into the `nat` table, which is evaluated before ufw's filter rules, so
+`ufw deny 80` leaves port 80 wide open. The only thing ufw would actually filter
+on a host like this is `sshd`, which is the one service you need. `install.sh`
+registers the ufw rules so enabling it later cannot lock you out, and leaves it
+inactive on purpose: a firewall that appears to protect the published ports and
+does not is worse than none.
+
+A provider firewall sits in front of the machine, where Docker has no way to
+route around it.
+
 ## Upgrading
 
 ```sh
