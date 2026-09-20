@@ -35,6 +35,8 @@ jobs:
 
       # `edge` follows main, a version tag gets its own tags plus `latest`.
       # Everything also gets the commit sha, so a deploy can be pinned exactly.
+      # Both `0.1.0` and `v0.1.0` are published: the bare form is the registry
+      # convention, the prefixed one is what people copy from the git tag.
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -42,6 +44,7 @@ jobs:
           tags: |
             type=edge,branch=main
             type=semver,pattern={{version}}
+            type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
           flavor: latest=${{ startsWith(github.ref, 'refs/tags/v') }}

@@ -214,13 +214,13 @@ The gateway is published on every push to `main` and on every version tag:
 | | |
 |---|---|
 | Image | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` and `linux/arm64` |
-| Tags | `edge` follows `main`; `v1.2.3`, `1.2`, `latest` on a release; `sha-<commit>` always |
+| Tags | `edge` follows `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` on a release; `sha-<commit>` always |
 | Binaries | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` on each [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), with `checksums.txt` |
 
 Pin a version with `WHATSAPP_MCP_TAG` in `.env`:
 
 ```sh
-WHATSAPP_MCP_TAG=v0.1.0
+WHATSAPP_MCP_TAG=v0.1.0   # or 0.1.0, 0.1, latest, edge, sha-<commit>
 ```
 
 The binary on its own needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and
