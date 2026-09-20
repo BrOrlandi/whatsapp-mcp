@@ -60,7 +60,7 @@ func recipeBook() []recipe {
 	return []recipe{
 		{
 			Title:   "Agendar uma mensagem",
-			Summary: "O gateway não tem agendador, e não precisa ter. Quem espera é o assistente: a tarefa fica marcada no cliente e, na hora certa, ela chama send_text_message como qualquer outra chamada.",
+			Summary: "O gateway não tem agendador, e não precisa ter. Quem espera é o assistente: a tarefa fica anotada com ele e, na hora certa, ele chama send_text_message como qualquer outra chamada.",
 			Uses:    []string{"send_text_message", "check_numbers"},
 			Prompt: `Amanhã às 9h, mande para o Lucas:
 "Bom dia! Confirma nossa call das 14h?"
@@ -68,17 +68,21 @@ func recipeBook() []recipe {
 Antes de enviar, confirme que o número existe com check_numbers.
 Se a entrega voltar como unconfirmed, me avise em vez de reenviar.`,
 			Schedule: "Uma vez, no horário marcado",
-			Caveat:   "A janela depende do cliente estar rodando na hora. Um agendamento de semanas à frente é mais frágil do que um de horas.",
+			Caveat:   "Na hora marcada, duas coisas precisam estar funcionando: o servidor de pé e o MCP conectado no assistente, que é quem guarda a tarefa e faz a chamada. Um agendamento de semanas à frente é mais frágil do que um de horas.",
 		},
 		{
 			Title:   "Vigiar palavras-chave",
-			Summary: "Uma rotina diária lê o dia inteiro de conversas, procura os termos que importam e avisa só quando algo aparece. Nada disso mexe no gateway: search_messages já responde a pergunta, o resto é instrução.",
+			Summary: "Uma rotina diária lê o dia inteiro de conversas, procura os termos que importam e avisa só quando algo aparece. Os termos são seus: o nome da empresa, o de um produto, o dos concorrentes, o de um cliente grande, ou as palavras que costumam vir antes de um problema. Nada disso mexe no gateway: search_messages já responde a pergunta, o resto é instrução.",
 			Uses:    []string{"search_messages", "list_chats", "get_chat_messages"},
 			Prompt: `Todo dia às 19h, procure nas mensagens das últimas 24h por:
-"contrato", "proposta", "reunião", "urgente", "boleto"
+
+negócio: "contrato", "proposta", "boleto", "reunião", "urgente"
+minha empresa: "[nome da empresa]", "[nome do produto]"
+concorrentes: "[concorrente 1]", "[concorrente 2]"
 
 Para cada acerto, me diga quem falou, em qual conversa e o trecho.
-Se não houver nenhum, responda apenas "nada hoje" — não invente resumo.`,
+Agrupe por categoria. Se não houver nenhum, responda apenas
+"nada hoje" — não invente resumo.`,
 			Schedule: "Diária",
 			Caveat:   "search_messages cobre só o que foi indexado. Se whatsapp_status apontar um gap no período, o silêncio pode ser perda de dado e não ausência de assunto.",
 		},

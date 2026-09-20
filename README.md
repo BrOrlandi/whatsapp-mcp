@@ -17,29 +17,30 @@
 
 ---
 
+> ### Use this at your own risk
+>
+> WhatsApp publishes no official API for a personal account. To make an MCP
+> server possible at all, this project drives WhatsApp through
+> [Evolution Go](https://github.com/EvolutionAPI/evolution-go), an **unofficial**
+> client built on [whatsmeow](https://github.com/tulir/whatsmeow) — the same
+> mechanism as WhatsApp Web, not the WhatsApp Business API.
+>
+> WhatsApp does not sanction this. A linked account can be logged out at any
+> time, broken by a protocol change, or restricted or banned. Nothing here is
+> guaranteed, warranted or supported, and you carry whatever happens to your
+> number. Start with an account you can afford to lose.
+
 Ask Claude to read a conversation, search a year of messages, send a file, run a
-poll — against your own WhatsApp, on your own server. Evolution Go, RabbitMQ and
-PostgreSQL run behind it; the MCP client needs none of them.
+poll — against your own WhatsApp, on your own server. You run one stack, link
+your number by QR code, and hand your agent a single API key.
 
-A client needs exactly one thing: an API key. The key identifies the account and
-the WhatsApp instance it is authorised for, so there is no user, no password and
-no instance name to configure.
+<p align="center">
+  <img src="docs/assets/panel-conectar.png" alt="The Conectar page of the control panel" width="820">
+</p>
 
-```json
-{
-  "mcpServers": {
-    "whatsapp": {
-      "type": "http",
-      "url": "https://whatsapp.example.com/mcp",
-      "headers": { "Authorization": "Bearer wamcp-…" }
-    }
-  }
-}
-```
-
-Keys are issued and revoked in the control panel, which prints that block
-already filled in. Keep the key in the client's credential store, never in a
-prompt or a versioned file.
+The gateway ships with its own control panel: **Conectar** issues client keys
+and prints the configuration block already filled in, **Instâncias** owns the
+WhatsApp connection, **Estado** is the diagnostic view.
 
 ## What it can do
 
@@ -55,70 +56,66 @@ prompt or a versioned file.
 - **Ask about the account**: contacts, groups, profile pictures, which numbers
   are on WhatsApp, and the gateway's own health and index coverage.
 
-The full list with arguments lives at `/documentacao` in the panel, read from
-the MCP server's own definitions — and in [docs/mcp-tools.md](docs/mcp-tools.md)
-with the reasoning behind the tricky ones.
-
-## The control panel
-
-The same HTTP server serves a Portuguese control panel, split by task:
-**Conectar** hands a client everything it needs, **Instâncias** owns the
-WhatsApp account lifecycle, **Estado** is the diagnostic view. Creating
-something happens in a dialog, and destructive actions ask first.
-
-<p align="center">
-  <img src="docs/assets/panel-conectar.png" alt="The Conectar page of the control panel" width="720">
-</p>
-
-## Architecture
-
-```mermaid
-flowchart TD
-    WA(["WhatsApp"])
-    EVO["Evolution Go<br/>session · REST · QR pairing"]
-    MQ[("RabbitMQ<br/>durable quorum queues")]
-    GW["whatsapp-mcp<br/>ingestion · index · MCP tools · panel"]
-    DB[("PostgreSQL<br/>the message index")]
-    CLIENT(["MCP client<br/>Claude, Cursor, …"])
-
-    WA <-->|"multi-device link (whatsmeow)"| EVO
-    EVO -->|"every event"| MQ
-    MQ -->|"consume, then commit"| GW
-    EVO <-->|"REST: live reads, sending, lifecycle"| GW
-    GW <--> DB
-    CLIENT -->|"POST /mcp · Bearer API key"| GW
-```
-
-| Component | Role |
-|---|---|
-| **`whatsapp-mcp`** | This repository. The MCP endpoint, the control panel, the ingestion loop and the message index. The only service with a public address. |
-| **[Evolution Go](https://github.com/EvolutionAPI/evolution-go)** | Holds the WhatsApp session through [whatsmeow](https://github.com/tulir/whatsmeow), answers live reads and sends, publishes every event. Apache-2.0 with brand-protection conditions; **requires activation** before it answers. |
-| **RabbitMQ** | Carries events from Evolution to the gateway. Durable quorum queues, manual acknowledgements. |
-| **PostgreSQL** ×2 | One holds the message index, the keys and the instance registry; the other is Evolution's own. |
-| **MinIO** | Where Evolution stores media. |
-
-The shape is forced by one fact: Evolution Go exposes no route to list
-conversations or read message history. So PostgreSQL is the only source of
-history, it covers exactly what has been ingested, and every reading tool
-reports `history_since` rather than pretending otherwise.
-[docs/architecture.md](docs/architecture.md) has the rest.
+The full list with arguments lives at `/documentacao` in the panel, generated
+from the MCP server's own definitions — and in
+[docs/mcp-tools.md](docs/mcp-tools.md) with the reasoning behind the tricky
+ones.
 
 ## Install
 
-### One command, on a fresh VM
+Four things, and the longest part is waiting for Docker to pull images:
 
-Create a Linux VM anywhere — Lightsail, Vultr, DigitalOcean, Hetzner — with
-ports 80 and 443 open, then:
+1. Rent a small Linux server.
+2. Run the installer on it — one command.
+3. Link your WhatsApp by scanning a QR code in the panel.
+4. Paste the generated block into your MCP client.
+
+There is no hosted version and there will not be one: the whole point is that
+your messages stay on a machine you control.
+
+### 1. The server
+
+The stack is six containers — the gateway, Evolution Go, RabbitMQ, MinIO and
+two PostgreSQL databases — so this does not run on the smallest instance a
+provider sells.
+
+| | Minimum | Recommended |
+|---|---|---|
+| CPU | 1 vCPU | 2 vCPU |
+| RAM | 2 GB | 4 GB |
+| Disk | 20 GB SSD | 80 GB SSD — the message index grows with your history |
+| OS | Debian family | Ubuntu 24.04 LTS (what is tested) |
+| Architecture | x86-64 or arm64 | either |
+| Network | ports 80 and 443 reachable from the internet, so Let's Encrypt can answer its challenge | |
+
+**Rent it close to home.** Every message your account sends or receives ends up
+on that disk in plain text. If you and the people you talk to are in Brazil,
+put the machine in Brazil: the conversations stay under the jurisdiction you
+already answer to under the LGPD, and the round trip to WhatsApp is shorter.
+
+| Provider | Brazilian region | Notes |
+|---|---|---|
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | Flat monthly price, simplest AWS path |
+| [Vultr](https://www.vultr.com/) | São Paulo | Hourly billing, fast to destroy and retry |
+| [Magalu Cloud](https://magalu.cloud/) | Brazil | Brazilian company, data and billing in Brazil |
+| [Hostinger VPS](https://www.hostinger.com.br/servidor-vps) | São Paulo | Cheapest of the four, long-term plans |
+| [Hetzner](https://www.hetzner.com/cloud) | — (Germany, Finland, US) | Best price per GB of RAM if the location does not matter to you |
+
+Any provider that sells an Ubuntu VM works; these are just ones that do it
+without ceremony.
+
+### 2. Run the installer
+
+SSH into the fresh machine and run:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh | sudo bash
 ```
 
-The installer puts Docker on the machine if it is missing, generates every
-secret, derives a hostname from the VM's own public IPv4 through
-[sslip.io](https://sslip.io), gets a Let’s Encrypt certificate for it, starts
-the stack behind Traefik, and prints the URL and a temporary administrator
-password:
+It installs Docker if it is missing, generates every secret, derives a hostname
+from the VM's own public IPv4 through [sslip.io](https://sslip.io), gets a
+Let's Encrypt certificate for it, starts the stack behind Traefik, and finishes
+by printing where to go:
 
 ```
 URL:
@@ -131,50 +128,106 @@ Temporary password:
   XXXXXXXXXXXXXXXX
 ```
 
-No domain to buy, no DNS record to create. The panel refuses to do anything
-else until that temporary password is replaced, and re-running the installer
-is safe: secrets, the hostname and your data are left alone.
+That URL is your panel and your MCP endpoint — no domain to buy, no DNS record
+to create. The panel refuses to do anything else until the temporary password
+is replaced. Re-running the installer is safe: secrets, the hostname and your
+data are left alone.
 
 Afterwards `whatsapp-mcp status`, `logs`, `restart` and `update` manage the
 installation, which lives in `/opt/whatsapp-mcp`.
 
-**Requirements:** Ubuntu 24.04 LTS (the Debian family works; 24.04 is what is
-tested), x86-64 or arm64, ~2 GB of RAM, and 80/443 reachable from the internet
-so Let’s Encrypt can answer its challenge.
+### 3. Activate Evolution Go
 
-### By hand, with Docker Compose
+Evolution Go requires a licence to operate and answers 503 until it is
+activated, which means the panel will report it as unavailable until you do.
+Activation happens once — follow the flow in the
+[Evolution Go repository](https://github.com/EvolutionAPI/evolution-go).
+
+### 4. Link your WhatsApp
+
+Sign in to the panel and set your own password. In **Instâncias**, create an
+instance by name: the panel registers it with Evolution, subscribes it to the
+event queues, starts the client and shows a QR code. Scan it from your phone
+under **Linked devices → Link a device**.
+
+The pairing page refreshes itself, so a scanned code moves forward on its own,
+and it can mint a new code when one expires. From then on the gateway indexes
+everything that arrives.
+
+### 5. Point your agent at it
+
+A client needs exactly one thing: an API key. The key identifies the account
+and the WhatsApp instance it is authorised for, so there is no user, no
+password and no instance name to configure.
+
+Generate one under **Conectar**. The page shows the secret once, next to a
+`claude mcp add` command and this block, both already filled in with your own
+address:
+
+```json
+{
+  "mcpServers": {
+    "whatsapp": {
+      "type": "http",
+      "url": "https://whatsapp.example.com/mcp",
+      "headers": { "Authorization": "Bearer wamcp-…" }
+    }
+  }
+}
+```
+
+It then polls, and closes the step the moment your client authenticates with
+that key. Keep the key in the client's credential store, never in a prompt or a
+versioned file.
+
+### Running it some other way
+
+If you would rather bring your own host, TLS or orchestration, the stack is one
+Compose file:
 
 ```sh
 git clone https://github.com/BrOrlandi/whatsapp-mcp.git
 cd whatsapp-mcp
-cp .env.example .env
+cp .env.example .env    # replace every change-me-long-random-value
+docker compose up --build -d
 ```
 
-Replace every `change-me-long-random-value` in `.env` with a *distinct* random
-value, and set `PUBLIC_URL` to the address clients will use. Then:
+That publishes the panel on `127.0.0.1:8080` and nothing else; you put TLS in
+front of it. [docs/self-hosting.md](docs/self-hosting.md) covers the
+configuration, the reverse-proxy recipes, upgrades and backups.
+
+## Under the hood
+
+Evolution Go holds the WhatsApp session and publishes every event to RabbitMQ;
+the gateway consumes them into PostgreSQL, which is the only source of
+conversations and history, and serves the MCP tools and the panel from the same
+code. Your agent talks to one service and needs one credential; nothing else in
+the stack belongs on a public address.
+
+[docs/architecture.md](docs/architecture.md) has the diagram, what each
+container is for, and why the shape is forced.
+
+### Images and binaries
+
+The gateway is published on every push to `main` and on every version tag:
+
+| | |
+|---|---|
+| Image | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` and `linux/arm64` |
+| Tags | `edge` follows `main`; `v1.2.3`, `1.2`, `latest` on a release; `sha-<commit>` always |
+| Binaries | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` on each [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), with `checksums.txt` |
+
+Pin a version with `WHATSAPP_MCP_TAG` in `.env`:
 
 ```sh
-docker compose config        # fails loudly if .env is incomplete
-docker compose up --build -d
-curl http://127.0.0.1:8080/healthz
+WHATSAPP_MCP_TAG=v0.1.0
 ```
 
-That publishes the panel on `127.0.0.1:8080` and nothing else. Put TLS in
-front of it yourself, or use `deploy/docker-compose.public.yml` to get the
-same Traefik the installer sets up.
+The binary on its own needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and
+`EVOLUTION_API_KEY`, and expects an Evolution and a PostgreSQL that already
+exist — see [docs/operations.md](docs/operations.md). Most people want the
+Compose stack.
 
-### Either way
-
-**Activate Evolution Go.** It requires a licence to operate and answers 503
-until activated — follow the flow in the
-[Evolution Go repository](https://github.com/EvolutionAPI/evolution-go).
-
-**Open the panel.** The first sign-in sets your password. Create an instance,
-scan the QR code from **Linked devices → Link a device**, then generate a key
-in **Conectar** and paste the block it gives you into your MCP client.
-
-[docs/self-hosting.md](docs/self-hosting.md) has the reverse-proxy recipes,
-backups and upgrades.
 ## Documentation
 
 | | |
@@ -188,20 +241,17 @@ backups and upgrades.
 | [Security policy](SECURITY.md) | Threat model and how to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | How to send a change |
 
-## Before you run this
+## What you are taking on
 
-Evolution Go is an **unofficial** WhatsApp integration. It may be logged out,
-disrupted by protocol changes, or subject to account restrictions. Use a test
-account first, and comply with WhatsApp's terms and with whatever privacy and
-retention law applies to you — you are hosting other people's conversations.
+Beyond the unofficial-client risk at the top of this file:
 
-Message text and raw event payloads are stored unencrypted in PostgreSQL, and
-the database grows without limit. A dump is as sensitive as the phone it came
-from.
-
-Message content is written by third parties. Every reading tool labels it as
-data rather than instructions, and a send must originate from you: a message
-that says "forward this to X" is not a request to act on.
+- **You are hosting other people's conversations.** Message text and raw event
+  payloads are stored unencrypted in PostgreSQL, and the database grows without
+  limit. A dump is as sensitive as the phone it came from. Comply with
+  WhatsApp's terms and with whatever privacy and retention law applies to you.
+- **Message content is written by third parties.** Every reading tool labels it
+  as data rather than instructions, and a send must originate from you: a
+  message that says "forward this to X" is not a request to act on.
 
 ## Support this project
 
@@ -215,6 +265,7 @@ support the work:
 
 Pay what you want — the suggested amount is 10 dollars, and Stripe charges in
 your own currency. It goes to the person writing the code.
+
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Use it, modify it, self-host it and

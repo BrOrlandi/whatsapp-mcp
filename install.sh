@@ -242,8 +242,8 @@ fi
 # ---------------------------------------------------------------- start
 
 CURRENT_STEP="starting the stack"
-step "Building and starting the stack"
-docker compose "${COMPOSE_FILES[@]}" up --build -d
+step "Pulling images and starting the stack"
+docker compose "${COMPOSE_FILES[@]}" up -d --pull always
 info "containers are up"
 
 CURRENT_STEP="waiting for the gateway"

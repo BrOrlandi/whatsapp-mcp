@@ -71,7 +71,13 @@ services:
       GLOBAL_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY}
       POSTGRES_AUTH_DB: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres-evolution:5432/${EVOLUTION_AUTH_DB_NAME:-evogo_auth}?sslmode=disable
       POSTGRES_USERS_DB: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres-evolution:5432/${EVOLUTION_USERS_DB_NAME:-evogo_users}?sslmode=disable
-      DATABASE_SAVE_MESSAGES: "true"
+      # Evolution keeps its own copy of every message when this is on, which
+      # duplicates the gateway's index in a database the gateway never reads.
+      # Off by default: the index in postgres-mcp is the only history, and the
+      # raw protobuf stored alongside it is what /message/downloadmedia needs.
+      # Turn it back on if delivery status or poll results prove to depend on
+      # Evolution's own store.
+      DATABASE_SAVE_MESSAGES: "${EVOLUTION_SAVE_MESSAGES:-false}"
       AMQP_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-whatsapp}
       AMQP_GLOBAL_ENABLED: "true"
       AMQP_GLOBAL_EVENTS: "MESSAGE,SEND_MESSAGE,HISTORY_SYNC,CONNECTION"
@@ -110,6 +116,14 @@ services:
       retries: 10
 
   whatsapp-mcp:
+    # The published image, so nobody compiles Go on their own server: a deploy
+    # is a pull, and 1 GB of RAM is enough. WHATSAPP_MCP_TAG pins a version —
+    # `edge` follows main, `v1.2.3` holds still.
+    #
+    # `build` is kept alongside it for working on the code: plain
+    # `docker compose up -d` pulls, and `--build` compiles this checkout
+    # instead.
+    image: ghcr.io/brorlandi/whatsapp-mcp:${WHATSAPP_MCP_TAG:-edge}
     build: .
     restart: unless-stopped
     stdin_open: true

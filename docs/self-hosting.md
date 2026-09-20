@@ -36,7 +36,7 @@ Then set the value that describes your host:
 
 ```sh
 docker compose config          # validates .env is complete
-docker compose up --build -d
+docker compose up -d           # pulls ghcr.io/brorlandi/whatsapp-mcp:edge
 docker compose ps
 curl http://127.0.0.1:8080/healthz
 curl -i http://127.0.0.1:8080/readyz
@@ -44,6 +44,11 @@ curl -i http://127.0.0.1:8080/readyz
 
 `/readyz` answers 503 until an instance is paired and events are flowing. That
 is the expected state on a fresh install, not a failure.
+
+The gateway image comes from GHCR rather than being compiled here, so a 1 GB
+machine is enough and a deploy is a pull. `WHATSAPP_MCP_TAG` in `.env` pins it
+(`edge` follows `main`, `v1.2.3` holds still); `docker compose up -d --build`
+compiles the checkout instead, which is what you want when working on the code.
 
 Images are pinned and every database uses a persistent named volume. The
 RabbitMQ and MinIO management ports bind to loopback only. The gateway's own
@@ -115,7 +120,7 @@ the only service that belongs on a public address.
 
 ```sh
 git pull
-docker compose up --build -d
+docker compose up -d --pull always
 ```
 
 Migrations run on start. Volumes are preserved, so the pairing and the indexed

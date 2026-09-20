@@ -22,11 +22,16 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
+// version is stamped at build time with -ldflags "-X main.version=...". It is
+// "dev" for a local build, which is the honest answer for one.
+var version = "dev"
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg := config.Load()
+	logger.Info("starting whatsapp-mcp", "version", version)
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("open database", "error", err)

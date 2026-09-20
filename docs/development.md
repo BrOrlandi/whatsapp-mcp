@@ -42,6 +42,18 @@ go build ./cmd/whatsapp-mcp
 docker compose config
 ```
 
+## Images
+
+`ghcr.io/brorlandi/whatsapp-mcp` is built and pushed by
+`.github/workflows/release.yml`: `edge` on every push to `main`, and the version
+tags plus the Linux binaries on every `v*` tag. The Dockerfile cross-compiles
+from the runner's own architecture rather than emulating the target, so the
+arm64 image costs about as much as the amd64 one.
+
+`docker compose up -d` pulls that image. `docker compose up -d --build`
+compiles the working tree instead — use it whenever you are testing a change
+to the gateway itself through Compose.
+
 ## Transports
 
 `POST /mcp` is the supported transport. A stdio transport exists for debugging a

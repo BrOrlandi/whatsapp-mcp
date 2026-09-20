@@ -8,7 +8,7 @@ import "strings"
 // sits, instead of being kept in sync by hand.
 const darkPalette = `
 --bg:#0a1513;--surface:#11211d;--surface-soft:#152b26;--surface-sunken:#0d1b18;--border:#23413a;--border-strong:#2f544b;
---text:#e4f1ec;--muted:#93aca4;
+--text:#e4f1ec;--text-soft:#cbe0d8;--muted:#a7c0b8;
 --brand:#2fc9a0;--brand-strong:#4adcb4;--brand-ink:#04211b;--brand-soft:#123029;
 --accent:#93b4ff;--accent-soft:#16224a;
 --danger:#ffaea7;--danger-bg:#361917;--danger-border:#67312e;
@@ -38,7 +38,7 @@ const pageSource = `
 :root{
 color-scheme:light dark;
 --bg:#eef3f1;--surface:#fff;--surface-soft:#f4f9f7;--surface-sunken:#e9f0ed;--border:#dbe6e1;--border-strong:#c3d5cd;
---text:#10241c;--muted:#5d726b;
+--text:#10241c;--text-soft:#2c443d;--muted:#54695f;
 --brand:#0b6b5d;--brand-strong:#0a8172;--brand-ink:#fff;--brand-soft:#e3f3ef;
 --accent:#1d4ed8;--accent-soft:#e8eeff;
 --danger:#96201f;--danger-bg:#fdeceb;--danger-border:#f0c6c3;
@@ -76,24 +76,33 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .brand__mark svg{width:100%;height:100%;display:block}
 .brand__name{font-weight:700;font-size:1rem;color:var(--brand);letter-spacing:-.01em}
 .brand__tagline{display:block;font-weight:400;font-size:.78rem;color:var(--muted);letter-spacing:0}
-.tool{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;background:var(--surface)}
-.tool__head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:12px 14px}
-.tool__name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;color:var(--brand);font-size:.98rem}
-.tool__desc{margin:0;padding:0 14px 12px;color:var(--muted);font-size:.9rem;line-height:1.55}
-.tool__args{margin:0;padding:0 14px 12px;list-style:none;display:grid;gap:6px}
-.tool__arg{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:.86rem;line-height:1.5}
-.tool__argname{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
-.tool__type{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem}
+/* ---- tools (documentação) ---- */
+.tools{display:grid;gap:14px;margin-top:24px}
+.tool{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
+.tool__head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:16px 18px 0}
+.tool__name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;color:var(--brand);font-size:1rem}
+.tool__desc{margin:0;padding:8px 18px 16px;color:var(--text-soft);font-size:.95rem;line-height:1.7;max-width:76ch}
+.tool__args{margin:0;padding:14px 18px 16px;list-style:none;display:grid;gap:12px;border-top:1px solid var(--border);background:var(--surface-soft)}
+.tool__arg{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:.9rem;line-height:1.65}
+.tool__argname{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;color:var(--text)}
+.tool__type{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem}
 .tool__req{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--warn)}
-.tool__argdesc{color:var(--muted);flex:1 1 220px;min-width:0}
-.recipe{border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);margin-bottom:14px;overflow:hidden}
-.recipe__head{padding:14px 16px 0}
-.recipe__title{margin:0 0 4px;font-size:1.05rem}
-.recipe__summary{margin:0 0 10px;color:var(--muted);font-size:.92rem;line-height:1.6}
-.recipe__meta{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px}
-.recipe__tool{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;padding:2px 7px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--border);color:var(--muted)}
-.recipe__prompt{margin:0;padding:14px 16px;background:var(--surface-soft);border-top:1px solid var(--border);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;line-height:1.65;white-space:pre-wrap;overflow-x:auto}
-.recipe__caveat{margin:0;padding:11px 16px;border-top:1px solid var(--border);font-size:.85rem;color:var(--muted);line-height:1.55}
+.tool__argdesc{color:var(--text-soft);flex:1 1 240px;min-width:0}
+
+/* ---- recipes ---- */
+.recipes{display:grid;gap:20px;margin-top:24px}
+.recipe{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
+.recipe__head{padding:clamp(18px,3vw,22px) clamp(18px,3vw,24px) 0}
+.recipe__title{margin:0 0 10px;font-size:1.18rem;letter-spacing:-.01em}
+.recipe__summary{margin:0;color:var(--text-soft);font-size:.97rem;line-height:1.75;max-width:68ch}
+.recipe__meta{display:flex;flex-wrap:wrap;gap:8px;padding:16px clamp(18px,3vw,24px) 20px}
+.recipe__tool{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;line-height:1.5;padding:4px 10px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--border-strong);color:var(--text-soft)}
+.recipe__tool--when{font-family:inherit;background:var(--brand-soft);border-color:var(--brand-soft);color:var(--brand-strong);font-weight:600}
+.recipe__prompt{padding:0 clamp(18px,3vw,24px) clamp(18px,3vw,22px)}
+.recipe__prompt .snippet{margin:0}
+.recipe__prompt pre{border:1px solid var(--border)}
+.recipe__caveat{margin:0;padding:14px clamp(18px,3vw,24px) 16px;border-top:1px solid var(--border);background:var(--surface-soft);font-size:.9rem;color:var(--text-soft);line-height:1.7}
+.recipe__caveat strong{color:var(--warn)}
 .nav{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border);margin-bottom:24px}
 .nav a{position:relative;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;text-decoration:none;color:var(--muted);font-weight:600;font-size:.94rem;border-radius:var(--radius-sm) var(--radius-sm) 0 0;border-bottom:2px solid transparent;margin-bottom:-1px}
 .nav a:hover{color:var(--text);background:var(--surface-soft)}
@@ -112,7 +121,7 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .card__body>:last-child{margin-child:0}
 .card--accent .card__head{background:var(--brand-soft);border-bottom-color:var(--border-strong)}
 .card--accent .card__head h2{color:var(--brand)}
-.lead{color:var(--muted);margin-top:0}
+.lead{color:var(--text-soft);margin-top:0;font-size:1.02rem;line-height:1.72;max-width:72ch}
 
 /* ---- steps ---- */
 .step{padding:4px 0}
@@ -253,7 +262,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 .prompt pre{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);padding:10px 12px;font-family:inherit;font-size:.92rem;white-space:pre-wrap}
 .qrcode{display:block;margin:0 auto;width:250px;height:250px;max-width:100%;background:#fff;padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
-.muted{color:var(--muted);font-size:.9rem}
+.muted{color:var(--text-soft);font-size:.9rem;line-height:1.65}
 .stack>*+*{margin-top:16px}
 @media (max-width:520px){.row{align-items:flex-start}.row form,.row .btn{width:100%}}
 /* ---- colophon ---- */
@@ -697,21 +706,24 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{define "documentacao"}}{{template "head" .}}{{template "nav" .}}
 <h1>O que o MCP sabe fazer</h1>
 <p class="lead">{{.Count}} ferramentas, lidas do próprio servidor. Esta página não é uma cópia mantida à mão: ela descreve exatamente a superfície que o MCP publica, então só fica errada se o servidor estiver.</p>
+<div class="tools">
 {{range .Tools}}
 <article class="tool">
 <div class="tool__head"><span class="tool__name">{{.Name}}</span></div>
 <p class="tool__desc">{{.Description}}</p>
 {{if .Arguments}}<ul class="tool__args">
 {{range .Arguments}}<li class="tool__arg"><span class="tool__argname">{{.Name}}</span><span class="tool__type">{{.Type}}</span>{{if .Required}}<span class="tool__req">obrigatório</span>{{end}}<span class="tool__argdesc">{{.Description}}{{if .Choices}} Valores: {{range $i, $c := .Choices}}{{if $i}}, {{end}}{{$c}}{{end}}.{{end}}</span></li>{{end}}
-</ul>{{else}}<p class="tool__args muted" style="font-size:.86rem">Sem argumentos.</p>{{end}}
+</ul>{{else}}<p class="tool__args muted">Sem argumentos.</p>{{end}}
 </article>
 {{end}}
+</div>
 </div>
 {{template "foot"}}{{end}}
 
 {{define "receitas"}}{{template "head" .}}{{template "nav" .}}
 <h1>Receitas</h1>
 <p class="lead">Nenhuma destas precisa de código novo. O gateway só responde pelo WhatsApp quando perguntado — esperar a hora, vigiar um termo, montar o relatório, tudo isso é trabalho do assistente, escrito como instrução. Cada receita é um prompt para colar.</p>
+<div class="recipes">
 {{range .Recipes}}
 <article class="recipe">
 <div class="recipe__head">
@@ -720,11 +732,15 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 </div>
 <div class="recipe__meta">
 {{range .Uses}}<span class="recipe__tool">{{.}}</span>{{end}}
-{{with .Schedule}}<span class="recipe__tool">⏱ {{.}}</span>{{end}}
+{{with .Schedule}}<span class="recipe__tool recipe__tool--when">⏱ {{.}}</span>{{end}}
 </div>
-<pre class="recipe__prompt">{{.Prompt}}</pre>
+<div class="recipe__prompt">
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Prompt</span></div>
+<pre data-copy><code>{{.Prompt}}</code></pre></div>
+</div>
 {{with .Caveat}}<p class="recipe__caveat"><strong>Atenção:</strong> {{.}}</p>{{end}}
 </article>
 {{end}}
+</div>
 </div>
 {{template "foot"}}{{end}}`
