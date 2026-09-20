@@ -27,6 +27,7 @@ flowchart TD
     DB[("PostgreSQL<br/>the message index")]
     EVODB[("PostgreSQL<br/>Evolution's auth and users")]
     MINIO[("MinIO<br/>media objects")]
+    PROXY["Traefik<br/>TLS · public deployments only"]
     CLIENT(["MCP client<br/>Claude, Cursor, …"])
 
     WA <-->|"multi-device link (whatsmeow)"| EVO
@@ -36,18 +37,37 @@ flowchart TD
     EVO <--> EVODB
     EVO <-->|"stores and serves media"| MINIO
     GW <--> DB
-    CLIENT -->|"POST /mcp · Bearer API key"| GW
+    CLIENT -->|"POST /mcp · Bearer API key"| PROXY
+    PROXY -->|"terminates TLS, routes by host"| GW
+
+    %% Fill, stroke and text colour are all set explicitly, because GitHub
+    %% renders this against a light or a dark page and only the values named
+    %% here survive both.
+    classDef repo fill:#0b6b5d,stroke:#075e54,color:#ffffff
+    classDef service fill:#d7ece8,stroke:#128c7e,color:#0b3b34
+    classDef store fill:#f0faf7,stroke:#2ec49a,color:#0b3b34
+    classDef outside fill:#ffffff,stroke:#94a3b8,color:#1f2937,stroke-dasharray:4 3
+
+    class GW repo
+    class EVO,MQ,PROXY service
+    class DB,EVODB,MINIO store
+    class WA,CLIENT outside
 ```
+
+Filled dark is this repository. Pale teal is a dependency it runs alongside,
+cylinders are the things that hold state, and the dashed nodes sit outside the
+stack entirely.
 
 
 | Component | Image | Role |
 |---|---|---|
-| `whatsapp-mcp` | built from this repository | The MCP endpoint, the control panel, the ingestion loop and the message index. The only service with a public address. |
+| `whatsapp-mcp` | built from this repository | The MCP endpoint, the control panel, the ingestion loop and the message index. The only service an MCP client addresses. |
 | [Evolution Go](https://github.com/EvolutionAPI/evolution-go) | `evoapicloud/evolution-go` | Holds the WhatsApp session through [whatsmeow](https://github.com/tulir/whatsmeow), answers live reads and sends, and publishes every event. Apache-2.0 with brand-protection conditions, and it requires activation before it answers — see [self-hosting](self-hosting.md). |
 | RabbitMQ | `rabbitmq:4.1-management` | Carries events from Evolution to the gateway. Durable quorum queues, manual acknowledgements. |
 | PostgreSQL (gateway) | `postgres:17.6` | The message index, the API keys, the panel account, the instance registry. Migrations run automatically on start. |
 | PostgreSQL (Evolution) | `postgres:17.6` | Evolution's own auth and user databases. The gateway never reads it. |
 | MinIO | `minio` | Where Evolution stores media. The gateway asks Evolution for media rather than reaching into the bucket. |
+| Traefik | `traefik:v3.3.4` | Terminates TLS and obtains the Let's Encrypt certificate. The only container that binds a public port, and the only one added by [`deploy/docker-compose.public.yml`](../deploy/docker-compose.public.yml) — which `install.sh` always uses, and which the base file deliberately knows nothing about. Nothing is routed without an explicit label; the dashboard and the API are off. |
 
 An MCP client talks to exactly one of these — `whatsapp-mcp` — and needs exactly
 one credential. Evolution Go has no public surface and its manager is never

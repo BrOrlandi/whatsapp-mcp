@@ -11,6 +11,12 @@
 # and the administrator are left alone.
 set -euo pipefail
 
+# This script is meant to be piped into bash, where stdin holds the
+# not-yet-read remainder of the script itself. So any command that reads stdin
+# eats the rest of the install and exits 0 — a failure that looks exactly like
+# success. Every such command below gets </dev/null; closing stdin globally is
+# not an option here, because that is where bash is reading this from.
+
 REPO_URL="${REPO_URL:-https://github.com/BrOrlandi/whatsapp-mcp.git}"
 REPO_REF="${REPO_REF:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/whatsapp-mcp}"
@@ -269,13 +275,18 @@ fi
 
 CURRENT_STEP="starting the stack"
 step "Pulling images and starting the stack"
-docker compose "${COMPOSE_FILES[@]}" up -d --pull missing
+docker compose "${COMPOSE_FILES[@]}" up -d --pull missing </dev/null
 info "containers are up"
 
 CURRENT_STEP="waiting for the gateway"
 step "Waiting for the gateway to answer"
 for attempt in $(seq 1 60); do
-    if docker compose "${COMPOSE_FILES[@]}" exec -T whatsapp-mcp wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+    # </dev/null matters more than it looks: this script is normally piped into
+    # bash, so stdin *is* the rest of the script, and `compose exec` forwards
+    # stdin to the container — swallowing every line after this one and exiting
+    # 0 as though the install had finished. Everything below simply never ran.
+    if docker compose "${COMPOSE_FILES[@]}" exec -T whatsapp-mcp \
+        wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 </dev/null; then
         info "the gateway is healthy"
         break
     fi
