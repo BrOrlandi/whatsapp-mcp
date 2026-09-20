@@ -33,7 +33,12 @@ func (l License) Activated() bool { return strings.EqualFold(l.Status, "active")
 // License asks Evolution about its activation, and for the registration URL
 // when it has not been activated. Both routes answer without the API key,
 // which is what makes this readable while everything else is refusing.
-func (c *Client) License(ctx context.Context) (License, error) {
+//
+// The registration URL may only be generated once per process and Evolution
+// keeps the first one it generated, so the redirect the caller wants has to be
+// there from the very first call. An empty callback leaves the redirect to
+// Evolution's own manager, which is where a manual registration lands.
+func (c *Client) License(ctx context.Context, callback string) (License, error) {
 	var status License
 	if err := c.getJSON(ctx, "/license/status", &status); err != nil {
 		return License{}, err
@@ -41,10 +46,34 @@ func (c *Client) License(ctx context.Context) (License, error) {
 	if status.Activated() {
 		return status, nil
 	}
-	var registration License
-	if err := c.getJSON(ctx, "/license/register", &registration); err == nil {
-		status.RegisterURL = registration.RegisterURL
+	// The query travels as its own piece because JoinPath would escape a '?'
+	// written into a path segment, which is how a redirect became
+	// `%3Fredirect_uri=...` and stopped being one.
+	endpoint, err := url.JoinPath(c.baseURL, "/license/register")
+	if err != nil {
+		return status, err
 	}
+	if callback != "" {
+		endpoint += "?" + url.Values{"redirect_uri": []string{callback}}.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return status, err
+	}
+	req.Header.Set("apikey", c.apiKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return status, fmt.Errorf("Evolution /license/register: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return status, fmt.Errorf("Evolution /license/register returned HTTP %d", resp.StatusCode)
+	}
+	var registration License
+	if err := json.NewDecoder(resp.Body).Decode(&registration); err != nil {
+		return status, err
+	}
+	status.RegisterURL = registration.RegisterURL
 	return status, nil
 }
 

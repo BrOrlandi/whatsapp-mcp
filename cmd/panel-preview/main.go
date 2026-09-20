@@ -63,6 +63,13 @@ func (f *fakeStore) RevokeAPIKey(context.Context, int64) error           { retur
 func (f *fakeStore) OldestMessage(context.Context, string, string) (store.Message, error) {
 	return store.Message{MessageID: "OLD", ChatJID: "a@s.whatsapp.net", SentAt: time.Now().Add(-62 * 24 * time.Hour)}, nil
 }
+func (f *fakeStore) SaveOperatorEmail(context.Context, string) error { return nil }
+func (f *fakeStore) SaveEvolutionLicense(context.Context, store.EvolutionLicense) error {
+	return nil
+}
+func (f *fakeStore) EvolutionLicense(context.Context) (store.EvolutionLicense, error) {
+	return store.EvolutionLicense{}, store.ErrNoLicense
+}
 
 type fakeEvo struct{ connected bool }
 
@@ -87,9 +94,14 @@ func (f *fakeEvo) QRCode(context.Context, string) (evolution.QRCode, error) {
 	return evolution.QRCode{Image: "data:image/png;base64," + sampleQR, Code: "2@AbCdEf"}, nil
 }
 func (f *fakeEvo) RequestHistory(context.Context, string, evolution.Anchor, int) error { return nil }
-func (f *fakeEvo) License(context.Context) (evolution.License, error) {
+func (f *fakeEvo) License(context.Context, string) (evolution.License, error) {
 	return evolution.License{Status: "active"}, nil
 }
+func (f *fakeEvo) RegisterOperator(context.Context, string, string, string) error { return nil }
+func (f *fakeEvo) CompleteActivation(context.Context, string) (evolution.LicenseActivation, error) {
+	return evolution.LicenseActivation{APIKey: "k", Tier: "evolution-go"}, nil
+}
+func (f *fakeEvo) ReactivateLicense(context.Context, string) error { return nil }
 
 const (
 	previewUser     = "admin"

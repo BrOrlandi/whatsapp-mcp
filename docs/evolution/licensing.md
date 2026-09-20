@@ -1,13 +1,16 @@
-# Evolution Go licensing, and why the install cannot be fully unattended
+# Evolution Go licensing, and what this panel automates of it
 
-The one step in this project's installation that a script cannot finish on its
-own is activating Evolution Go. This explains what that step is, why it needs a
-person the first time, and how far it has been automated.
+The one step in this project's installation that no code can finish on its own
+is the first registration of an operator's email with Evolution Foundation's
+licensing server — because that registration *is* the proof that the email is
+theirs. This explains what the licence is, what the licensing server exposes,
+how far this project drives it without a browser, and the one click that is
+left and why it stays.
 
 Everything below was read from
 [`evolution-foundation/evolution-go`](https://github.com/evolution-foundation/evolution-go)
-at tag `0.7.2` (`9337afc`), in `pkg/core/c0.go`, and confirmed against a running
-container.
+at tag `0.7.2` (`9337afc`), in `pkg/core/c0.go`, and — where it says so —
+probed against the live licensing server.
 
 ## What the licence gates
 
@@ -44,56 +47,64 @@ Not in a file. It goes into Evolution's own PostgreSQL, in the table
 In this project's Compose stack that database is the `postgres-evolution`
 service, so the activation survives a container rebuild as long as the
 `postgres_evolution_data` volume survives. Losing that volume means activating
-again.
+again — which, since the panel keeps the credential, nobody has to notice.
 
-## How activation actually happens
+## How activation happens, end to end
 
 The licensing server is `https://license.evolutionfoundation.com.br`, assembled
-one fragment at a time in `_cdo()` (`pkg/core/c0.go:35`) rather than written as
-a constant. All calls go through `_dtnx` (`pkg/core/c0.go:114`).
+one fragment at a time in `_cdo()` (`pkg/core/c0.go:35`) rather than written
+as a constant. All calls go through `_dtnx` (`pkg/core/c0.go:114`).
 
-There are two paths to a licence.
+The whole registration is four moves, and only one of them needs a person:
 
-**Browser registration.** `GET /license/register` returns a URL carrying a token
-bound to this `instance_id`:
+1. **`POST /v1/register/init`** with `{tier, version, instance_id}` — an
+   Evolution route (`GET /license/register`) calls this, and accepts a
+   `redirect_uri` for where the operator should land afterwards. It returns a
+   registration token bound to this `instance_id`.
+2. **`POST /v1/auth/magic-link`** with `{token, email, name}` — this is all
+   the register *page* does when a person opens it; a server can make the
+   same call with no browser involved. The licensing server emails the
+   operator a link valid for 15 minutes. *(Probed live: `{"status":"sent"}`.)*
+3. **The click.** The operator clicks the link in their own inbox. This is
+   the identity proof — the thing being registered is precisely the ownership
+   of that email — so no automation can honestly skip it. The licensing
+   server then redirects the browser to the `redirect_uri` with a one-time
+   authorization `?code=`.
+4. **`POST /v1/register/exchange`** with `{authorization_code, instance_id}`**
+   returns the `{api_key, tier, customer_id}`. Evolution's
+   `GET /license/activate?code=…` route does this and stores the result; the
+   exchange can equally be made by anyone holding the code, and the key it
+   returns also works directly as the `code` for `/license/activate`
+   (`_58` at `pkg/core/c0.go:591` falls back from code to key). *(Probed
+   live: a wrong code answers `401 AUTH_CODE_EXPIRED`.)*
 
-```json
-{
-  "register_url": "https://license.evolutionfoundation.com.br/register?token=…",
-  "status": "pending"
-}
-```
+Evolution's own Manager UI walks these same moves; the difference here is who
+drives them.
 
-The operator opens it, registers with an email, and the server activates that
-instance. The instance is live immediately — no restart needed. Internally this
-is the `/v1/register/init` → `/v1/register/exchange` pair
-(`pkg/core/c0.go:730`, `786`).
+## The headless path Evolution ships, and its current state
 
-**Headless activation.** With `EVOLUTION_OPERATOR_EMAIL` set, `_rh`
-(`pkg/core/c0.go:503`) posts to `/v1/register/auto` on startup:
+Evolution Go also documents a no-browser activation: with
+`EVOLUTION_OPERATOR_EMAIL` set, `_rh` (`pkg/core/c0.go:503`) posts to
+`/v1/register/auto` on startup with `{email, tier, version, instance_id}`, and
+a **previously registered** email gets an `api_key` back. An unknown email
+gets a 404 and the process falls back to the manual flow
+(`pkg/core/c0.go:526`). It was added in this project in `3b03c94`.
 
-```json
-{"email": "…", "tier": "…", "version": "…", "instance_id": "…"}
-```
+As of this writing, though, the **live** licensing server answers
+`/v1/register/auto` with `401 {"code":"UNAUTHORIZED","error":"missing token"}`
+without an `Authorization: Bearer …` header — and the register token from
+`/v1/register/init` is rejected as `invalid token` there. Evolution Go 0.7.2
+sends no such header (checked against tag `0.7.2` and `main`, which are
+identical). So the shipped headless path may be dead against the current
+server; the panel's flow below does not depend on it at all. It is kept in
+`.env` as a fallback that costs nothing if the server accepts it again.
 
-A registered email gets an `api_key` back, which is stored through `_yosh` and
-activates the process. This is the documented feature — `.env.example` line 10
-and the CHANGELOG entry "Headless license auto-activation".
+## Why the first registration still needs a person
 
-## Why the first activation still needs a person
-
-`/v1/register/auto` **recognises an email, it does not create one.** An address
-that has never registered gets a 404, and `_rh` handles it explicitly
-(`pkg/core/c0.go:526`):
-
-```
-ℹ Auto-activation skipped — email not registered yet (first time?).
-  Falling back to manual flow.
-```
-
-So there is no input an installer could invent that would produce a licence.
-The credential is issued by a server that this project does not control, in
-exchange for an identity the operator has to establish once.
+There is no input an installer could invent that would produce a licence. The
+credential is issued by a server this project does not control, in exchange
+for an identity the operator has to establish once — by clicking a link in the
+inbox they own.
 
 That step is not incidental. Evolution Go is Apache-2.0 **with additional
 brand-protection conditions, including a Usage Notification requirement**, and
@@ -120,25 +131,45 @@ deployments, and a revocation breaking every installation at once.
 
 ## What this project does instead
 
-1. The panel detects the 503 and says the licence is missing rather than
-   reporting a transient outage, and shows the registration link read from
-   Evolution's own `/license/register`.
-2. `EVOLUTION_OPERATOR_EMAIL` is passed through by the Compose stack and can be
-   given to `install.sh` in its environment, so every machine after the first —
-   and every rebuild that loses the Evolution volume — comes up activated with
-   no browser step.
-3. The operator registers once, ever, under their own identity.
+The panel drives the whole registration itself, from the activation card in
+`/instancias` (`internal/evolution/licensing.go`, `internal/httpapi/web.go`):
 
-The residual cost is one browser visit per operator, not per server.
+1. It detects the 503 and says the licence is missing rather than reporting a
+   transient outage.
+2. The operator fills in a name and email **in the panel**. Behind the form
+   the panel asks Evolution for the registration URL with this panel as the
+   `redirect_uri`, extracts the token, and calls the licensing server's
+   `/v1/auth/magic-link` itself. No Evolution Manager, no registration form
+   on anyone else's site. (The plain registration link is kept as a manual
+   escape hatch. `url.JoinPath` had to be avoided to keep the query a query —
+   it escapes a `?` written into a path segment.)
+3. The operator clicks the email. The licensing server redirects them back to
+   `/instancias/licenca/retorno?code=…`, the panel exchanges the code for
+   the key, activates Evolution with it, and keeps a copy in its own
+   database (`evolution_license`, migration `008`).
+4. **From then on, nobody is asked anything.** If a rebuild loses the
+   Evolution volume, the panel notices the 503, hands Evolution the key it
+   kept, and carries on; rebuilding that loses both volumes would be a new
+   registration, and even then the saved email is prefilled in the form.
+
+The callback accepts the code without a panel session: the code is a
+single-use, short-lived capability the licensing server issued exactly like the
+installer's setup token, and it stops meaning anything the moment it is spent.
+
+The residual cost is one click in the operator's inbox, once per email,
+ever — not per server, not per rebuild, and no page of Evolution's to open.
+`EVOLUTION_OPERATOR_EMAIL` in the Compose stack stays as a belt-and-braces
+startup fallback, documented above.
 
 ## If that is still too much
 
-The way to remove it is to ask, not to route around it. Evolution Foundation
-lists a contact for licensing enquiries, and an open-source installer that puts
-Evolution Go on third-party servers is a distribution channel rather than lost
-revenue. What to ask for is a distribution identifier or a non-interactive
-per-installation activation: every deployment still counted, which is what the
-Usage Notification is for, without a form in the middle.
+The way to remove the click is to ask, not to route around it. Evolution
+Foundation lists a contact for licensing enquiries, and an open-source
+installer that puts Evolution Go on third-party servers is a distribution
+channel rather than lost revenue. What to ask for is a distribution
+identifier or a non-interactive per-installation activation: every deployment
+still counted, which is what the Usage Notification is for, without a form
+in the middle.
 
 The alternative that removes the dependency entirely is talking to
 [whatsmeow](https://github.com/tulir/whatsmeow) directly — the MIT-licensed

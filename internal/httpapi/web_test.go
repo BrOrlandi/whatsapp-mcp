@@ -33,6 +33,8 @@ type fakeRepo struct {
 	oldest               store.Message
 	oldestErr            error
 	mustChange           bool
+	license              store.EvolutionLicense
+	operatorEmail        string
 }
 
 func newRepo() *fakeRepo {
@@ -147,6 +149,26 @@ func (f *fakeRepo) ManagedInstances(context.Context) (map[string]string, error) 
 	}
 	return copied, nil
 }
+func (f *fakeRepo) SaveOperatorEmail(_ context.Context, email string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.operatorEmail = email
+	return nil
+}
+func (f *fakeRepo) SaveEvolutionLicense(_ context.Context, license store.EvolutionLicense) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.license = license
+	return nil
+}
+func (f *fakeRepo) EvolutionLicense(context.Context) (store.EvolutionLicense, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.license.APIKey == "" {
+		return store.EvolutionLicense{}, store.ErrNoLicense
+	}
+	return f.license, nil
+}
 
 type fakeEvolution struct {
 	mu         sync.Mutex
@@ -161,6 +183,12 @@ type fakeEvolution struct {
 	historyErr error
 	license    evolution.License
 	licenseErr error
+
+	registerErr   error
+	operatorEmail string
+	activation    evolution.LicenseActivation
+	activationErr error
+	healErr       error
 }
 
 func (f *fakeEvolution) record(call, token string) {
@@ -227,8 +255,40 @@ func (f *fakeEvolution) RequestHistory(_ context.Context, token string, anchor e
 	f.anchors = append(f.anchors, anchor)
 	return f.historyErr
 }
-func (f *fakeEvolution) License(context.Context) (evolution.License, error) {
+func (f *fakeEvolution) License(context.Context, string) (evolution.License, error) {
 	return f.license, f.licenseErr
+}
+func (f *fakeEvolution) RegisterOperator(_ context.Context, email, name, callback string) error {
+	f.record("register-operator", email+" "+name+" "+callback)
+	if f.registerErr != nil {
+		return f.registerErr
+	}
+	f.mu.Lock()
+	f.operatorEmail = email
+	f.mu.Unlock()
+	return nil
+}
+func (f *fakeEvolution) CompleteActivation(_ context.Context, code string) (evolution.LicenseActivation, error) {
+	f.record("complete-activation", code)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.activationErr != nil {
+		return evolution.LicenseActivation{}, f.activationErr
+	}
+	return f.activation, nil
+}
+func (f *fakeEvolution) ReactivateLicense(_ context.Context, apiKey string) error {
+	f.record("reactivate", apiKey)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.healErr != nil {
+		return f.healErr
+	}
+	// A licence that went back in unblocks the instance API, which is what the
+	// handler re-reads right after healing.
+	f.err = nil
+	f.license = evolution.License{Status: "active"}
+	return nil
 }
 func (f *fakeEvolution) QRCode(_ context.Context, token string) (evolution.QRCode, error) {
 	f.record("qr", token)
@@ -1220,7 +1280,9 @@ func TestUnactivatedEvolutionIsNotReportedAsAnOutage(t *testing.T) {
 	ts, client := signedIn(t, repo, evo)
 
 	page := fetch(t, client, ts.URL+"/instancias")
-	mustContain(t, page, "instancias", "ainda não foi ativada", "Ativar a Evolution Go", "https://license.example/register?token=abc")
+	// A missing licence is offered as a form that can be filled here, rather
+	// than a link into somebody else's site.
+	mustContain(t, page, "instancias", "ainda não foi ativada", "Ativar a Evolution Go", `action="/instancias/licenca"`, `name="email"`, "Prefere o site da Evolution?", "https://license.example/register?token=abc")
 	if strings.Contains(page, "Tente novamente em instantes") {
 		t.Fatal("a missing licence is described as a transient outage")
 	}
@@ -1235,4 +1297,136 @@ func TestUnactivatedEvolutionIsNotReportedAsAnOutage(t *testing.T) {
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 	mustContain(t, string(body), "instancias", "ainda não foi ativada")
+}
+
+func TestLicenseRegistrationRunsThroughThePanel(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{
+		err:     evolution.ErrNotActivated,
+		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+		activation: evolution.LicenseActivation{
+			APIKey: "evo-key-1", Tier: "evolution-go", CustomerID: 42, InstanceID: "inst-9",
+		},
+	}
+	ts, client := signedIn(t, repo, evo)
+	defer ts.Close()
+
+	// The form is the way in: the operator never leaves the panel, and never
+	// opens the licensing site. The confirmation is what the redirect lands on.
+	r, err := client.PostForm(ts.URL+"/instancias/licenca", url.Values{
+		"name": {"Bruno Orlandi"}, "email": {"bruno@example.com"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if !evo.did("register-operator") {
+		t.Fatal("the magic link was not requested through Evolution")
+	}
+	if evo.operatorEmail != "bruno@example.com" {
+		t.Fatalf("register-operator handled email %q", evo.operatorEmail)
+	}
+	mustContain(t, string(body), "instancias", "bruno@example.com", "15 minutos")
+	if repo.operatorEmail != "bruno@example.com" {
+		t.Fatal("the operator email was not kept for the callback")
+	}
+
+	// The click comes back to the panel without a session behind it, because
+	// it is the one-time code that carries the authority. The confirmation
+	// says the licence is in, not that it is pending.
+	bare := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	r, err = bare.Get(ts.URL + "/instancias/licenca/retorno?code=one-time-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusSeeOther {
+		t.Fatalf("callback returned %d", r.StatusCode)
+	}
+	saved, err := repo.EvolutionLicense(context.Background())
+	if err != nil {
+		t.Fatalf("no licence was kept: %v", err)
+	}
+	if saved.APIKey != "evo-key-1" || saved.InstanceID != "inst-9" {
+		t.Fatalf("kept licence = %+v", saved)
+	}
+}
+
+func TestLicenseCallbackRefusesAnEmptyOrRejectedCode(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{activationErr: errors.New("licensing server said no")}
+	ts, client := signedIn(t, repo, evo)
+	defer ts.Close()
+
+	// Registered instances stay put when the activation goes wrong; the
+	// operator can retry the link or ask for another.
+	r, err := client.Get(ts.URL + "/instancias/licenca/retorno?code=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "instâncias", "veio sem o código")
+
+	r, err = client.Get(ts.URL + "/instancias/licenca/retorno?code=spent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "instâncias", "Não foi possível ativar a licença")
+
+	// The licence form does not accept a nonsense e-mail either.
+	r, err = client.PostForm(ts.URL+"/instancias/licenca", url.Values{"name": {"B"}, "email": {"not-an-email"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if evo.did("register-operator") {
+		t.Fatal("a magic link was requested for an invalid e-mail")
+	}
+}
+
+func TestASavedLicenceReactivatesItself(t *testing.T) {
+	repo := newRepo()
+	repo.license = store.EvolutionLicense{OperatorEmail: "bruno@example.com", APIKey: "evo-key-1", Tier: "evolution-go"}
+	evo := &fakeEvolution{
+		err:       evolution.ErrNotActivated,
+		instances: []evolution.Instance{{ID: "inst-1", Name: "pessoal", Status: evolution.StatusDisconnected, Token: "tok"}},
+		license:   evolution.License{Status: "inactive"},
+	}
+	ts, client := signedIn(t, repo, evo)
+	defer ts.Close()
+
+	// Sign-in itself heals once Evolution loses its licence mid-session, which
+	// consumes the fresh state. Losing it again is what the operator would
+	// actually be looking at when the alert matters.
+	evo.mu.Lock()
+	evo.err, evo.license = evolution.ErrNotActivated, evolution.License{Status: "inactive"}
+	evo.mu.Unlock()
+
+	page := fetch(t, client, ts.URL+"/instancias")
+	if !evo.did("reactivate") {
+		t.Fatal("the panel did not hand Evolution the licence it was keeping")
+	}
+	mustContain(t, page, "instancias", "reativada automaticamente", "pessoal")
+	if strings.Contains(page, "Ativar a Evolution Go") {
+		t.Fatal("an operator was asked to register again although the panel had the licence")
+	}
+
+	// And the saved e-mail is offered as prefill when a heal cannot happen.
+	repo2 := newRepo()
+	repo2.license = store.EvolutionLicense{OperatorEmail: "bruno@example.com", APIKey: "evo-key-1", Tier: "evolution-go"}
+	evo2 := &fakeEvolution{
+		err:     evolution.ErrNotActivated,
+		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=def"},
+		healErr: errors.New("revoked"),
+	}
+	ts2, client2 := signedIn(t, repo2, evo2)
+	defer ts2.Close()
+	page2 := fetch(t, client2, ts2.URL+"/instancias")
+	mustContain(t, page2, "instancias", `value="bruno@example.com"`, "Ativar a Evolution Go")
 }

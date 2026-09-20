@@ -54,11 +54,15 @@ type ControlStore interface {
 	InstanceToken(context.Context, string) (string, error)
 	ForgetInstance(context.Context, string) error
 	ManagedInstances(context.Context) (map[string]string, error)
+	SaveOperatorEmail(context.Context, string) error
+	SaveEvolutionLicense(context.Context, store.EvolutionLicense) error
+	EvolutionLicense(context.Context) (store.EvolutionLicense, error)
 }
 
 // EvolutionAPI is the slice of Evolution this panel drives. The panel owns the
 // whole instance lifecycle so the operator never needs the Evolution Manager,
-// which is why creation, pairing and teardown all appear here.
+// which is why creation, pairing and teardown all appear here. It also owns
+// the whole licence lifecycle, for the same reason.
 type EvolutionAPI interface {
 	FetchInstances(context.Context) ([]evolution.Instance, error)
 	CreateInstance(context.Context, string, string) (evolution.Instance, error)
@@ -67,7 +71,10 @@ type EvolutionAPI interface {
 	DisconnectInstance(context.Context, string) error
 	LogoutInstance(context.Context, string) error
 	QRCode(context.Context, string) (evolution.QRCode, error)
-	License(context.Context) (evolution.License, error)
+	License(context.Context, string) (evolution.License, error)
+	RegisterOperator(context.Context, string, string, string) error
+	CompleteActivation(context.Context, string) (evolution.LicenseActivation, error)
+	ReactivateLicense(context.Context, string) error
 	RequestHistory(context.Context, string, evolution.Anchor, int) error
 }
 
@@ -153,6 +160,8 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /senha", a.changePassword)
 	mux.HandleFunc("GET /instancias", a.instances)
 	mux.HandleFunc("POST /instancias", a.createInstance)
+	mux.HandleFunc("POST /instancias/licenca", a.sendLicenseLink)
+	mux.HandleFunc("GET /instancias/licenca/retorno", a.completeLicense)
 	mux.HandleFunc("POST /instancias/selecionar", a.selectInstance)
 	mux.HandleFunc("POST /instancias/conectar", a.connectInstance)
 	mux.HandleFunc("POST /instancias/desconectar", a.disconnectInstance)
@@ -491,11 +500,23 @@ type selection struct {
 	Notice       string
 	Unavailable  bool
 	// NeedsActivation separates the one unavailability that waiting will not
-	// fix. RegisterURL is where the operator fixes it.
+	// fix. RegisterURL is where the operator fixes it, and OperatorEmail is
+	// the address already used for a licence here, offered back as prefill.
 	NeedsActivation bool
 	RegisterURL     string
-	Ready           bool
-	NeedsPairing    bool
+	OperatorEmail   string
+	// LicenseHealed marks the render where a licence the panel was already
+	// holding was put back into Evolution without anyone being asked for it.
+	LicenseHealed bool
+	Ready         bool
+	NeedsPairing  bool
+}
+
+// licenseCallback is where the licensing server sends the operator after the
+// magic-link click. It has to be the public address, since it is the
+// operator's browser doing the walking.
+func (a *webApp) licenseCallback() string {
+	return a.publicURL + "/instancias/licenca/retorno"
 }
 
 // readSelection lists the instances and works out which one the MCP is using.
@@ -506,22 +527,41 @@ func (a *webApp) readSelection(r *http.Request) selection {
 	selected, _ := a.store.SelectedInstance(r.Context())
 	managed, _ := a.store.ManagedInstances(r.Context())
 	instances, err := a.evolution.FetchInstances(r.Context())
-	state := selection{Selected: selected, Unavailable: err != nil}
 	if err != nil {
-		state.Notice = "A API do WhatsApp está indisponível no momento. Tente novamente em instantes."
+		state := selection{Selected: selected, Unavailable: true, Notice: "A API do WhatsApp está indisponível no momento. Tente novamente em instantes."}
 		// "Try again in a moment" is the wrong thing to say when nothing is
 		// going to change on its own. An Evolution without a licence answers
 		// 503 on every route until somebody registers it, so say that, and
 		// carry the link that does it.
 		if errors.Is(err, evolution.ErrNotActivated) {
+			// A licence this panel already holds can be handed back without
+			// asking anyone anything — Evolution losing its database volume to
+			// a rebuild is exactly the case this covers — so try that first.
+			// Only when there is no licence of ours does this become a form.
+			if a.reactivateSavedLicense(r) {
+				if instances, err = a.evolution.FetchInstances(r.Context()); err == nil {
+					return a.listedSelection(r, selected, managed, instances, selection{Selected: selected, LicenseHealed: true})
+				}
+				// The licence is back in, so whatever this failure is, it is
+				// no longer a licence problem — report it as a plain outage.
+				return state
+			}
 			state.NeedsActivation = true
 			state.Notice = "A Evolution Go ainda não foi ativada. Ela exige uma licença e responde 503 em todas as rotas até ser registrada — esperar não resolve."
-			if license, licenseErr := a.evolution.License(r.Context()); licenseErr == nil {
+			if license, licenseErr := a.evolution.License(r.Context(), a.licenseCallback()); licenseErr == nil {
 				state.RegisterURL = license.RegisterURL
+			}
+			if saved, savedErr := a.store.EvolutionLicense(r.Context()); savedErr == nil {
+				state.OperatorEmail = saved.OperatorEmail
 			}
 		}
 		return state
 	}
+	return a.listedSelection(r, selected, managed, instances, selection{Selected: selected})
+}
+
+// listedSelection builds a selection out of an instance listing that answered.
+func (a *webApp) listedSelection(r *http.Request, selected string, managed map[string]string, instances []evolution.Instance, state selection) selection {
 	for _, instance := range instances {
 		_, isManaged := managed[instance.ID]
 		if !isManaged && instance.Token != "" {
@@ -552,6 +592,18 @@ func (a *webApp) readSelection(r *http.Request) selection {
 		state.Notice = "Este painel não tem credenciais da instância selecionada, então não pode operá-la."
 	}
 	return state
+}
+
+// reactivateSavedLicense hands Evolution the licence credential the panel kept
+// from a previous registration. It reports whether Evolution came back to life,
+// because a key the licensing server has rejected will keep failing, and the
+// operator should then be offered a fresh registration instead of a loop.
+func (a *webApp) reactivateSavedLicense(r *http.Request) bool {
+	saved, err := a.store.EvolutionLicense(r.Context())
+	if err != nil || saved.APIKey == "" {
+		return false
+	}
+	return a.evolution.ReactivateLicense(r.Context(), saved.APIKey) == nil
 }
 
 // statusView is the operational picture: what WhatsApp reports, what the
@@ -639,17 +691,19 @@ func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "conectar", page)
 }
 
-// instancesPage manages the WhatsApp accounts themselves.
+// instancesPage manages the WhatsApp accounts themselves. OK is a read-once
+// confirmation, like the inverse of the layout's Error.
 type instancesPage struct {
 	layout
 	selection
+	OK string
 }
 
 func (a *webApp) instances(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
-	a.render(w, "instancias", instancesPage{layout: a.newLayout(r, "Instâncias", "instancias"), selection: a.readSelection(r)})
+	a.render(w, "instancias", instancesPage{layout: a.newLayout(r, "Instâncias", "instancias"), selection: a.readSelection(r), OK: r.URL.Query().Get("ok")})
 }
 
 // statusPage is the diagnostic view.
@@ -890,6 +944,63 @@ func (a *webApp) deleteInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, "/instancias", http.StatusSeeOther)
+}
+
+// sendLicenseLink starts a licence registration for the operator who filled the
+// form. The email is the operator's own; the licensing server will send a
+// magic link to it, and only the person who can read that inbox can click it.
+// That click is the identity the licence is issued for, so this is as far as
+// any automation can go without pretending to be somebody.
+func (a *webApp) sendLicenseLink(w http.ResponseWriter, r *http.Request) {
+	if !a.require(w, r) {
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	email := strings.TrimSpace(r.FormValue("email"))
+	if name == "" || len(name) > 120 || !strings.Contains(email, "@") || len(email) > 254 {
+		a.fail(w, r, "/instancias", "Informe seu nome completo e um e-mail válido para ativar.")
+		return
+	}
+	if err := a.evolution.RegisterOperator(r.Context(), email, name, a.licenseCallback()); err != nil {
+		a.fail(w, r, "/instancias", "Não foi possível enviar o e-mail de ativação: "+err.Error())
+		return
+	}
+	if err := a.store.SaveOperatorEmail(r.Context(), email); err != nil {
+		// The link is already on its way; losing the prefill is not worth
+		// telling the operator about, but it is worth noticing in logs one day.
+		_ = err
+	}
+	http.Redirect(w, r, "/instancias?ok="+url.QueryEscape("Enviamos um e-mail de ativação para "+email+". Ele expira em 15 minutos; depois de clicar o link dele, a licença entra sozinha."), http.StatusSeeOther)
+}
+
+// completeLicense finishes the registration the magic link started. The
+// licensing server sends the operator's browser here with a one-time code that
+// only it can judge, which makes the code the proof of identity the same way
+// the installer's setup token is: it is accepted without a panel session, and
+// it stops meaning anything the moment it is spent.
+func (a *webApp) completeLicense(w http.ResponseWriter, r *http.Request) {
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		a.fail(w, r, "/instancias", "O link de ativação veio sem o código. Peça o e-mail de novo.")
+		return
+	}
+	activation, err := a.evolution.CompleteActivation(r.Context(), code)
+	if err != nil {
+		a.fail(w, r, "/instancias", "Não foi possível ativar a licença: "+err.Error())
+		return
+	}
+	if err := a.store.SaveEvolutionLicense(r.Context(), store.EvolutionLicense{
+		InstanceID: activation.InstanceID,
+		APIKey:     activation.APIKey,
+		Tier:       activation.Tier,
+		CustomerID: activation.CustomerID,
+	}); err != nil {
+		// Evolution is alive; only the panel's copy of the credential failed to
+		// persist. The deployment works — say so, losing only rebuild comfort.
+		a.fail(w, r, "/instancias", "A licença foi ativada, mas este painel não conseguiu guardar uma cópia dela para rebuilds futuros.")
+		return
+	}
+	http.Redirect(w, r, "/instancias?ok="+url.QueryEscape("Licença ativada. A Evolution Go já está respondendo — recarregue se as instâncias não aparecerem."), http.StatusSeeOther)
 }
 
 func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {

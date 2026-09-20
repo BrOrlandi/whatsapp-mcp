@@ -138,8 +138,13 @@ installation, which lives in `/opt/whatsapp-mcp`.
 
 Evolution Go requires a licence to operate and answers 503 until it is
 activated, which means the panel will report it as unavailable until you do.
-Activation happens once — follow the flow in the
-[Evolution Go repository](https://github.com/EvolutionAPI/evolution-go).
+Activation happens in the panel itself: under **Instâncias**, the card that
+appears while the licence is missing asks for your name and email, sends the
+activation link to that inbox, and finishes on its own after you click the
+link. Nobody opens Evolution's own pages, and rebuilds that lose Evolution's
+data are re-licensed automatically from the copy this panel keeps. The residual
+step — clicking one emailed link — is the operator's proof of identity, and
+no installer can honestly do it for you.
 
 ### 4. Link your WhatsApp
 

@@ -478,6 +478,8 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{define "instancias"}}{{template "head" .}}{{template "nav" .}}
 <h1>Instâncias</h1>
 <p class="lead">Uma instância é uma conta de WhatsApp conectada. O MCP usa uma por vez.</p>
+{{with .OK}}<p class="alert alert--ok" role="status">{{.}}</p>{{end}}
+{{if .LicenseHealed}}<p class="alert alert--ok" role="status">A licen&ccedil;a da Evolution foi reativada automaticamente a partir da que este painel guardava, sem que ningu&eacute;m precisasse registrar de novo.</p>{{end}}
 
 <section class="card">
 <div class="card__head"><h2>Instâncias disponíveis</h2><a class="btn btn--ghost btn--small" href="#nova-instancia">Adicionar instância</a></div>
@@ -486,9 +488,17 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{if .NeedsActivation}}<div class="card" style="margin-bottom:14px"><div class="card__body">
 <h3 style="margin-bottom:8px">Ativar a Evolution Go</h3>
 <p class="muted">A Evolution Go &eacute; a camada que mant&eacute;m a sess&atilde;o do WhatsApp, e ela exige uma licen&ccedil;a pr&oacute;pria. &Eacute; uma etapa &uacute;nica: depois de registrada, nada aqui volta a pedir isso.</p>
-{{if .RegisterURL}}<div class="actions" style="margin-top:12px"><a class="btn" href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Registrar a licen&ccedil;a</a></div>
-<p class="muted" style="margin-top:10px">O link vem da pr&oacute;pria Evolution desta instala&ccedil;&atilde;o. Depois de registrar, recarregue esta p&aacute;gina.</p>
-<p class="muted" style="margin-top:10px">Esse registro &eacute; uma vez por e-mail, n&atilde;o por servidor. Guardando o e-mail em <code>EVOLUTION_OPERATOR_EMAIL</code> no <code>.env</code>, toda instala&ccedil;&atilde;o e todo rebuild seguintes sobem j&aacute; ativados, sem navegador.</p>
+<form method="post" action="/instancias/licenca" style="margin-top:12px">
+<label class="field" for="license-name"><span class="field__label">Seu nome completo</span>
+<span class="field__hint">&Eacute; o nome do registro da licen&ccedil;a, na Evolution Foundation.</span></label>
+<input id="license-name" type="text" name="name" maxlength="120" required placeholder="Maria da Silva" autocomplete="name">
+<label class="field" for="license-email"><span class="field__label">Seu e-mail</span>
+<span class="field__hint">Chega um link de ativa&ccedil;&atilde;o neste endere&ccedil;o; clicar nele completa o registro.</span></label>
+<input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="email"{{with .OperatorEmail}} value="{{.}}"{{end}}>
+<div class="actions" style="margin-top:12px"><button class="btn" type="submit">Ativar por e-mail</button></div>
+</form>
+<p class="muted" style="margin-top:10px">O e-mail vale para sempre: em qualquer outra instala&ccedil;&atilde;o, registrar com o mesmo endere&ccedil;o re&aacute;prova o mesmo titular em um clique, e a licen&ccedil;a desta implanta&ccedil;&atilde;o fica guardada pelo painel para reativar rebuilds sem ajuda humana.</p>
+{{if .RegisterURL}}<p class="muted" style="margin-top:10px">Prefere o site da Evolution? <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Abrir o registro no servidor deles</a> — leva ao mesmo lugar, s&oacute; que em vez de redirecionar aqui.</p>
 {{else}}<p class="muted" style="margin-top:10px">N&atilde;o foi poss&iacute;vel obter o link de registro agora. Ele tamb&eacute;m sai no servidor com:</p>
 <pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}
 </div></div>{{end}}
