@@ -302,6 +302,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{define "nav"}}
 <header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
 <div class="masthead__tools">{{template "themeswitch"}}
+<a class="btn btn--quiet" href="/senha">Senha</a>
 <form method="post" action="/logout"><button class="btn btn--quiet" type="submit">Sair</button></form></div></header>
 <nav class="nav" aria-label="Seções">
 <a href="/"{{if eq .Active "conectar"}} aria-current="page"{{end}}>Conectar</a>
@@ -665,13 +666,16 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{template "foot"}}{{end}}
 
 {{define "senha"}}{{template "head" .}}
-<div style="max-width:460px;margin:0 auto;padding-top:8vh">
+{{if .Forced}}<div style="max-width:460px;margin:0 auto;padding-top:8vh">
 <div class="masthead" style="justify-content:center">{{template "brandmark"}}</div>
+{{else}}{{template "nav" .}}<div style="max-width:460px;margin:0 auto">{{end}}
 <section class="card">
-<div class="card__head"><h2>Defina uma senha</h2></div>
+<div class="card__head"><h2>{{if .Forced}}Defina uma senha{{else}}Trocar a senha{{end}}</h2></div>
 <div class="card__body">
-<p class="lead">A senha atual foi gerada pelo instalador e apareceu no terminal. Escolha uma sua antes de continuar.</p>
+{{if .Forced}}<p class="lead">A senha atual foi gerada pelo instalador e apareceu no terminal. Escolha uma sua antes de continuar.</p>
+{{else}}<p class="lead">A troca vale imediatamente. As outras sess&otilde;es continuam abertas at&eacute; o pr&oacute;ximo reinicio do servi&ccedil;o.</p>{{end}}
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+{{with .Saved}}<p class="ok" role="status">{{.}}</p>{{end}}
 <form method="post">
 <label class="field" for="current"><span class="field__label">Senha atual</span></label>
 <input id="current" type="password" name="current_password" required autocomplete="current-password">
@@ -682,7 +686,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Salvar senha</button></div>
 </form>
 </div></section>
-<p class="muted" style="text-align:center">A senha do instalador continua v&aacute;lida at&eacute; esta troca. Nada mais do painel abre antes dela.</p>
+{{if .Forced}}<p class="muted" style="text-align:center">A senha do instalador continua v&aacute;lida at&eacute; esta troca. Nada mais do painel abre antes dela.</p>{{end}}
 </div>
 {{template "foot"}}{{end}}
 

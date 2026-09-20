@@ -1078,3 +1078,59 @@ func TestBootstrapPasswordMustBeReplacedBeforeAnythingElse(t *testing.T) {
 		t.Fatal("the rotation flag survived the change")
 	}
 }
+
+// Changing the password when nothing is forcing it has to be possible and has
+// to be findable: a panel where the only way to rotate the administrator
+// password is to guess a URL does not really let you rotate it.
+func TestPasswordCanBeChangedOnPurpose(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{}
+	ts, client := signedIn(t, repo, evo)
+
+	// The masthead offers the way in.
+	mustContain(t, fetch(t, client, ts.URL+"/"), "connect", `href="/senha"`)
+
+	page := fetch(t, client, ts.URL+"/senha")
+	mustContain(t, page, "senha", "Trocar a senha", `name="current_password"`)
+	if strings.Contains(page, "gerada pelo instalador") {
+		t.Fatal("a voluntary change is described as the installer's forced one")
+	}
+
+	r, err := client.PostForm(ts.URL+"/senha", url.Values{
+		"current_password": {"senha segura 123"},
+		"password":         {"outra senha bem boa"},
+		"confirm_password": {"outra senha bem boa"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "senha", "Senha alterada.")
+
+	// The new one works and the old one does not.
+	fresh := &http.Client{Jar: newJar(t)}
+	login := func(c *http.Client, password string) int {
+		resp, err := c.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {password}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := login(fresh, "senha segura 123"); code != http.StatusUnauthorized {
+		t.Fatalf("the old password still signs in: %d", code)
+	}
+	if code := login(&http.Client{Jar: newJar(t)}, "outra senha bem boa"); code != http.StatusOK {
+		t.Fatalf("the new password does not sign in: %d", code)
+	}
+}
+
+func newJar(t *testing.T) *cookiejar.Jar {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return jar
+}

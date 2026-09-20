@@ -229,7 +229,18 @@ func (a *webApp) passwordPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	a.render(w, "senha", layout{Title: "Defina uma senha"})
+	a.render(w, "senha", a.passwordLayout(r))
+}
+
+// passwordLayout decides which of the two pages this is. Forced means the
+// installer's password is still in place and nothing else will render;
+// otherwise it is an ordinary page with the panel's chrome around it.
+func (a *webApp) passwordLayout(r *http.Request) passwordPageData {
+	must, err := a.store.AdminMustChangePassword(r.Context())
+	if err == nil && must {
+		return passwordPageData{layout: layout{Title: "Defina uma senha"}, Forced: true}
+	}
+	return passwordPageData{layout: a.newLayout(r, "Trocar a senha", ""), Saved: r.URL.Query().Get("ok")}
 }
 
 func (a *webApp) changePassword(w http.ResponseWriter, r *http.Request) {
@@ -242,6 +253,7 @@ func (a *webApp) changePassword(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	forced, _ := a.store.AdminMustChangePassword(r.Context())
 	current := r.FormValue("current_password")
 	next := r.FormValue("password")
 	// The current password is asked for even though the session already proves
@@ -249,19 +261,27 @@ func (a *webApp) changePassword(w http.ResponseWriter, r *http.Request) {
 	// to lock the owner out of their own panel.
 	if !auth.CheckPassword(hash, current) {
 		w.WriteHeader(http.StatusUnauthorized)
-		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "A senha atual não confere."})
+		page := a.passwordLayout(r)
+		page.Error = "A senha atual não confere."
+		a.render(w, "senha", page)
 		return
 	}
 	if len(next) < 10 || len([]byte(next)) > 72 {
-		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "Use uma senha com pelo menos 10 caracteres."})
+		page := a.passwordLayout(r)
+		page.Error = "Use uma senha com pelo menos 10 caracteres."
+		a.render(w, "senha", page)
 		return
 	}
 	if next != r.FormValue("confirm_password") {
-		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "As duas senhas não são iguais."})
+		page := a.passwordLayout(r)
+		page.Error = "As duas senhas não são iguais."
+		a.render(w, "senha", page)
 		return
 	}
 	if auth.CheckPassword(hash, next) {
-		a.render(w, "senha", layout{Title: "Defina uma senha", Error: "Escolha uma senha diferente da atual."})
+		page := a.passwordLayout(r)
+		page.Error = "Escolha uma senha diferente da atual."
+		a.render(w, "senha", page)
 		return
 	}
 	newHash, err := auth.HashPassword(next)
@@ -273,7 +293,13 @@ func (a *webApp) changePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erro interno", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// A forced change is on its way somewhere: the panel was refusing to serve
+	// anything else, so land on the panel. A voluntary one should say it worked.
+	if forced {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/senha?ok="+url.QueryEscape("Senha alterada."), http.StatusSeeOther)
 }
 
 // render builds the page in memory before writing it. Rendering straight to the
@@ -371,6 +397,19 @@ type layout struct {
 	Refresh      bool
 	SessionLabel string
 	SessionTone  string
+}
+
+// passwordPageData is the password page's own shape rather than two more
+// fields on layout: instancesPage embeds both layout and selection, selection
+// already carries a Notice, and a second one at the same depth makes the
+// selector ambiguous for every page that embeds both.
+type passwordPageData struct {
+	layout
+	// Forced marks this as the only page the panel will serve, which is the
+	// installer's temporary password still standing. Reached from the masthead
+	// instead, the same page is a choice rather than a gate.
+	Forced bool
+	Saved  string
 }
 
 // newLayout builds the chrome shared by every signed-in page.
