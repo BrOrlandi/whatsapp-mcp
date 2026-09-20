@@ -71,9 +71,20 @@ func (f *fakeStore) EvolutionLicense(context.Context) (store.EvolutionLicense, e
 	return store.EvolutionLicense{}, store.ErrNoLicense
 }
 
-type fakeEvo struct{ connected bool }
+// unlicensed is the state an installation is in before anyone registers a
+// licence: Evolution answers 503 on every route, and the panel shows the
+// activation card instead of the instance list. PREVIEW_UNLICENSED=true starts
+// there, because that card is otherwise the one screen impossible to look at
+// without tearing down a real Evolution.
+type fakeEvo struct {
+	connected  bool
+	unlicensed bool
+}
 
 func (f *fakeEvo) FetchInstances(context.Context) ([]evolution.Instance, error) {
+	if f.unlicensed {
+		return nil, evolution.ErrNotActivated
+	}
 	status := evolution.StatusConnected
 	if !f.connected {
 		status = evolution.StatusDisconnected
@@ -95,6 +106,13 @@ func (f *fakeEvo) QRCode(context.Context, string) (evolution.QRCode, error) {
 }
 func (f *fakeEvo) RequestHistory(context.Context, string, evolution.Anchor, int) error { return nil }
 func (f *fakeEvo) License(context.Context, string) (evolution.License, error) {
+	if f.unlicensed {
+		return evolution.License{
+			Status:      "inactive",
+			InstanceID:  "53045908-0603-4001-8f59-505c1a00323a",
+			RegisterURL: "https://license.example/register?token=preview",
+		}, nil
+	}
 	return evolution.License{Status: "active"}, nil
 }
 func (f *fakeEvo) RegisterOperator(context.Context, string, string, string) error { return nil }
@@ -120,7 +138,7 @@ func main() {
 	}
 	st := &fakeStore{hash: hash, used: os.Getenv("PREVIEW_CONNECTED") == "true"}
 	_ = st.CreateAPIKey(context.Background(), "Claude Code no notebook", "inst-1", "d", "wamcp-a1B2c3")
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: true}, state, []byte("preview-session-key-preview-session-key"), "https://whatsapp-mcp.example.com", "")
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: true, unlicensed: os.Getenv("PREVIEW_UNLICENSED") == "true"}, state, []byte("preview-session-key-preview-session-key"), "https://whatsapp-mcp.example.com", "")
 	log.Printf("painel de demonstração em http://127.0.0.1:8090 — usuário %q, senha %q", previewUser, previewPassword)
 	_ = http.ListenAndServe("127.0.0.1:8090", handler)
 }

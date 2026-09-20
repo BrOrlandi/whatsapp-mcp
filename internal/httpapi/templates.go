@@ -118,7 +118,7 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .card__head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:16px clamp(16px,3vw,22px);border-bottom:1px solid var(--border);background:var(--surface-soft)}
 .card__body{padding:clamp(16px,3vw,22px)}
 .card__body>:first-child{margin-top:0}
-.card__body>:last-child{margin-child:0}
+.card__body>:last-child{margin-bottom:0}
 .card--accent .card__head{background:var(--brand-soft);border-bottom-color:var(--border-strong)}
 .card--accent .card__head h2{color:var(--brand)}
 .lead{color:var(--text-soft);margin-top:0;font-size:1.02rem;line-height:1.72;max-width:72ch}
@@ -182,12 +182,21 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .guide li::before{content:counter(guide);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:var(--brand-soft);color:var(--brand);font-size:.76rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
 
 /* ---- forms ---- */
-.field{display:block;margin:0 0 14px}
-.field__label{display:block;font-weight:600;font-size:.9rem;margin-bottom:5px}
-.field__hint{display:block;font-weight:400;color:var(--muted);font-size:.84rem;margin-top:2px}
-input[type=text],input[type=password]{width:100%;font:inherit;padding:10px 12px;color:var(--text);background:var(--surface-soft);border:1px solid var(--border-strong);border-radius:var(--radius-sm)}
-input[type=text]:hover,input[type=password]:hover{border-color:var(--brand-strong)}
+/* A field is the label sitting above one control. The gap that separates one
+   field from the next belongs to whatever follows the control, not to the
+   label alone — with only a label margin, the next label lands flush against
+   the input above it. */
+.field{display:block;margin:0 0 7px}
+.field__label{display:block;font-weight:600;font-size:.9rem}
+.field__hint{display:block;font-weight:400;color:var(--muted);font-size:.84rem;margin-top:3px}
+input[type=text],input[type=email],input[type=password]{width:100%;font:inherit;padding:10px 12px;color:var(--text);background:var(--surface-soft);border:1px solid var(--border-strong);border-radius:var(--radius-sm)}
+input[type=text]:hover,input[type=email]:hover,input[type=password]:hover{border-color:var(--brand-strong)}
 input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:none;margin:0}
+/* Anything after a control opens a new block. .reveal is that same control
+   once password.js has wrapped it with the show/hide button, so both spellings
+   carry the rule and the spacing does not depend on the script having run. */
+input+.field,.reveal+.field{margin-top:20px}
+input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 
 /* ---- alerts ---- */
 .alert{display:block;margin:0 0 18px;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid var(--danger-border);background:var(--danger-bg);color:var(--danger);font-size:.93rem}
@@ -492,7 +501,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <label class="field" for="license-email"><span class="field__label">Seu e-mail</span>
 <span class="field__hint">Chega um link de ativa&ccedil;&atilde;o neste endere&ccedil;o; clicar nele completa o registro. O registro fica em nome do {{product}}, e o e-mail &eacute; o titular da licen&ccedil;a.</span></label>
 <input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="email"{{with .OperatorEmail}} value="{{.}}"{{end}}>
-<div class="actions" style="margin-top:12px"><button class="btn" type="submit">Ativar por e-mail</button></div>
+<div class="actions"><button class="btn" type="submit">Ativar por e-mail</button></div>
 </form>
 <p class="muted" style="margin-top:10px">O e-mail vale para sempre: em qualquer outra instala&ccedil;&atilde;o, registrar com o mesmo endere&ccedil;o re&aacute;prova o mesmo titular em um clique, e a licen&ccedil;a desta implanta&ccedil;&atilde;o fica guardada pelo painel para reativar rebuilds sem ajuda humana.</p>
 {{if .RegisterURL}}<p class="muted" style="margin-top:10px">Prefere o site da Evolution? <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Abrir o registro no servidor deles</a> — leva ao mesmo lugar, s&oacute; que em vez de redirecionar aqui.</p>
@@ -683,9 +692,10 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 {{with .Token}}<input type="hidden" name="setup_token" value="{{.}}">{{end}}
 <label class="field" for="username"><span class="field__label">Usuário</span></label>
 <input id="username" type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false">
-<label class="field" for="password"><span class="field__label">Senha<span class="field__hint">Mínimo de 10 caracteres.</span></span></label>
+<label class="field" for="password"><span class="field__label">Senha</span>
+<span class="field__hint">Mínimo de 10 caracteres.</span></label>
 <input id="password" type="password" name="password" minlength="10" required autocomplete="new-password">
-<div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Criar administrador</button></div>
+<div class="actions"><button class="btn btn--block" type="submit">Criar administrador</button></div>
 </form>{{end}}
 </div></section>
 <p class="muted" style="text-align:center">As senhas são guardadas com bcrypt e nunca aparecem nos logs.</p>
@@ -706,11 +716,12 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <form method="post">
 <label class="field" for="current"><span class="field__label">Senha atual</span></label>
 <input id="current" type="password" name="current_password" required autocomplete="current-password">
-<label class="field" for="password"><span class="field__label">Nova senha<span class="field__hint">M&iacute;nimo de 10 caracteres.</span></span></label>
+<label class="field" for="password"><span class="field__label">Nova senha</span>
+<span class="field__hint">M&iacute;nimo de 10 caracteres.</span></label>
 <input id="password" type="password" name="password" minlength="10" required autocomplete="new-password">
 <label class="field" for="confirm"><span class="field__label">Repita a nova senha</span></label>
 <input id="confirm" type="password" name="confirm_password" minlength="10" required autocomplete="new-password">
-<div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Salvar senha</button></div>
+<div class="actions"><button class="btn btn--block" type="submit">Salvar senha</button></div>
 </form>
 </div></section>
 {{if .Forced}}<p class="muted" style="text-align:center">A senha do instalador continua v&aacute;lida at&eacute; esta troca. Nada mais do painel abre antes dela.</p>{{end}}
@@ -729,7 +740,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <input id="username" type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false">
 <label class="field" for="password"><span class="field__label">Senha</span></label>
 <input id="password" type="password" name="password" required autocomplete="current-password">
-<div class="actions" style="margin-top:16px"><button class="btn btn--block" type="submit">Entrar</button></div>
+<div class="actions"><button class="btn btn--block" type="submit">Entrar</button></div>
 </form>
 </div></section>
 </div>
