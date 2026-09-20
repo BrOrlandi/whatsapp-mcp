@@ -62,6 +62,30 @@ report Evolution as unavailable. Activation happens once, in Evolution's own
 manager, which the Compose stack exposes on the internal network. Follow the
 activation flow documented in the Evolution Go repository.
 
+### Activating without a browser
+
+The registration is **once per email, not once per server**. Evolution Go has a
+headless activation for exactly this: put the email you registered with into
+`EVOLUTION_OPERATOR_EMAIL` and it calls their licensing server on startup and
+activates itself, with no browser step.
+
+```sh
+EVOLUTION_OPERATOR_EMAIL=you@example.com
+```
+
+`install.sh` reads it from its own environment, so a second server is one
+command with nothing to click:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh \
+  | sudo EVOLUTION_OPERATOR_EMAIL=you@example.com bash
+```
+
+An email that has never registered falls back to the manual flow, so the first
+time is still a browser visit. After that, every rebuild and every new machine
+comes up already activated — which also means a redeploy that recreates the
+Evolution container does not leave the panel waiting on a form.
+
 Evolution Go is Apache-2.0 with additional brand-protection conditions, and
 "Evolution", "Evolution Go" and "Evolution Foundation" are trademarks. Review
 its `LICENSE`, `NOTICE` and `TRADEMARKS.md` before redistributing anything that

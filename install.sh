@@ -211,6 +211,11 @@ MCP_DB_USER=whatsapp_mcp
 MCP_DB_PASSWORD=$(secret)
 MCP_DB_NAME=whatsapp_mcp
 
+# Activates Evolution Go on startup without a browser, for an email that has
+# registered once before. Empty means the manual flow, which the panel walks
+# you through.
+EVOLUTION_OPERATOR_EMAIL=${EVOLUTION_OPERATOR_EMAIL:-}
+
 PUBLIC_URL=https://${PUBLIC_HOST}
 PUBLIC_HOST=${PUBLIC_HOST}
 LETSENCRYPT_EMAIL=admin@${PUBLIC_HOST}
@@ -232,6 +237,17 @@ chown root:root .env install-id hostname 2>/dev/null || true
 # The hostname may have been written before .env existed on a partial run.
 grep -q "^PUBLIC_HOST=${PUBLIC_HOST}$" .env || sed -i "s|^PUBLIC_HOST=.*|PUBLIC_HOST=${PUBLIC_HOST}|" .env
 grep -q "^PUBLIC_URL=https://${PUBLIC_HOST}$" .env || sed -i "s|^PUBLIC_URL=.*|PUBLIC_URL=https://${PUBLIC_HOST}|" .env
+
+# An operator email given on a re-run should take effect, so it is written even
+# when .env already exists. Nothing else in .env is touched.
+if [ -n "${EVOLUTION_OPERATOR_EMAIL:-}" ]; then
+    if grep -q "^EVOLUTION_OPERATOR_EMAIL=" .env; then
+        sed -i "s|^EVOLUTION_OPERATOR_EMAIL=.*|EVOLUTION_OPERATOR_EMAIL=${EVOLUTION_OPERATOR_EMAIL}|" .env
+    else
+        printf 'EVOLUTION_OPERATOR_EMAIL=%s\n' "${EVOLUTION_OPERATOR_EMAIL}" >> .env
+    fi
+    info "Evolution will activate itself with ${EVOLUTION_OPERATOR_EMAIL}"
+fi
 
 # ---------------------------------------------------------------- firewall
 
@@ -352,7 +368,9 @@ printf 'databases, RabbitMQ, MinIO or Evolution.\n\n'
 printf 'Next:\n'
 printf '  1. Open the link above and create your administrator.\n'
 printf '  2. Activate Evolution Go - it requires a licence and answers 503\n'
-printf '     until then. See https://github.com/EvolutionAPI/evolution-go\n'
+printf '     until then. The panel walks you through it, in Instancias.\n'
+printf '     Already registered an email with them? Re-run this installer as\n'
+printf '     EVOLUTION_OPERATOR_EMAIL=you@example.com and it activates itself.\n'
 printf '  3. Create an instance and scan the QR code from WhatsApp under\n'
 printf '     Linked devices -> Link a device.\n'
 printf '  4. Generate an API key under "Conectar" and paste the block it\n'

@@ -488,6 +488,7 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <p class="muted">A Evolution Go &eacute; a camada que mant&eacute;m a sess&atilde;o do WhatsApp, e ela exige uma licen&ccedil;a pr&oacute;pria. &Eacute; uma etapa &uacute;nica: depois de registrada, nada aqui volta a pedir isso.</p>
 {{if .RegisterURL}}<div class="actions" style="margin-top:12px"><a class="btn" href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Registrar a licen&ccedil;a</a></div>
 <p class="muted" style="margin-top:10px">O link vem da pr&oacute;pria Evolution desta instala&ccedil;&atilde;o. Depois de registrar, recarregue esta p&aacute;gina.</p>
+<p class="muted" style="margin-top:10px">Esse registro &eacute; uma vez por e-mail, n&atilde;o por servidor. Guardando o e-mail em <code>EVOLUTION_OPERATOR_EMAIL</code> no <code>.env</code>, toda instala&ccedil;&atilde;o e todo rebuild seguintes sobem j&aacute; ativados, sem navegador.</p>
 {{else}}<p class="muted" style="margin-top:10px">N&atilde;o foi poss&iacute;vel obter o link de registro agora. Ele tamb&eacute;m sai no servidor com:</p>
 <pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}
 </div></div>{{end}}

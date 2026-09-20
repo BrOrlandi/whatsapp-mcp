@@ -60,6 +60,7 @@ Read by the `whatsapp-mcp` binary:
 | `EVOLUTION_URL` | `http://evolution-go:4000` | Evolution Go's internal address. |
 | `EVOLUTION_API_KEY` | — | Evolution's global key, for administrative routes only. Required. |
 | `EVOLUTION_TIMEOUT` | `5s` | Per-request timeout against Evolution. |
+| `EVOLUTION_OPERATOR_EMAIL` | unset | Read by Evolution Go, not by the gateway. An email that has registered a licence once before makes Evolution activate itself on startup instead of waiting for the browser flow. |
 | `FRESHNESS_WINDOW` | `5m` | How old the newest persisted event may be before `/readyz` reports 503. |
 | `STATUS_POLL_INTERVAL` | `15s` | How often the gateway reconciles session state with Evolution. |
 | `SETUP_TOKEN` | unset | Guards the first-run form: it opens only at `/setup?token=<value>`. Set it whenever the panel is reachable from the internet; leave it empty on loopback. Stops mattering once an administrator exists. |

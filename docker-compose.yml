@@ -71,6 +71,16 @@ services:
       SERVER_PORT: "4000"
       CLIENT_NAME: evolution
       GLOBAL_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY}
+      # Evolution Go needs a licence and answers 503 on every route until it
+      # has one. With the operator's email set it activates itself on startup —
+      # Evolution's own headless flow, which calls their licensing server and
+      # skips the browser. It works for an email that has registered once
+      # before, and falls back to the manual flow otherwise, so the very first
+      # registration an operator ever does is still a browser visit.
+      #
+      # This is what makes a rebuild or a new server come up already activated
+      # instead of waiting for someone to click through a form again.
+      EVOLUTION_OPERATOR_EMAIL: ${EVOLUTION_OPERATOR_EMAIL:-}
       POSTGRES_AUTH_DB: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres-evolution:5432/${EVOLUTION_AUTH_DB_NAME:-evogo_auth}?sslmode=disable
       POSTGRES_USERS_DB: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres-evolution:5432/${EVOLUTION_USERS_DB_NAME:-evogo_users}?sslmode=disable
       # Evolution keeps its own copy of every message when this is on, which
