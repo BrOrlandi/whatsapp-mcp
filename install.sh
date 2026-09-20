@@ -57,9 +57,34 @@ AVAILABLE_MB=$(df -Pm /opt 2>/dev/null | awk 'NR==2 {print $4}' || echo 0)
 CURRENT_STEP="installing base packages"
 step "Installing base packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends ca-certificates curl git openssl dnsutils >/dev/null
-info "ca-certificates, curl, git, openssl, dnsutils"
+
+# A cloud VM boots straight into unattended-upgrades and apt-daily, which hold
+# the apt locks for the first minute or two of its life — exactly when someone
+# pastes this command into a fresh machine. Waiting is the whole fix: apt is
+# told to block rather than fail, and we also wait for the lists lock, which
+# DPkg::Lock::Timeout does not cover.
+APT_OPTS=(-o DPkg::Lock::Timeout=600)
+wait_for_apt() {
+    local waited=0
+    while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock \
+                /var/cache/apt/archives/lock >/dev/null 2>&1; do
+        if [ "$waited" -eq 0 ]; then
+            info "waiting for the system's own package updates to finish…"
+        fi
+        if [ "$waited" -ge 600 ]; then
+            fail "installing base packages: apt is still locked after 10 minutes. Check: systemctl status unattended-upgrades"
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+    [ "$waited" -gt 0 ] && info "apt is free after ${waited}s"
+    return 0
+}
+
+wait_for_apt
+apt-get "${APT_OPTS[@]}" update -qq
+apt-get "${APT_OPTS[@]}" install -y -qq --no-install-recommends ca-certificates curl git openssl >/dev/null
+info "ca-certificates, curl, git, openssl"
 
 CURRENT_STEP="installing Docker"
 step "Installing Docker"
@@ -71,8 +96,9 @@ else
     chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable" \
         > /etc/apt/sources.list.d/docker.list
-    apt-get update -qq
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    wait_for_apt
+    apt-get "${APT_OPTS[@]}" update -qq
+    apt-get "${APT_OPTS[@]}" install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
     info "installed $(docker --version)"
 fi
 # The stack has to come back by itself after a reboot, which needs both the
