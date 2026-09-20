@@ -10,5 +10,6 @@ Start with the [README](../README.md); this directory is the detail behind it.
 | [authentication.md](authentication.md) | Client keys, the panel account, the internal instance token, and what a key holder can do. |
 | [operations.md](operations.md) | Health and readiness, the event pipeline, the full configuration reference, retention, troubleshooting. |
 | [development.md](development.md) | The three local run modes, the pre-commit checks, transports, brand assets. |
+| [evolution/licensing.md](evolution/licensing.md) | Why Evolution Go needs a licence, where it is stored, and why the first activation cannot be unattended. |
 | [evolution/endpoint-map.md](evolution/endpoint-map.md) | Every Evolution Go route this project depends on, against the versioned `swagger.yaml`. |
 | [backlog.md](backlog.md) | What comes next. |
