@@ -41,7 +41,7 @@ case "${1:-}" in
         # the images move. Migrations run when the gateway starts.
         git fetch --quiet origin
         git checkout --quiet -B "$(git rev-parse --abbrev-ref HEAD)" "origin/$(git rev-parse --abbrev-ref HEAD)"
-        "${COMPOSE[@]}" up -d --pull always
+        "${COMPOSE[@]}" up -d --pull always  # update: always fetch the newer image
         printf '\nUpdated to %s\n' "$(git rev-parse --short HEAD)"
         ;;
     url)     cat hostname 2>/dev/null | sed 's|^|https://|' ;;

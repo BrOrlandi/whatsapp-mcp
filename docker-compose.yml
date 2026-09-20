@@ -41,7 +41,9 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    # quay.io, not Docker Hub: MinIO took minio/minio down from Hub, so the
+    # Hub reference stopped resolving and the installer died pulling it.
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
