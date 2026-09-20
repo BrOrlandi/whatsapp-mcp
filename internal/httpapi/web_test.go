@@ -186,6 +186,7 @@ type fakeEvolution struct {
 
 	registerErr   error
 	operatorEmail string
+	operatorName  string
 	activation    evolution.LicenseActivation
 	activationErr error
 	healErr       error
@@ -264,7 +265,7 @@ func (f *fakeEvolution) RegisterOperator(_ context.Context, email, name, callbac
 		return f.registerErr
 	}
 	f.mu.Lock()
-	f.operatorEmail = email
+	f.operatorEmail, f.operatorName = email, name
 	f.mu.Unlock()
 	return nil
 }
@@ -1312,9 +1313,10 @@ func TestLicenseRegistrationRunsThroughThePanel(t *testing.T) {
 	defer ts.Close()
 
 	// The form is the way in: the operator never leaves the panel, and never
-	// opens the licensing site. The confirmation is what the redirect lands on.
+	// opens the licensing site. Only the email is typed — the name on the
+	// registry is the product's, not a second field to fill.
 	r, err := client.PostForm(ts.URL+"/instancias/licenca", url.Values{
-		"name": {"Bruno Orlandi"}, "email": {"bruno@example.com"},
+		"email": {"bruno@example.com"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1326,6 +1328,9 @@ func TestLicenseRegistrationRunsThroughThePanel(t *testing.T) {
 	}
 	if evo.operatorEmail != "bruno@example.com" {
 		t.Fatalf("register-operator handled email %q", evo.operatorEmail)
+	}
+	if got := evo.operatorName; got != brand.Name {
+		t.Fatalf("register-operator handled name %q, want the product name %q", got, brand.Name)
 	}
 	mustContain(t, string(body), "instancias", "bruno@example.com", "15 minutos")
 	if repo.operatorEmail != "bruno@example.com" {
@@ -1380,7 +1385,7 @@ func TestLicenseCallbackRefusesAnEmptyOrRejectedCode(t *testing.T) {
 	mustContain(t, string(body), "instâncias", "Não foi possível ativar a licença")
 
 	// The licence form does not accept a nonsense e-mail either.
-	r, err = client.PostForm(ts.URL+"/instancias/licenca", url.Values{"name": {"B"}, "email": {"not-an-email"}})
+	r, err = client.PostForm(ts.URL+"/instancias/licenca", url.Values{"email": {"not-an-email"}})
 	if err != nil {
 		t.Fatal(err)
 	}

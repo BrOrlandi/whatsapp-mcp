@@ -489,11 +489,8 @@ input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:n
 <h3 style="margin-bottom:8px">Ativar a Evolution Go</h3>
 <p class="muted">A Evolution Go &eacute; a camada que mant&eacute;m a sess&atilde;o do WhatsApp, e ela exige uma licen&ccedil;a pr&oacute;pria. &Eacute; uma etapa &uacute;nica: depois de registrada, nada aqui volta a pedir isso.</p>
 <form method="post" action="/instancias/licenca" style="margin-top:12px">
-<label class="field" for="license-name"><span class="field__label">Seu nome completo</span>
-<span class="field__hint">&Eacute; o nome do registro da licen&ccedil;a, na Evolution Foundation.</span></label>
-<input id="license-name" type="text" name="name" maxlength="120" required placeholder="Maria da Silva" autocomplete="name">
 <label class="field" for="license-email"><span class="field__label">Seu e-mail</span>
-<span class="field__hint">Chega um link de ativa&ccedil;&atilde;o neste endere&ccedil;o; clicar nele completa o registro.</span></label>
+<span class="field__hint">Chega um link de ativa&ccedil;&atilde;o neste endere&ccedil;o; clicar nele completa o registro. O registro fica em nome do {{product}}, e o e-mail &eacute; o titular da licen&ccedil;a.</span></label>
 <input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="email"{{with .OperatorEmail}} value="{{.}}"{{end}}>
 <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Ativar por e-mail</button></div>
 </form>

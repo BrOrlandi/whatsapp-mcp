@@ -47,6 +47,9 @@ func AppleTouchIcon() []byte { return appleTouchIcon }
 // else that credits the project all say the same thing, and so changing the
 // donation link is one edit rather than a search.
 const (
+	// Name is what the project calls itself, wherever the panel or its
+	// registrations need a label instead of a logo.
+	Name = "WhatsApp MCP"
 	// Author is the person who wrote and maintains this.
 	Author = "Bruno Orlandi"
 	// AuthorURL is where clicking the name goes.

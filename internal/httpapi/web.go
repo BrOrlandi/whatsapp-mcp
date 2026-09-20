@@ -955,13 +955,16 @@ func (a *webApp) sendLicenseLink(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
-	name := strings.TrimSpace(r.FormValue("name"))
 	email := strings.TrimSpace(r.FormValue("email"))
-	if name == "" || len(name) > 120 || !strings.Contains(email, "@") || len(email) > 254 {
-		a.fail(w, r, "/instancias", "Informe seu nome completo e um e-mail válido para ativar.")
+	if !strings.Contains(email, "@") || len(email) > 254 {
+		a.fail(w, r, "/instancias", "Informe um e-mail válido para ativar.")
 		return
 	}
-	if err := a.evolution.RegisterOperator(r.Context(), email, name, a.licenseCallback()); err != nil {
+	// The licensing server's registry wants a {token, email, name}, but the
+	// identity is the email — the name is a label, so the product supplies
+	// its own and the operator has one field to type. A person who prefers
+	// their own name on the registry can still use Evolution's own link below.
+	if err := a.evolution.RegisterOperator(r.Context(), email, brand.Name, a.licenseCallback()); err != nil {
 		a.fail(w, r, "/instancias", "Não foi possível enviar o e-mail de ativação: "+err.Error())
 		return
 	}
@@ -1039,6 +1042,7 @@ func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {
 var templateFuncs = template.FuncMap{
 	"logo":          brand.LogoSVG,
 	"author":        func() string { return brand.Author },
+	"product":       func() string { return brand.Name },
 	"authorURL":     func() string { return brand.AuthorURL },
 	"repositoryURL": func() string { return brand.RepositoryURL },
 	"supportURL":    func() string { return brand.SupportURL },
