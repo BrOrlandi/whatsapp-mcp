@@ -38,9 +38,12 @@ your number by QR code, and hand your agent a single API key.
   <img src="docs/assets/panel-conectar.png" alt="The Conectar page of the control panel" width="820">
 </p>
 
-The gateway ships with its own control panel: **Conectar** issues client keys
-and prints the configuration block already filled in, **Instâncias** owns the
-WhatsApp connection, **Estado** is the diagnostic view.
+The gateway ships with its own control panel. The first sign-in opens an
+installation wizard — licence, WhatsApp, client — and hands over once the
+gateway can actually do something. After that the panel is split by task:
+**Conectar** issues client keys and prints the configuration block already
+filled in, **Instâncias** owns the WhatsApp connection, **Estado** is the
+diagnostic view.
 
 ## What it can do
 
@@ -134,30 +137,34 @@ data are left alone.
 Afterwards `whatsapp-mcp status`, `logs`, `restart` and `update` manage the
 installation, which lives in `/opt/whatsapp-mcp`.
 
-### 3. Activate Evolution Go
+### 3. Run the installation wizard
 
-Evolution Go requires a licence to operate and answers 503 until it is
-activated, which means the panel will report it as unavailable until you do.
-Activation happens in the panel itself: under **Instâncias**, the card that
-appears while the licence is missing asks for your name and email, sends the
-activation link to that inbox, and finishes on its own after you click the
-link. Nobody opens Evolution's own pages, and rebuilds that lose Evolution's
-data are re-licensed automatically from the copy this panel keeps. The residual
-step — clicking one emailed link — is the operator's proof of identity, and
+Sign in and the panel opens the wizard rather than a dashboard with nothing in
+it. There are two things to do and it asks for one at a time.
+
+That form asks for an email and a password. The email is the administrator —
+you sign in with it — and it has to be one you can open, because the next step
+confirms it.
+
+**Licence.** Evolution Go requires a licence to operate and answers 503 until
+it is activated. There is nothing to type: the panel already has your address,
+so it asks the licensing server for the activation link and the first screen
+you see is your inbox waiting to be opened. It keeps checking in the background
+and moves on by itself the moment the licence lands. If the mail never arrives,
+*Não recebeu o e-mail?* sends it again, to another address if you prefer.
+Nobody opens Evolution's own pages, and rebuilds that lose
+Evolution's data are re-licensed automatically from the copy the panel keeps.
+The residual step — clicking one emailed link — is your proof of identity, and
 no installer can honestly do it for you.
 
-### 4. Link your WhatsApp
+**WhatsApp.** Name the account. The panel registers it with Evolution,
+subscribes it to the event queues, starts the client and shows the QR code on
+the same screen. Scan it from your phone under **Linked devices → Link a
+device**. The page refreshes itself, so a scanned code moves forward on its
+own, and it mints a new code when one expires. From then on the gateway
+indexes everything that arrives.
 
-Sign in to the panel and set your own password. In **Instâncias**, create an
-instance by name: the panel registers it with Evolution, subscribes it to the
-event queues, starts the client and shows a QR code. Scan it from your phone
-under **Linked devices → Link a device**.
-
-The pairing page refreshes itself, so a scanned code moves forward on its own,
-and it can mint a new code when one expires. From then on the gateway indexes
-everything that arrives.
-
-### 5. Point your agent at it
+### 4. Point your agent at it
 
 A client needs exactly one thing: an API key. The key identifies the account
 and the WhatsApp instance it is authorised for, so there is no user, no

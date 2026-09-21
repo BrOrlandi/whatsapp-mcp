@@ -131,12 +131,15 @@ deployments, and a revocation breaking every installation at once.
 
 ## What this project does instead
 
-The panel drives the whole registration itself, from the activation card in
-`/instancias` (`internal/evolution/licensing.go`, `internal/httpapi/web.go`):
+The panel drives the whole registration itself, from the first step of the
+installation wizard at `/instalacao` (`internal/evolution/licensing.go`,
+`internal/httpapi/web.go`):
 
 1. It detects the 503 and says the licence is missing rather than reporting a
-   transient outage.
-2. The operator fills in a name and email **in the panel**. Behind the form
+   transient outage — and says it as a step of the installation, not as an
+   alert, because a deployment that was installed a minute ago has no licence
+   yet and that is the normal starting state.
+2. The operator fills in an email **in the panel**. Behind the form
    the panel asks Evolution for the registration URL with this panel as the
    `redirect_uri`, extracts the token, and calls the licensing server's
    `/v1/auth/magic-link` itself. No Evolution Manager, no registration form
@@ -146,7 +149,9 @@ The panel drives the whole registration itself, from the activation card in
 3. The operator clicks the email. The licensing server redirects them back to
    `/instancias/licenca/retorno?code=…`, the panel exchanges the code for
    the key, activates Evolution with it, and keeps a copy in its own
-   database (`evolution_license`, migration `008`).
+   database (`evolution_license`, migration `008`). The wizard does not wait
+   on that tab: it polls `/api/instalacao` and moves to the next step on its
+   own, wherever the link was clicked.
 4. **From then on, nobody is asked anything.** If a rebuild loses the
    Evolution volume, the panel notices the 503, hands Evolution the key it
    kept, and carries on; rebuilding that loses both volumes would be a new

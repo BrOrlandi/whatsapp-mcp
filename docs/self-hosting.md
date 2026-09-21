@@ -57,10 +57,12 @@ PostgreSQL migrations run automatically when it starts.
 ## 3. Activate Evolution Go
 
 [Evolution Go](https://github.com/EvolutionAPI/evolution-go) requires a licence
-to operate: until it is activated, its endpoints answer 503 and the panel will
-report Evolution as unavailable. Activation happens once, in Evolution's own
-manager, which the Compose stack exposes on the internal network. Follow the
-activation flow documented in the Evolution Go repository.
+to operate: until it is activated, its endpoints answer 503. Activation happens
+once, and the panel drives it — the first sign-in opens the installation wizard
+on that step, which asks for an email, requests the magic link itself and polls
+until the licence lands. Nobody opens Evolution's own manager. See
+[evolution/licensing.md](evolution/licensing.md) for what the licence is and
+why one click cannot be automated away.
 
 ### Activating without a browser
 
@@ -94,8 +96,10 @@ bundles it.
 ## 4. First access and pairing
 
 Open the panel — `http://127.0.0.1:8080/` by default. The first visit asks you
-to create the administrator account; there is no default password to forget to
-change.
+to create the administrator account: an email and a password, no default
+credentials to forget to change. The email is the identity you sign in with,
+and it has to be one you can open — the installation's next step sends a
+confirmation to it.
 
 On a panel that is reachable from the internet, that form needs guarding: in the
 seconds between the address existing and you reaching it, whoever arrives first
@@ -111,12 +115,18 @@ SETUP_TOKEN=$(openssl rand -hex 12)
 
 Leave it empty for a panel bound to loopback, where there is no race to lose.
 
-Then, in **Instâncias**, create an instance by name. The panel registers it with
-Evolution, subscribes it to the `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` and
-`CONNECTION` event queues, starts the client and shows a QR code. Scan it from
-WhatsApp under **Linked devices → Link a device**. The pairing page refreshes
-itself, so a scanned code moves forward on its own; codes expire quickly and the
-page can mint another.
+Signing in then opens the installation wizard, which asks for the licence
+first and for the WhatsApp account second — one screen at a time, and no panel
+chrome to wander off into until the gateway works. Name the account and the
+panel registers it with Evolution, subscribes it to the `MESSAGE`,
+`SEND_MESSAGE`, `HISTORY_SYNC` and `CONNECTION` event queues, starts the client
+and shows the QR code. Scan it from WhatsApp under **Linked devices → Link a
+device**. The page refreshes itself, so a scanned code moves forward on its
+own; codes expire quickly and the page mints another.
+
+The wizard is the first run only. A deployment that has already issued a key is
+past it, so a later outage lands on the panel — where **Estado** and the
+instance controls are — instead of on an install screen that cannot help.
 
 Do not paste API keys or QR payloads into chat, issue trackers, or logs.
 
