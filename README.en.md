@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-0b6b5d"></a>
-  <img alt="Go" src="https://img.shields.io/badge/go-1.23-00ADD8">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-0b6b5d"></a>
+  <img alt="Go" src="https://img.shields.io/badge/go-1.24-00ADD8">
   <img alt="Self-hosted" src="https://img.shields.io/badge/deploy-docker%20compose-2496ED">
 </p>
 
@@ -223,6 +223,22 @@ It then polls, and closes the step the moment your client authenticates with
 that key. Keep the key in the client's credential store, never in a prompt or a
 versioned file.
 
+### 5. Keeping it current
+
+The panel prints the running version in its footer, and says when a newer one
+exists. To update, one command on your instance:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
+```
+
+It dumps the database, moves the code to the newest release, pulls the images
+and waits for the gateway to answer. Secrets, the hostname, the pairing and the
+indexed messages stay where they are. **There is no downgrade** — a release may
+migrate the schema, and migrations only run forward; the way back is that dump.
+[docs/updating.md](docs/updating.md) has the steps, the variables, and a prompt
+for Claude Code to diagnose an update that failed.
+
 ### Running it some other way
 
 If you would rather bring your own host, TLS or orchestration, the stack is one
@@ -257,13 +273,13 @@ The gateway is published on every push to `main` and on every version tag:
 | | |
 |---|---|
 | Image | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` and `linux/arm64` |
-| Tags | `edge` follows `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` on a release; `sha-<commit>` always. `v0.1.0` only exists from the next release on — for 0.1.0 use the form without the `v`. |
+| Tags | `edge` follows `main`; `0.2.0-beta.1` and `v0.2.0-beta.1` on a release; `sha-<commit>` always. A prerelease moves neither `latest` nor the short `0.2` form — while the series is beta, `latest` stays on the last stable version. |
 | Binaries | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` on each [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), with `checksums.txt` |
 
 Pin a version with `WHATSAPP_MCP_TAG` in `.env`:
 
 ```sh
-WHATSAPP_MCP_TAG=0.1.0   # or 0.1, latest, edge, sha-<commit>
+WHATSAPP_MCP_TAG=0.2.0-beta.1   # or latest, edge, sha-<commit>
 ```
 
 The binary on its own needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and
@@ -278,11 +294,13 @@ The documents below are in English.
 | | |
 |---|---|
 | [Self-hosting](docs/self-hosting.md) | Configuration, TLS, upgrades, backups |
+| [Updating](docs/updating.md) | The update command, what it does, and why there is no downgrade |
 | [Architecture](docs/architecture.md) | Why it is built this way |
 | [MCP tools](docs/mcp-tools.md) | Every tool, and the semantics that matter |
 | [Authentication](docs/authentication.md) | Keys, sessions, what a key holder can do |
 | [Operations](docs/operations.md) | Health, the event pipeline, full config reference |
 | [Development](docs/development.md) | Local run modes, checks, brand assets |
+| [Changelog](CHANGELOG.md) | What changed in each version |
 | [Security policy](SECURITY.md) | Threat model and how to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | How to send a change |
 
@@ -315,9 +333,12 @@ for you:
   project's own, `whatsappmcp+<random>@brorlandi.xyz` — a fresh address per
   installation, so every deploy is its own registration.
 - Cloudflare Email Routing delivers that address's mail to
-  [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
-  (private repository), an Email Worker that finds the link in the message and
-  does the same GET a browser would. The same click, server-side.
+  [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker),
+  an Email Worker that finds the link in the message and does the same GET a
+  browser would. The same click, server-side. It is a separate project, under
+  the MIT licence, and its README covers what the worker accepts and what it
+  ignores — including the detail that the link arrives rewritten by
+  Evolution's email tracker rather than as the licensing server's own URL.
 - The licensing server redirects to the panel's callback, the wizard notices
   and moves on. You typed no email, opened no inbox and clicked nothing.
 
@@ -358,8 +379,8 @@ step by step, and why each piece is shaped this way.
 ## Support this project
 
 WhatsApp MCP is built and maintained by one person, in the open, and it is
-free to self-host for any noncommercial use. If it saves you time, you can
-support the work:
+free to self-host — commercially too. If it saves you time, you can support
+the work:
 
 <p align="center">
   <a href="https://donate.stripe.com/8x200jdhA6c1d375jF9Ve06"><img alt="Support the project" src="https://img.shields.io/badge/%E2%98%95%20support%20this%20project-pay%20what%20you%20want-0b6b5d?style=for-the-badge"></a>
@@ -370,13 +391,16 @@ your own currency. It goes to the person writing the code.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE). Use it, modify it, self-host it and
-share it freely for any **noncommercial** purpose — personal use, research,
-education, charities, public institutions.
+[MIT](LICENSE). Use it, modify it, self-host it, fork it and distribute it
+freely, for any purpose — commercial included. The only requirement is to keep
+the copyright notice and the licence with the code.
 
-Commercial use — selling it, running it as a paid service, or using it inside a
-business to make money — needs a separate licence.
-[Open an issue](https://github.com/BrOrlandi/whatsapp-mcp/issues) or reach out.
+The software is provided **as is**, with no warranty of any kind. And two
+things are worth keeping apart: the licence covers this code, and it is not
+permission from Meta. Running a WhatsApp account through an unofficial client
+is the decision of whoever installs it; complying with WhatsApp's terms and
+with the privacy law that applies is on whoever operates the instance and
+hosts the messages.
 
 ---
 

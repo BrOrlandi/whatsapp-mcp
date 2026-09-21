@@ -23,7 +23,18 @@ jobs:
   image:
     runs-on: ubuntu-24.04
     steps:
+      # The tags and the full history are what `git describe` needs. The
+      # default shallow checkout has neither, and the version would silently
+      # fall back to a bare sha on every build.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      # What the binary reports about itself: "0.1.0-beta" exactly on a release
+      # tag, "0.1.0-beta-12-gabc1234" on a main build past it.
+      - id: version
+        run: echo "describe=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -47,7 +58,13 @@ jobs:
             type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
-          flavor: latest=${{ startsWith(github.ref, 'refs/tags/v') }}
+          # `latest` is what someone gets when they pin nothing, so a
+          # prerelease must not move it — publishing v0.1.0-beta would
+          # otherwise make the beta the default for everybody. A tag with a
+          # hyphen in it is a prerelease by the semver definition, which is
+          # every tag in the 0.1.0-beta series. ({{major}}.{{minor}} is skipped
+          # for prereleases by metadata-action itself, for the same reason.)
+          flavor: latest=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -57,7 +74,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+            VERSION=${{ steps.version.outputs.describe }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -67,6 +84,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-go@v5
         with:
@@ -79,7 +99,8 @@ jobs:
           mkdir -p dist
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build \
-              -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
+              -trimpath \
+              -ldflags="-s -w -X github.com/BrOrlandi/whatsapp-mcp/internal/version.Version=$(git describe --tags --always)" \
               -o "dist/whatsapp-mcp_linux_${arch}/whatsapp-mcp" ./cmd/whatsapp-mcp
             tar -czf "dist/whatsapp-mcp_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" \
               -C "dist/whatsapp-mcp_linux_${arch}" whatsapp-mcp

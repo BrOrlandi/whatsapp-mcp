@@ -27,6 +27,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/ratelimit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
 )
 
 // StatusReader exposes the live gateway state to the panel. It is the same
@@ -1478,6 +1479,29 @@ func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"selected_instance_id": selected, "name": name, "status": status})
 }
 
+// updateCommand is what the panel hands an operator whose instance is behind:
+// the same one-liner the documentation gives, so there is one command to get
+// wrong rather than two. It is a constant because it names a script in this
+// repository, not anything about this installation.
+const updateCommand = "curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash"
+
+// newRelease is the version to update to, or empty when there is nothing to
+// say — no check has succeeded, the check is off, this build is already
+// current, or it is ahead of every release. Empty is what the banner tests, so
+// every one of those cases renders nothing at all.
+func newRelease() string {
+	if latest, behind := version.Latest(); behind {
+		return latest
+	}
+	return ""
+}
+
+// releaseURL points at the notes for a version, which is the only place that
+// answers "is this worth updating for".
+func releaseURL(tag string) string {
+	return brand.RepositoryURL + "/releases/tag/v" + tag
+}
+
 // templateFuncs exposes the brand mark and small presentation helpers to the
 // templates. The logo is trusted markup embedded in the binary, so it is
 // inlined as template.HTML; every other value stays contextually escaped.
@@ -1488,6 +1512,10 @@ var templateFuncs = template.FuncMap{
 	"authorURL":     func() string { return brand.AuthorURL },
 	"repositoryURL": func() string { return brand.RepositoryURL },
 	"supportURL":    func() string { return brand.SupportURL },
+	"version":       version.String,
+	"newRelease":    newRelease,
+	"releaseURL":    releaseURL,
+	"updateCommand": func() string { return updateCommand },
 	"statusLabel":   statusLabel,
 	"statusTone":    statusTone,
 	"sessionLabel":  sessionLabel,

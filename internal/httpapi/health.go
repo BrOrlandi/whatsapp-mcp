@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
 )
 
 func Handler(state *health.State, freshness time.Duration) http.Handler {
@@ -36,6 +37,9 @@ func FullHandler(state *health.State, freshness time.Duration, web, remoteMCP ht
 func writeHealth(w http.ResponseWriter, snapshot health.Snapshot, freshness time.Duration, live bool) {
 	stale := snapshot.Stale(freshness)
 	body := map[string]any{
+		// The version is here so that "which version is that box running" has an
+		// answer a monitor can read, without a session on the panel.
+		"version":             version.String(),
 		"evolution_connected": snapshot.EvolutionConnected,
 		"last_event_at":       snapshot.LastEventAt,
 		"last_message_at":     snapshot.LastMessageAt,

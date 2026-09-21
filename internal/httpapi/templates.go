@@ -302,6 +302,15 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 .colophon__sep{color:var(--border-strong)}
 .colophon__support{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:var(--brand-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;text-decoration:none}
 .colophon__support:hover{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+/* ---- update banner ---- */
+.update{margin:0 0 18px;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--warn-bg);color:var(--text)}
+.update__line{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:0 0 8px;font-size:.93rem}
+.update__version{font-weight:700;color:var(--warn)}
+.update__notes{color:var(--muted);font-weight:600;text-decoration:none}
+.update__notes:hover{color:var(--brand-strong);text-decoration:underline}
+.update .snippet{margin:0}
+.update__note{margin:8px 0 0;font-size:.84rem;color:var(--muted)}
+.colophon__version{font-variant-numeric:tabular-nums}
 /* ---- password reveal ---- */
 .reveal{position:relative;display:block}
 .reveal input{width:100%;padding-right:44px}
@@ -316,6 +325,8 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <a class="colophon__link" href="{{authorURL}}" rel="noopener noreferrer" target="_blank">{{author}}</a>
 <span class="colophon__sep">&middot;</span>
 <a class="colophon__link" href="{{repositoryURL}}" rel="noopener noreferrer" target="_blank">{{template "githubmark"}}<span>C&oacute;digo-fonte</span></a>
+<span class="colophon__sep">&middot;</span>
+<span class="colophon__version" title="Vers&atilde;o em execu&ccedil;&atilde;o">v{{version}}</span>
 {{with supportURL}}<span class="colophon__sep">&middot;</span>
 <a class="colophon__support" href="{{.}}" rel="noopener noreferrer" target="_blank">Apoie o projeto</a>{{end}}
 </p>
@@ -345,8 +356,22 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <a href="/documentacao"{{if eq .Active "documentacao"}} aria-current="page"{{end}}>Documentação</a>
 <a href="/receitas"{{if eq .Active "receitas"}} aria-current="page"{{end}}>Receitas</a>
 </nav>
+{{template "updatebanner"}}
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 {{end}}
+
+{{/* The banner lives in "nav" rather than in the footer on purpose: nav is
+rendered only on the pages behind the session cookie, and "this instance is
+running an outdated version" is not something to tell whoever loads the sign-in
+page. */}}
+{{define "updatebanner"}}{{with newRelease}}
+<div class="update">
+<p class="update__line">Versão <span class="update__version">{{.}}</span> disponível — esta instância roda a {{version}}.
+<a class="update__notes" href="{{releaseURL .}}" rel="noopener noreferrer" target="_blank">Ver o que mudou</a></p>
+<div class="snippet"><pre data-copy><code>{{updateCommand}}</code></pre></div>
+<p class="update__note">Rode na sua instância, por SSH. Os segredos, o pareamento e as mensagens indexadas são preservados; o banco é copiado antes de qualquer migração.</p>
+</div>
+{{end}}{{end}}
 
 {{define "clientTabs"}}
 <div class="tabs">

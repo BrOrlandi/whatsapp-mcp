@@ -21,9 +21,9 @@ whatsapp-mcp <command>
   restart    restart the stack
   stop       stop the stack, keeping the data
   start      start it again
-  update     pull the latest code and rebuild, keeping secrets and data
+  update     move to the newest release, keeping secrets and data
   url        print the public URL
-  version    print the installed commit
+  version    print the running version
 USAGE
 }
 
@@ -37,15 +37,31 @@ case "${1:-}" in
     stop)    "${COMPOSE[@]}" stop ;;
     start)   "${COMPOSE[@]}" up -d ;;
     update)
-        # Secrets, the hostname and the volumes are untouched: only the code and
-        # the images move. Migrations run when the gateway starts.
-        git fetch --quiet origin
-        git checkout --quiet -B "$(git rev-parse --abbrev-ref HEAD)" "origin/$(git rev-parse --abbrev-ref HEAD)"
-        "${COMPOSE[@]}" up -d --pull always  # update: always fetch the newer image
-        printf '\nUpdated to %s\n' "$(git rev-parse --short HEAD)"
+        # update.sh is the update, and this is one way to reach it. The other is
+        # the one-liner people are sent, which curls the same script; two
+        # implementations would diverge at the first fix only one of them got.
+        # The copy in the checkout is used when it is there, so an update can be
+        # run on a machine with no outbound network.
+        shift
+        export INSTALL_DIR
+        if [ -x ./update.sh ]; then
+            exec ./update.sh "$@"
+        fi
+        curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | bash
         ;;
     url)     cat hostname 2>/dev/null | sed 's|^|https://|' ;;
-    version) git rev-parse --short HEAD 2>/dev/null || echo unknown ;;
+    version)
+        # What the container reports, which is what is actually serving. The
+        # checkout is the fallback for a stopped stack, and says what would run.
+        reported=$("${COMPOSE[@]}" exec -T whatsapp-mcp \
+            wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null </dev/null \
+            | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -1) || true
+        if [ -n "${reported}" ]; then
+            printf '%s\n' "${reported}"
+        else
+            git describe --tags --always 2>/dev/null | sed 's/^v//' || echo unknown
+        fi
+        ;;
     ""|-h|--help|help) usage ;;
     *) echo "Unknown command: $1" >&2; usage >&2; exit 1 ;;
 esac

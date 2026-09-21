@@ -6,13 +6,17 @@
 FROM --platform=$BUILDPLATFORM golang:1.24.6-alpine3.22 AS build
 ARG TARGETOS
 ARG TARGETARCH
+# The version comes in as a build argument rather than from git: .dockerignore
+# drops .git, so `git describe` cannot run in here. Whoever builds the image
+# runs it — the release workflow does, and `just image` does.
 ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+    go build -trimpath \
+    -ldflags="-s -w -X github.com/BrOrlandi/whatsapp-mcp/internal/version.Version=${VERSION}" \
     -o /out/whatsapp-mcp ./cmd/whatsapp-mcp
 
 FROM alpine:3.22.1

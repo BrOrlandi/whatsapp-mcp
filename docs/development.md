@@ -54,6 +54,37 @@ arm64 image costs about as much as the amd64 one.
 compiles the working tree instead — use it whenever you are testing a change
 to the gateway itself through Compose.
 
+## Releasing
+
+The version is the git tag, and nothing else. There is no `VERSION` file to
+forget to bump: the binary carries `git describe --tags --always --dirty`,
+stamped through `-ldflags` by the Dockerfile, by `release.yml` and by
+`just build`. `just version` prints what this checkout would compile as.
+
+To publish one:
+
+```sh
+just release 0.2.0-beta.2      # writes the tag, after checking CHANGELOG.md
+git push origin v0.2.0-beta.2  # this is what triggers release.yml
+```
+
+Two rules the workflow encodes, both worth knowing before tagging:
+
+- **A prerelease must not move `latest`.** `latest` is what someone gets when
+  they pin nothing, so a `-beta` tag would otherwise make the beta the default
+  for everybody. The `flavor: latest=` expression excludes any tag with a
+  hyphen in it, which is the semver definition of a prerelease.
+- **The checkout must be deep.** `actions/checkout` is shallow by default and
+  `git describe` then sees no tags at all, silently stamping a bare sha.
+
+Write the `CHANGELOG.md` section before tagging. It is what turns a number into
+information: without it, "0.3.0" tells nobody whether it is worth updating to,
+and the panel links straight at it from the update notice.
+
+There is no downgrade. A release may migrate the schema, migrations only run
+forward, and [updating.md](updating.md) is where that is spelled out for the
+people running instances.
+
 ## Transports
 
 `POST /mcp` is the supported transport. A stdio transport exists for debugging a

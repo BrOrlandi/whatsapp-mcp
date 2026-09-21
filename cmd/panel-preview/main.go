@@ -18,6 +18,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/httpapi"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
 )
 
 type fakeStore struct {
@@ -231,6 +232,15 @@ func main() {
 			autoWait = parsed
 		}
 	}
+	// The version in the footer and the "newer release available" banner are
+	// panel states like any other, so they can be worked on here rather than
+	// only on a server that happens to be behind. PREVIEW_VERSION is what this
+	// build claims to be; PREVIEW_LATEST is what the update check found.
+	if stamped := os.Getenv("PREVIEW_VERSION"); stamped != "" {
+		version.Version = stamped
+	}
+	version.Record(os.Getenv("PREVIEW_LATEST"))
+
 	publicURL := os.Getenv("PREVIEW_PUBLIC_URL")
 	if publicURL == "" {
 		publicURL = "https://whatsapp-mcp.example.com"

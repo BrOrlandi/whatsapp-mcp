@@ -9,6 +9,7 @@ Start with the [README](../README.md); this directory is the detail behind it.
 | [mcp-tools.md](mcp-tools.md) | Every tool, what is deliberately *not* a tool, and the semantics of history, gaps, sending and destructive actions. |
 | [authentication.md](authentication.md) | Client keys, the panel account, the internal instance token, and what a key holder can do. |
 | [operations.md](operations.md) | Health and readiness, the event pipeline, the full configuration reference, retention, troubleshooting. |
+| [updating.md](updating.md) | Moving an instance to a newer version: the one-liner, what it does, why there is no downgrade, and the agent prompt for a failed update. |
 | [development.md](development.md) | The three local run modes, the pre-commit checks, transports, brand assets. |
 | [evolution/licensing.md](evolution/licensing.md) | Why Evolution Go needs a licence, where it is stored, and how this panel registers it — automatically, through the email worker that clicks the link, or with the operator's own click. |
 | [evolution/endpoint-map.md](evolution/endpoint-map.md) | Every Evolution Go route this project depends on, against the versioned `swagger.yaml`. |

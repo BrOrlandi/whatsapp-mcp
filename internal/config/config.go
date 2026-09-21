@@ -38,6 +38,12 @@ type Config struct {
 	// — a routing rule, the worker, the licensing server's delivery — and none
 	// of those get better by waiting longer.
 	LicenseAutoWait time.Duration
+	// UpdateCheck lets the panel ask GitHub whether a newer release exists, so
+	// an operator finds out from the panel they already look at rather than
+	// from noticing the repository moved. It is an outbound call from their
+	// server, carrying nothing about the instance, and this is the one variable
+	// that stops it.
+	UpdateCheck bool
 }
 
 func Load() Config {
@@ -65,6 +71,7 @@ func Load() Config {
 		LicenseAuto:        boolEnv("EVOLUTION_LICENSE_AUTO", true),
 		LicenseEmailDomain: env("EVOLUTION_LICENSE_EMAIL_DOMAIN", "brorlandi.xyz"),
 		LicenseAutoWait:    duration("EVOLUTION_LICENSE_AUTO_WAIT", 3*time.Minute),
+		UpdateCheck:        boolEnv("UPDATE_CHECK", true),
 	}
 }
 

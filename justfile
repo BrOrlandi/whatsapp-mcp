@@ -145,6 +145,11 @@ preview:
     @echo "Painel de demonstração em http://127.0.0.1:8090  (usuário: admin / senha: senha segura 123)"
     go run ./cmd/panel-preview
 
+# O painel com o aviso de nova versão ligado, para mexer no banner.
+preview-atualizacao:
+    @echo "Painel em http://127.0.0.1:8090 — o aviso de versão nova aparece nas páginas com menu."
+    PREVIEW_VERSION=0.1.0-beta PREVIEW_LATEST=0.2.0 go run ./cmd/panel-preview
+
 # A instalação inteira, do /setup ao pareamento: sem admin, sem licença, sem chave.
 preview-instalacao:
     @echo "Comece em http://127.0.0.1:8090/setup — crie o administrador com um e-mail qualquer."
@@ -194,9 +199,35 @@ test:
 race:
     go test -race ./...
 
-# Compila o binário em ./bin.
+# Compila o binário em ./bin, carimbado com a versão do git.
 build:
-    go build -o ./bin/whatsapp-mcp ./cmd/whatsapp-mcp
+    go build -ldflags "-X github.com/BrOrlandi/whatsapp-mcp/internal/version.Version=$(git describe --tags --always --dirty)" \
+      -o ./bin/whatsapp-mcp ./cmd/whatsapp-mcp
+
+# Diz qual versão este checkout compilaria.
+version:
+    @git describe --tags --always --dirty
+
+# Cria a tag de uma versão: `just release 0.2.0`. O push dela dispara o
+# release.yml, que publica a imagem, os binários e a release no GitHub. Não há
+# downgrade — uma versão pode migrar o esquema, e migrações só correm para
+# frente.
+#
+# Marca uma versão para publicação. Escreva o CHANGELOG.md antes.
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git status --porcelain)" ]; then
+      echo "A árvore de trabalho tem mudanças não commitadas." >&2
+      exit 1
+    fi
+    if ! grep -q "^## {{version}}" CHANGELOG.md; then
+      echo "CHANGELOG.md não tem uma seção '## {{version}}'. Escreva-a primeiro." >&2
+      exit 1
+    fi
+    git tag -a "v{{version}}" -m "v{{version}}"
+    echo "Tag v{{version}} criada. Para publicar:"
+    echo "  git push origin v{{version}}"
 
 # Tudo que precisa passar antes de um commit.
 check: fmt

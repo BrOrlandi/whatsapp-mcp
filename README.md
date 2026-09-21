@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="Licença: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-0b6b5d"></a>
-  <img alt="Go" src="https://img.shields.io/badge/go-1.23-00ADD8">
+  <a href="LICENSE"><img alt="Licença: MIT" src="https://img.shields.io/badge/license-MIT-0b6b5d"></a>
+  <img alt="Go" src="https://img.shields.io/badge/go-1.24-00ADD8">
   <img alt="Self-hosted" src="https://img.shields.io/badge/deploy-docker%20compose-2496ED">
 </p>
 
@@ -221,6 +221,22 @@ A página então fica verificando, e encerra a etapa no momento em que o seu
 cliente se autentica com aquela chave. Guarde a chave no cofre de credenciais do
 cliente, nunca em um prompt ou em um arquivo versionado.
 
+### 5. Mantendo atualizado
+
+O painel mostra a versão que está rodando no rodapé, e avisa quando existe uma
+mais nova. Para atualizar, um comando na sua instância:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
+```
+
+Ele faz backup do banco, move o código para a release mais nova, sobe as imagens
+e espera o gateway responder. Os segredos, o hostname, o pareamento e as
+mensagens indexadas ficam onde estão. **Não há downgrade** — uma versão pode
+migrar o esquema, e migrações só correm para frente; o caminho de volta é aquele
+backup. [docs/updating.md](docs/updating.md) tem o passo a passo, as variáveis, e
+uma prompt para o Claude Code diagnosticar uma atualização que falhou.
+
 ### Rodando de outro jeito
 
 Se você prefere usar o seu próprio host, o seu TLS ou a sua orquestração, a
@@ -255,13 +271,13 @@ O gateway é publicado a cada push na `main` e a cada tag de versão:
 | | |
 |---|---|
 | Imagem | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` e `linux/arm64` |
-| Tags | `edge` acompanha a `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` em um release; `sha-<commit>` sempre. A `v0.1.0` só existe a partir do próximo release — na 0.1.0 use a forma sem `v`. |
+| Tags | `edge` acompanha a `main`; `0.2.0-beta.1` e `v0.2.0-beta.1` em um release; `sha-<commit>` sempre. Uma prerelease não move a `latest`, nem publica a forma curta `0.2` — enquanto a série for beta, `latest` continua na última versão estável. |
 | Binários | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` em cada [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), com `checksums.txt` |
 
 Fixe uma versão com `WHATSAPP_MCP_TAG` no `.env`:
 
 ```sh
-WHATSAPP_MCP_TAG=0.1.0   # ou 0.1, latest, edge, sha-<commit>
+WHATSAPP_MCP_TAG=0.2.0-beta.1   # ou latest, edge, sha-<commit>
 ```
 
 O binário sozinho precisa de `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` e
@@ -276,11 +292,13 @@ Os documentos abaixo estão em inglês.
 | | |
 |---|---|
 | [Self-hosting](docs/self-hosting.md) | Configuração, TLS, atualizações, backups |
+| [Atualização](docs/updating.md) | O comando de atualizar, o que ele faz, e por que não existe downgrade |
 | [Arquitetura](docs/architecture.md) | Por que é construído assim |
 | [Ferramentas MCP](docs/mcp-tools.md) | Cada ferramenta, e as semânticas que importam |
 | [Autenticação](docs/authentication.md) | Chaves, sessões, o que quem tem uma chave pode fazer |
 | [Operação](docs/operations.md) | Saúde, o pipeline de eventos, referência completa de configuração |
 | [Desenvolvimento](docs/development.md) | Modos de execução local, checagens, assets de marca |
+| [Changelog](CHANGELOG.md) | O que mudou em cada versão |
 | [Política de segurança](SECURITY.md) | Modelo de ameaças e como reportar uma vulnerabilidade |
 | [Contribuindo](CONTRIBUTING.md) | Como enviar uma mudança |
 
@@ -315,9 +333,12 @@ por você:
   projeto, `whatsappmcp+<aleatório>@brorlandi.xyz` — um endereço novo por
   instalação, para que cada deploy seja o seu próprio registro.
 - O Cloudflare Email Routing entrega o email daquele endereço ao
-  [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
-  (repositório privado), um Email Worker que encontra o link na mensagem e faz
-  o mesmo GET que um navegador faria. O mesmo clique, só que no servidor.
+  [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker),
+  um Email Worker que encontra o link na mensagem e faz o mesmo GET que um
+  navegador faria. O mesmo clique, só que no servidor. Ele é um projeto à
+  parte, sob licença MIT, e o README de lá descreve o que o worker aceita e o
+  que ele ignora — inclusive o detalhe de que o link chega reescrito pelo
+  rastreador de email da Evolution, e não como URL do licenciador.
 - O servidor de licenciamento redireciona para o callback do painel, o
   assistente percebe e segue em frente. Você não digitou email, não abriu caixa
   de entrada e não clicou em nada.
@@ -358,7 +379,7 @@ do protocolo, e por que cada pedaço é assim.
 ## Apoie este projeto
 
 O WhatsApp MCP é construído e mantido por uma pessoa só, em código aberto, e é
-gratuito para hospedar por conta própria em qualquer uso não comercial. Se ele
+gratuito para hospedar por conta própria — inclusive comercialmente. Se ele
 economiza o seu tempo, você pode apoiar o trabalho:
 
 <p align="center">
@@ -370,14 +391,15 @@ própria moeda. Vai para a pessoa que escreve o código.
 
 ## Licença
 
-[PolyForm Noncommercial 1.0.0](LICENSE). Use, modifique, hospede e compartilhe
-livremente para qualquer propósito **não comercial** — uso pessoal, pesquisa,
-educação, instituições de caridade, instituições públicas.
+[MIT](LICENSE). Use, modifique, hospede, forke e distribua livremente, para
+qualquer propósito — inclusive comercial. A única exigência é manter o aviso
+de copyright e a licença junto com o código.
 
-Uso comercial — vender, rodar como serviço pago, ou usar dentro de uma empresa
-para ganhar dinheiro — precisa de uma licença separada.
-[Abra uma issue](https://github.com/BrOrlandi/whatsapp-mcp/issues) ou entre em
-contato.
+O software é fornecido **como está**, sem garantia de nenhum tipo. E vale
+separar duas coisas: a licença cobre este código, e não é permissão da Meta.
+Operar uma conta de WhatsApp por um cliente não oficial é decisão de quem
+instala; a conformidade com os termos do WhatsApp e com a LGPD é de quem opera
+a instância e hospeda as mensagens.
 
 ---
 

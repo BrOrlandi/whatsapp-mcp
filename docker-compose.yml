@@ -165,6 +165,11 @@ services:
       # back to the operator's own inbox. Nothing automatic mode depends on
       # lives in this container, so the hand-over is the point, not the number.
       EVOLUTION_LICENSE_AUTO_WAIT: ${EVOLUTION_LICENSE_AUTO_WAIT:-3m}
+      # Asks GitHub whether a newer release exists, so the panel can say so and
+      # hand over the update command. It is an unauthenticated GET of a public
+      # list every six hours, carrying nothing about this installation, and
+      # false stops it.
+      UPDATE_CHECK: ${UPDATE_CHECK:-true}
     # Bound to loopback by default: the panel has no business facing the
     # internet directly. Put a TLS-terminating reverse proxy in front of it and
     # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens

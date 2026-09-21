@@ -19,18 +19,20 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/rabbit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/repair"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
 )
-
-// version is stamped at build time with -ldflags "-X main.version=...". It is
-// "dev" for a local build, which is the honest answer for one.
-var version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg := config.Load()
-	logger.Info("starting whatsapp-mcp", "version", version)
+	logger.Info("starting whatsapp-mcp", "version", version.String())
+
+	// The panel tells the operator when their instance is behind. This is the
+	// only call this process makes to anything that is not theirs, it carries
+	// nothing about them, and UPDATE_CHECK=false is all it takes to stop it.
+	version.StartUpdateCheck(ctx, cfg.UpdateCheck, logger)
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("open database", "error", err)

@@ -202,14 +202,43 @@ route around it.
 
 ## Upgrading
 
+On an installation made by `install.sh`, one command:
+
 ```sh
-git pull
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
+```
+
+It moves the checkout to the newest release and pulls the images for it, having
+first dumped the gateway's database — see [updating.md](updating.md) for what it
+does step by step, for the variables that pin a specific version, and for the
+agent prompt that diagnoses a failed update.
+
+There is no downgrade. A release may migrate the schema, migrations only run
+forward, and the way back is that dump.
+
+Running the stack by hand instead, the same move is:
+
+```sh
+git fetch --tags && git checkout --detach "$(git describe --tags --abbrev=0 origin/main)"
 docker compose up -d --pull always
 ```
 
 Migrations run on start. Volumes are preserved, so the pairing and the indexed
 messages survive. `docker compose down` stops the stack without touching them;
 `docker compose down -v` deletes them, which means re-pairing and re-syncing.
+
+## Which version is running
+
+The panel prints it in the footer, and the probes answer it without a session:
+
+```sh
+curl -s https://your.host/healthz | jq -r .version
+whatsapp-mcp version
+```
+
+The panel also says when a newer release exists, and hands over the command
+above. That check is a public GET against GitHub every six hours, carrying
+nothing about the instance; `UPDATE_CHECK=false` in `.env` stops it.
 
 ## Backups
 
@@ -221,7 +250,8 @@ Two things are worth backing up, and they are not the same thing:
   them and you re-scan a QR code.
 
 `docker compose exec postgres-mcp pg_dump -U "$MCP_DB_USER" "$MCP_DB_NAME"` is
-enough for the first; the volumes themselves are the practical answer for the
+enough for the first — it is the same dump the updater takes before every
+update, and the ones it leaves in `backups/` are a backup like any other; the volumes themselves are the practical answer for the
 second. Message text and raw event payloads are stored unencrypted, so treat a
 dump exactly as you would treat the phone.
 

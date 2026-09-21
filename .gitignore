@@ -7,10 +7,11 @@
 bin/
 *.log
 
-# macOS finder droppings.
-.DS_Store
-
 # Agent and tooling scratch directories.
 .hermes/
 .playwright-mcp/
 .claude/
+
+# Database dumps taken by update.sh before a migration. They hold message
+# text, and they belong on the server they were taken on.
+backups/

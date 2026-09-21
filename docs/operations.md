@@ -67,6 +67,7 @@ Read by the `whatsapp-mcp` binary:
 | `STATUS_POLL_INTERVAL` | `15s` | How often the gateway reconciles session state with Evolution. |
 | `SETUP_TOKEN` | unset | Guards the first-run form: it opens only at `/setup?token=<value>`. Set it whenever the panel is reachable from the internet; leave it empty on loopback. Stops mattering once an administrator exists. |
 | `MCP_STDIO` | unset | `true` enables the stdio transport. Development only — it carries no credential. |
+| `UPDATE_CHECK` | `true` | Asks GitHub every six hours whether a newer release exists, so the panel can say so and hand over the update command. An unauthenticated GET of a public list, carrying nothing about the instance; it fails silently with no outbound network. `false` stops it. See [updating.md](updating.md). |
 
 The Compose stack adds the credentials for the services it runs
 (`EVOLUTION_DB_*`, `RABBITMQ_*`, `MINIO_*`, `MCP_DB_*`) plus `PANEL_BIND` and
