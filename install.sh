@@ -249,6 +249,27 @@ if [ -n "${EVOLUTION_OPERATOR_EMAIL:-}" ]; then
     info "Evolution will activate itself with ${EVOLUTION_OPERATOR_EMAIL}"
 fi
 
+# The licence variables default to automatic activation in docker-compose, but
+# compose reads .env — a value in the installer's own environment would not get
+# there by itself. Anything given here is written down; the "false" is what
+# matters, and a domain only matters with automation on.
+if [ -n "${EVOLUTION_LICENSE_AUTO:-}" ]; then
+    if grep -q "^EVOLUTION_LICENSE_AUTO=" .env; then
+        sed -i "s|^EVOLUTION_LICENSE_AUTO=.*|EVOLUTION_LICENSE_AUTO=${EVOLUTION_LICENSE_AUTO}|" .env
+    else
+        printf 'EVOLUTION_LICENSE_AUTO=%s\n' "${EVOLUTION_LICENSE_AUTO}" >> .env
+    fi
+    info "licence automation set to ${EVOLUTION_LICENSE_AUTO}"
+fi
+if [ -n "${EVOLUTION_LICENSE_EMAIL_DOMAIN:-}" ]; then
+    if grep -q "^EVOLUTION_LICENSE_EMAIL_DOMAIN=" .env; then
+        sed -i "s|^EVOLUTION_LICENSE_EMAIL_DOMAIN=.*|EVOLUTION_LICENSE_EMAIL_DOMAIN=${EVOLUTION_LICENSE_EMAIL_DOMAIN}|" .env
+    else
+        printf 'EVOLUTION_LICENSE_EMAIL_DOMAIN=%s\n' "${EVOLUTION_LICENSE_EMAIL_DOMAIN}" >> .env
+    fi
+    info "licence addresses will use @${EVOLUTION_LICENSE_EMAIL_DOMAIN}"
+fi
+
 # ---------------------------------------------------------------- firewall
 
 CURRENT_STEP="configuring the firewall"
