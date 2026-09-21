@@ -7,6 +7,9 @@
 bin/
 *.log
 
+# macOS finder droppings.
+.DS_Store
+
 # Agent and tooling scratch directories.
 .hermes/
 .playwright-mcp/

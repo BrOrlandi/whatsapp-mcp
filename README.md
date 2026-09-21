@@ -60,7 +60,8 @@ de configuração na mão, sem descobrir qual URL usar.
 
 Depois disso o painel é dividido por tarefa: **Conectar** emite chaves de
 cliente e imprime o bloco de configuração já preenchido, **Instâncias** cuida da
-conexão com o WhatsApp, **Estado** é a visão de diagnóstico.
+conexão com o WhatsApp, **Estado** é a visão de diagnóstico, **Documentação**
+lista as ferramentas e **Receitas** mostra o que dá para pedir ao assistente.
 
 ## O que ele faz
 
@@ -82,6 +83,14 @@ partir das próprias definições do servidor MCP — e em
 [docs/mcp-tools.md](docs/mcp-tools.md), com o raciocínio por trás das mais
 delicadas.
 
+E o painel não para na lista: **`/receitas`** traz seis receitas prontas —
+agendar uma mensagem, vigiar palavras-chave, cobrar o que ficou sem resposta,
+apurar uma enquete, resumir o dia de um grupo, arquivar o que foi combinado.
+Cada uma é um prompt para colar, com as ferramentas que ela usa e a ressalva
+que importa. Nenhuma precisa de código novo: quem espera, vigia e monta o
+relatório é o assistente — o gateway só responde pelo WhatsApp quando
+perguntado.
+
 ## Instalação
 
 Quatro coisas, e a parte mais demorada é esperar o Docker baixar as imagens:
@@ -97,8 +106,8 @@ mensagens fiquem em uma máquina que é sua.
 ### 1. O servidor
 
 A stack são seis contêineres — o gateway, o Evolution Go, o RabbitMQ, o MinIO e
-dois bancos PostgreSQL — então ela não roda na menor instância que um provedor
-vende.
+dois bancos PostgreSQL, mais o Traefik que o instalador coloca na frente —
+então ela não roda na menor instância que um provedor vende.
 
 | | Mínimo | Recomendado |
 |---|---|---|
@@ -152,8 +161,8 @@ registro de DNS para criar. O painel se recusa a fazer qualquer outra coisa
 enquanto a senha temporária não for trocada. Rodar o instalador de novo é
 seguro: os segredos, o hostname e os seus dados não são tocados.
 
-Depois, `whatsapp-mcp status`, `logs`, `restart` e `update` administram a
-instalação, que fica em `/opt/whatsapp-mcp`.
+Depois, `whatsapp-mcp status`, `logs`, `restart`, `start`, `stop`, `url` e
+`update` administram a instalação, que fica em `/opt/whatsapp-mcp`.
 
 ### 3. Siga o assistente de instalação
 
@@ -246,13 +255,13 @@ O gateway é publicado a cada push na `main` e a cada tag de versão:
 | | |
 |---|---|
 | Imagem | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` e `linux/arm64` |
-| Tags | `edge` acompanha a `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` em um release; `sha-<commit>` sempre |
+| Tags | `edge` acompanha a `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` em um release; `sha-<commit>` sempre. A `v0.1.0` só existe a partir do próximo release — na 0.1.0 use a forma sem `v`. |
 | Binários | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` em cada [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), com `checksums.txt` |
 
 Fixe uma versão com `WHATSAPP_MCP_TAG` no `.env`:
 
 ```sh
-WHATSAPP_MCP_TAG=v0.1.0   # ou 0.1.0, 0.1, latest, edge, sha-<commit>
+WHATSAPP_MCP_TAG=0.1.0   # ou 0.1, latest, edge, sha-<commit>
 ```
 
 O binário sozinho precisa de `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` e
@@ -261,6 +270,8 @@ O binário sozinho precisa de `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` e
 Compose.
 
 ## Documentação
+
+Os documentos abaixo estão em inglês.
 
 | | |
 |---|---|
@@ -325,7 +336,14 @@ explicitada aqui de propósito.
 
 **Não quer isso?** `EVOLUTION_LICENSE_AUTO=false` e o assistente manda o link
 para o seu email — mesma automação em tudo o mais, exceto que o clique é seu e
-a licença é registrada no seu endereço. E mesmo no modo automático existe uma
+a licença é registrada no seu endereço. Dá para decidir isso já na instalação,
+sem editar arquivo nenhum depois:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh \
+  | sudo EVOLUTION_LICENSE_AUTO=false bash
+```
+ E mesmo no modo automático existe uma
 saída: se o clique não chegar em `EVOLUTION_LICENSE_AUTO_WAIT` (3 minutos por
 padrão), o assistente para de prometer e pede um endereço que você consiga
 abrir — sem editar variável, sem voltar ao shell.

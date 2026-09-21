@@ -63,7 +63,8 @@ URL to figure out.
 
 After that the panel is split by task: **Conectar** issues client keys and
 prints the configuration block already filled in, **Instâncias** owns the
-WhatsApp connection, **Estado** is the diagnostic view.
+WhatsApp connection, **Estado** is the diagnostic view, **Documentação** lists
+the tools and **Receitas** shows what you can ask the assistant for.
 
 ## What it can do
 
@@ -84,6 +85,13 @@ from the MCP server's own definitions — and in
 [docs/mcp-tools.md](docs/mcp-tools.md) with the reasoning behind the tricky
 ones.
 
+The panel does not stop at the list: **`/receitas`** carries six ready-made
+recipes — schedule a message, watch for keywords, chase what went unanswered,
+run a poll and count it, summarise a group's day, archive what was agreed.
+Each is a prompt to paste, with the tools it leans on and the caveat that
+matters. None of them needs new code: the assistant is what waits, watches and
+writes the report — the gateway only answers for WhatsApp when asked.
+
 ## Install
 
 Four things, and the longest part is waiting for Docker to pull images:
@@ -99,8 +107,8 @@ your messages stay on a machine you control.
 ### 1. The server
 
 The stack is six containers — the gateway, Evolution Go, RabbitMQ, MinIO and
-two PostgreSQL databases — so this does not run on the smallest instance a
-provider sells.
+two PostgreSQL databases, plus the Traefik the installer puts in front — so
+this does not run on the smallest instance a provider sells.
 
 | | Minimum | Recommended |
 |---|---|---|
@@ -154,8 +162,8 @@ to create. The panel refuses to do anything else until the temporary password
 is replaced. Re-running the installer is safe: secrets, the hostname and your
 data are left alone.
 
-Afterwards `whatsapp-mcp status`, `logs`, `restart` and `update` manage the
-installation, which lives in `/opt/whatsapp-mcp`.
+Afterwards `whatsapp-mcp status`, `logs`, `restart`, `start`, `stop`, `url` and
+`update` manage the installation, which lives in `/opt/whatsapp-mcp`.
 
 ### 3. Run the installation wizard
 
@@ -249,13 +257,13 @@ The gateway is published on every push to `main` and on every version tag:
 | | |
 |---|---|
 | Image | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` and `linux/arm64` |
-| Tags | `edge` follows `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` on a release; `sha-<commit>` always |
+| Tags | `edge` follows `main`; `0.1.0`, `v0.1.0`, `0.1`, `latest` on a release; `sha-<commit>` always. `v0.1.0` only exists from the next release on — for 0.1.0 use the form without the `v`. |
 | Binaries | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` on each [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), with `checksums.txt` |
 
 Pin a version with `WHATSAPP_MCP_TAG` in `.env`:
 
 ```sh
-WHATSAPP_MCP_TAG=v0.1.0   # or 0.1.0, 0.1, latest, edge, sha-<commit>
+WHATSAPP_MCP_TAG=0.1.0   # or 0.1, latest, edge, sha-<commit>
 ```
 
 The binary on its own needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and
@@ -327,7 +335,14 @@ it is spelled out here on purpose.
 
 **Don't want that?** `EVOLUTION_LICENSE_AUTO=false` and the wizard sends the
 link to your email instead — same automation in every other respect, except
-the click is yours and the licence is registered to your address. And even in
+the click is yours and the licence is registered to your address. You can
+decide that at install time, with no file to edit afterwards:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh \
+  | sudo EVOLUTION_LICENSE_AUTO=false bash
+```
+ And even in
 automatic mode there is a way out: if the click does not arrive within
 `EVOLUTION_LICENSE_AUTO_WAIT` (3 minutes by default), the wizard stops
 promising and asks for an address you can open — no variable to edit, no

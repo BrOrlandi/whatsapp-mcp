@@ -167,10 +167,18 @@ func (s *State) ObserveInstance(connected bool, trafficWindow time.Duration) boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	refused := false
-	// Only a downgrade is refused, and only from "connected". An explicit
-	// disconnected, logged_out or banned event is authoritative — those arrive
-	// from the client too, and this must never argue with them.
-	if !connected && s.snapshot.WhatsApp.State == "connected" && s.receiving(trafficWindow) {
+	// Refused whenever traffic contradicts the poll, whatever this state was
+	// believed to be — including the blank it starts as. Restricting it to a
+	// downgrade from "connected" left the case that matters most unprotected:
+	// a gateway that restarts knows nothing, so the first poll of a stale
+	// record wrote "disconnected" unopposed and the panel stayed wrong until
+	// WhatsApp itself happened to reconnect.
+	//
+	// A specific failure is the exception, and the only one. logged_out,
+	// banned and failed come from the client and each tells the operator to do
+	// something different; replacing one with "connected" because an event was
+	// still in flight would strand them.
+	if !connected && !specificFailure(s.snapshot.WhatsApp.State) && s.receiving(trafficWindow) {
 		connected, refused = true, true
 	}
 	s.snapshot.EvolutionConnected = connected
@@ -186,6 +194,17 @@ func (s *State) ObserveInstance(connected bool, trafficWindow time.Duration) boo
 		current.ChangedAt = time.Now().UTC()
 	}
 	return refused
+}
+
+// specificFailure reports whether a state names something the operator has to
+// act on, as opposed to the two ways of saying "not connected" that carry no
+// instruction.
+func specificFailure(state string) bool {
+	switch state {
+	case "logged_out", "banned", "failed":
+		return true
+	}
+	return false
 }
 
 // receiving reports whether an event has arrived recently enough to prove the

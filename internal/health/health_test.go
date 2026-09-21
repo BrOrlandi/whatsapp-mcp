@@ -140,3 +140,52 @@ func TestTrafficDoesNotArgueWithAnExplicitFailure(t *testing.T) {
 		t.Fatalf("session reported %q, want logged_out", got)
 	}
 }
+
+// The case the first version of this missed. A gateway restart wipes what it
+// believed, so the state starts blank; the first poll of a stale instance
+// record then wrote "disconnected" with nothing to argue against it, and the
+// panel stayed wrong until WhatsApp itself happened to reconnect. The moment a
+// message arrives there is something to argue with.
+func TestARestartedGatewayBelievesItsOwnTrafficOverTheRecord(t *testing.T) {
+	state := NewState()
+	state.SetDatabase(true)
+	state.SetRabbit(true)
+
+	// Boot: nothing known, nothing arriving. The poll is all there is, and it
+	// is believed.
+	if state.ObserveInstance(false, 5*time.Minute) {
+		t.Fatal("a poll was refused with no evidence against it")
+	}
+	if got := state.Snapshot().WhatsApp.State; got != "disconnected" {
+		t.Fatalf("session reported %q before any evidence, want disconnected", got)
+	}
+
+	// A message arrives through the very session the record calls dead.
+	state.MarkEvent(time.Now())
+	if !state.ObserveInstance(false, 5*time.Minute) {
+		t.Fatal("traffic did not overturn the stale record after a restart")
+	}
+	snapshot := state.Snapshot()
+	if snapshot.WhatsApp.State != "connected" || !snapshot.EvolutionConnected {
+		t.Fatalf("session still reported down while receiving: %+v", snapshot.WhatsApp)
+	}
+	if len(snapshot.Problems()) != 0 {
+		t.Fatalf("problems reported for a working session: %v", snapshot.Problems())
+	}
+}
+
+// Each specific failure keeps its own instruction, from a blank state too:
+// arriving traffic must not turn "scan a new QR code" into "connected".
+func TestSpecificFailuresSurviveArrivingTraffic(t *testing.T) {
+	for _, failure := range []string{"logged_out", "banned", "failed"} {
+		state := NewState()
+		state.MarkEvent(time.Now())
+		state.SetWhatsApp(failure, "", "", "")
+		if state.ObserveInstance(false, 5*time.Minute) {
+			t.Fatalf("%s was overridden by traffic", failure)
+		}
+		if got := state.Snapshot().WhatsApp.State; got != failure {
+			t.Fatalf("state %q became %q", failure, got)
+		}
+	}
+}
