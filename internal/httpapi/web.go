@@ -904,6 +904,14 @@ func (a *webApp) onboardingState(r *http.Request) onboardingPage {
 			page.QRCode, page.QRNotice = a.pairingCode(r)
 		}
 	}
+	// The manual copy names the address it is waiting on, which is right when
+	// that address is the operator's and wrong when it is one of ours. A
+	// deployment that sent automatically and then had EVOLUTION_LICENSE_AUTO
+	// turned off would otherwise show the maintainer's domain in a sentence
+	// addressed to the operator.
+	if !page.Auto && autoAddress(page.OperatorEmail) {
+		page.OperatorEmail = ""
+	}
 	page.Steps = wizardSteps(page.Step)
 	return page
 }

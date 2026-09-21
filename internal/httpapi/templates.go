@@ -688,6 +688,14 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 </div></section>
 {{template "foot"}}{{end}}
 
+{{define "licencaform"}}<form method="post" action="/instancias/licenca" data-busy="Enviando…">
+<label class="field" for="license-email"><span class="field__label">E-mail para a licença</span>
+<span class="field__hint">Voc&ecirc; recebe um link de ativação neste endereço, v&aacute;lido por 15 minutos. Não &eacute; o e-mail com que voc&ecirc; entra no painel: a Evolution Foundation registra uma licença por endereço, então use um que ainda não tenha licenciado outra instalação.</span></label>
+<input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="off" autocapitalize="none" spellcheck="false">
+<div class="actions"><button class="btn btn--ghost" type="submit">Enviar link de ativação</button></div>
+<p class="busy" data-busy-note role="status" hidden>Pedindo o link ao servidor de licenças.</p>
+</form>{{end}}
+
 {{define "instalacao"}}{{template "head" .}}
 <header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
 <div class="masthead__tools">{{template "themeswitch"}}</div></header>
@@ -705,44 +713,36 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <div class="card__body">
 {{if and .Auto .AutoStalled}}
 <p class="lead">A ativação automática não se completou.</p>
-<p class="muted">O robô que clica o link de ativação por voc&ecirc; não respondeu no tempo esperado{{if .Sent}} — o registro saiu para <strong>{{.OperatorEmail}}</strong>, um endereço deste servidor, e ningu&eacute;m o abriu{{else}} e o registro não chegou a sair{{end}}. Esperar mais não resolve, então o caminho agora &eacute; uma caixa de entrada que voc&ecirc; abra: informe um endereço, clique no link que chegar, e a licença entra do mesmo jeito.</p>
-<form method="post" action="/instancias/licenca" data-busy="Enviando…">
-<label class="field" for="license-email"><span class="field__label">E-mail para a licença</span>
-<span class="field__hint">Voc&ecirc; recebe um link de ativação neste endereço, v&aacute;lido por 15 minutos. Não &eacute; o e-mail com que voc&ecirc; entra no painel: a licença &eacute; registrada uma vez por endereço na Evolution Foundation, então use um que ainda não tenha licenciado outra instalação.</span></label>
-<input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="off" autocapitalize="none" spellcheck="false">
-<div class="actions"><button class="btn btn--block" type="submit">Enviar link de ativação</button></div>
-<p class="busy" data-busy-note role="status" hidden>Pedindo o link ao servidor de licenças.</p>
-</form>
+<p class="muted">Ela {{if .Sent}}não respondeu no tempo esperado{{else}}não chegou a sair{{end}}, e esperar mais não resolve. O caminho agora &eacute; uma caixa de entrada que voc&ecirc; abra: informe um endereço, clique no link que chegar, e a licença entra do mesmo jeito.</p>
+{{template "licencaform" .}}
 <details class="resend">
-<summary>Prefiro tentar a automática de novo</summary>
-<p class="muted">Se voc&ecirc; corrigiu o que estava quebrado — a regra de roteamento de e-mail, o worker — pedir de novo aqui recomeça a ativação automática.</p>
+<summary>Tentar a automática de novo</summary>
+<p class="muted">Recomeça a ativação automática, o que vale a pena se a falha foi passageira.</p>
 <form method="post" action="/instancias/licenca/auto"><input type="hidden" name="origem" value="instalacao">
-<div class="actions"><button class="btn btn--ghost" type="submit">Tentar a ativação automática de novo</button></div>
+<div class="actions"><button class="btn btn--ghost" type="submit">Tentar a ativação automática</button></div>
 </form>
 {{if .RegisterURL}}<p class="muted">Ou faça no site da Evolution: <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">abrir o registro</a> — leva ao mesmo lugar.</p>{{end}}
 </details>
+{{else if and .Auto .Sent}}
+<p class="lead">Verificando a licença do software.</p>
+<p class="muted">A ativação &eacute; automática e não pede nada de voc&ecirc;. Esta página segue sozinha assim que a licença entrar.</p>
+<p class="busy" role="status"><span class="spinner" aria-hidden="true"></span>Ativando…</p>
+<details class="resend">
+<summary>Prefiro ativar manualmente</summary>
+<p class="muted">Não &eacute; necess&aacute;rio — a ativação automática costuma resolver em segundos, e se travar esta página oferece isto sozinha. Mas se voc&ecirc; preferir registrar a licença voc&ecirc; mesmo, informe um e-mail que consiga abrir e clique no link que chegar.</p>
+{{template "licencaform" .}}
+</details>
 {{else if .Sent}}
-{{if .Auto}}
-<p class="lead">Licença sendo ativada automaticamente.</p>
-<p class="muted">O registro usa o endereço <strong>{{.OperatorEmail}}</strong> e o e-mail &eacute; lido pelo robô de ativação — nenhum clique seu. Esta página segue sozinha assim que a licença entrar.</p>
-{{else}}
-<p class="lead">Enviamos um link de ativação para <strong>{{.OperatorEmail}}</strong>.</p>
+<p class="lead">Enviamos um link de ativação{{with .OperatorEmail}} para <strong>{{.}}</strong>{{end}}.</p>
 <p class="muted">Abra o e-mail e clique no link. Ele vale por 15 minutos, e esta página segue sozinha assim que a licença entrar.</p>
-{{end}}
 <p class="busy" role="status"><span class="spinner" aria-hidden="true"></span>Verificando a ativação…</p>
 <details class="resend">
 <summary>Não recebeu o e-mail?</summary>
-{{if .Auto}}
-<form method="post" action="/instancias/licenca/auto"><input type="hidden" name="origem" value="instalacao">
-<div class="actions"><button class="btn btn--ghost" type="submit">Pedir a ativação automática de novo</button></div>
-</form>
-{{else}}
 <form method="post" action="/instancias/licenca" data-busy="Enviando…">
-<label class="field" for="license-email"><span class="field__label">Enviar para outro endereço</span></label>
-<input id="license-email" type="email" name="email" maxlength="254" required value="{{.OperatorEmail}}" autocomplete="email" autocapitalize="none" spellcheck="false">
+<label class="field" for="license-email-resend"><span class="field__label">Enviar para outro endereço</span></label>
+<input id="license-email-resend" type="email" name="email" maxlength="254" required{{with .OperatorEmail}} value="{{.}}"{{end}} placeholder="voce@exemplo.com" autocomplete="email" autocapitalize="none" spellcheck="false">
 <div class="actions"><button class="btn btn--ghost" type="submit">Enviar de novo</button></div>
 </form>
-{{end}}
 {{if .RegisterURL}}<p class="muted">Prefere fazer no site da Evolution? <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Abrir o registro</a> — leva ao mesmo lugar.</p>
 {{else}}<p class="muted">O link de registro não veio agora. Ele tamb&eacute;m sai no servidor com:</p>
 <pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}

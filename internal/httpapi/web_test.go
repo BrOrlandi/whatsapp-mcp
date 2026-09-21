@@ -1819,7 +1819,10 @@ func TestAutomaticLicenceRegistrationRunsItself(t *testing.T) {
 	if !strings.HasPrefix(address, "whatsappmcp+") || !strings.HasSuffix(address, "@brorlandi.xyz") {
 		t.Fatalf("registration address = %q, want whatsappmcp+…@brorlandi.xyz", address)
 	}
-	mustContain(t, page, "wizard automatic", "ativada automaticamente", htmlEscaped(address), "Verificando a ativação")
+	mustContain(t, page, "wizard automatic", "Verificando a licença do software", "Ativando…")
+	if strings.Contains(page, htmlEscaped(address)) || strings.Contains(page, "whatsappmcp") {
+		t.Fatalf("the wizard showed the internal licence address:\n%s", page)
+	}
 	if !strings.Contains(page, `data-onboarding="1"`) {
 		t.Fatal("the wizard did not keep polling for the licence to come in")
 	}
@@ -1830,7 +1833,10 @@ func TestAutomaticLicenceRegistrationRunsItself(t *testing.T) {
 	if evo.operatorEmail != address {
 		t.Fatalf("a poll re-registered as %q, want the same %q", evo.operatorEmail, address)
 	}
-	mustContain(t, second, "wizard automatic", htmlEscaped(address))
+	mustContain(t, second, "wizard automatic", "Verificando a licença do software")
+	if strings.Contains(second, htmlEscaped(address)) {
+		t.Fatal("a poll leaked the internal licence address")
+	}
 }
 
 // The retry button goes back to the wizard it came from, and a failure to
@@ -1850,7 +1856,10 @@ func TestAutomaticLicenceRetryReturnsToItsWizard(t *testing.T) {
 	}
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	mustContain(t, string(body), "wizard automatic", "ativada automaticamente", "whatsappmcp&#43;")
+	mustContain(t, string(body), "wizard automatic", "Verificando a licença do software")
+	if strings.Contains(string(body), "whatsappmcp") {
+		t.Fatal("the retry leaked the internal licence address")
+	}
 	if r.Request.URL.Path != "/instalacao" {
 		t.Fatalf("retry landed on %s", r.Request.URL.Path)
 	}
@@ -1868,9 +1877,14 @@ func TestAutomaticModeDoesNotWaitOnTheOperatorInbox(t *testing.T) {
 	ts, client := signedIn(t, repo, evo, true)
 	defer ts.Close()
 	page := fetch(t, client, ts.URL+"/instalacao")
-	mustContain(t, page, "wizard automatic", "whatsappmcp&#43;")
-	if strings.Contains(page, "Enviamos um link de ativação para") && !strings.Contains(page, "whatsappmcp&#43;") {
-		t.Fatal("the wait was put on the operator's own inbox")
+	mustContain(t, page, "wizard automatic", "Verificando a licença do software")
+	// The registration still has to go to the worker's address rather than the
+	// operator's; it just must not be named on the page.
+	if !strings.HasPrefix(evo.operatorEmail, "whatsappmcp+") {
+		t.Fatalf("the wait was put on %q, want the worker's own address", evo.operatorEmail)
+	}
+	if strings.Contains(page, "Enviamos um link de ativação para") {
+		t.Fatal("the wizard told the operator to open an inbox in automatic mode")
 	}
 }
 
@@ -1930,7 +1944,7 @@ func TestAutomaticLicenceFallsBackToTheOperatorInbox(t *testing.T) {
 		t.Fatalf("the registration went to %q, want the operator's own address", got)
 	}
 	mustContain(t, string(body), "wizard manual", "eu@example.com", "Abra o e-mail e clique no link")
-	if strings.Contains(string(body), "ativada automaticamente") {
+	if strings.Contains(string(body), "Verificando a licença do software") {
 		t.Fatal("the wizard still described the automatic flow after the hand-over")
 	}
 }
@@ -1964,8 +1978,58 @@ func TestAutomaticLicenceWaitsBeforeHandingOver(t *testing.T) {
 	ts, client := signedIn(t, repo, evo, true)
 	defer ts.Close()
 	page := fetch(t, client, ts.URL+"/instalacao")
-	mustContain(t, page, "wizard automatic", "ativada automaticamente", "Verificando a ativação")
+	mustContain(t, page, "wizard automatic", "Verificando a licença do software", "Ativando…")
 	if strings.Contains(page, "não se completou") {
 		t.Fatal("the wizard gave up on the automatic path inside its own wait")
+	}
+}
+
+// The automatic address lives on the maintainer's own domain. It is how the
+// worker gets the mail and it is none of the operator's business: naming it
+// on the page raises a question with no good answer. The leak this guards is
+// the awkward one — a deployment that registered automatically and then had
+// EVOLUTION_LICENSE_AUTO turned off, whose manual copy would name the address
+// it was waiting on.
+func TestManualModeNeverNamesTheAutomaticAddress(t *testing.T) {
+	repo := newRepo()
+	repo.mu.Lock()
+	repo.license = store.EvolutionLicense{
+		OperatorEmail: "whatsappmcp+abc@brorlandi.xyz",
+		LinkSentAt:    time.Now(),
+	}
+	repo.mu.Unlock()
+	evo := &fakeEvolution{err: evolution.ErrNotActivated, license: evolution.License{Status: "inactive"}}
+	ts, client := signedIn(t, repo, evo, false)
+	defer ts.Close()
+
+	page := fetch(t, client, ts.URL+"/instalacao")
+	if strings.Contains(page, "whatsappmcp") {
+		t.Fatalf("the manual wizard named the automatic licence address:\n%s", page)
+	}
+	mustContain(t, page, "wizard manual", "link de ativação")
+}
+
+// Registering the licence by hand has to be reachable before the timeout too:
+// an operator who would rather own the registration should not have to wait
+// three minutes for a failure to be offered the choice. It is a disclosure,
+// not the page's question — the automatic path is what the page is doing.
+func TestManualRegistrationIsOfferedDuringTheAutomaticWait(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{err: evolution.ErrNotActivated, license: evolution.License{Status: "inactive"}}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+
+	page := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, page, "wizard automatic", "Verificando a licença do software",
+		"Prefiro ativar manualmente", `action="/instancias/licenca"`, `name="email"`)
+	// Offered, not asked: the licence form's button is never the page's
+	// primary action while the automatic path is still running.
+	if strings.Contains(page, "btn btn--block") {
+		t.Fatalf("the manual form was presented as the primary action:\n%s", page)
+	}
+	// And it is not framed as a missing email, because none was ever sent to
+	// the operator in this mode.
+	if strings.Contains(page, "Não recebeu o e-mail") {
+		t.Fatal("the automatic wait asked about an email the operator never gets")
 	}
 }
