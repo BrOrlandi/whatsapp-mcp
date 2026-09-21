@@ -96,14 +96,39 @@ func main() {
 	}
 }
 
+// seedLastEvent recovers the last-event time from the message index, so the
+// readiness rules have the same evidence after a restart that they had before
+// it. A failure here is not worth refusing to start over: it only means the
+// first minutes are judged by the poll alone, which is where this began.
+func seedLastEvent(ctx context.Context, selection selectionReader, state *health.State, logger *slog.Logger) {
+	selected, err := selection.SelectedInstance(ctx)
+	if err != nil || selected == "" {
+		return
+	}
+	coverage, err := selection.Coverage(ctx, selected)
+	if err != nil {
+		logger.Warn("could not read the index to recover the last event time", "error", err)
+		return
+	}
+	if coverage.NewestAt.IsZero() {
+		return
+	}
+	state.MarkEvent(coverage.NewestAt)
+	state.MarkMessage(coverage.NewestAt)
+	logger.Info("recovered the last event time from the index", "at", coverage.NewestAt)
+}
+
 // instanceLister is the slice of Evolution the readiness poll needs.
 type instanceLister interface {
 	FetchInstances(context.Context) ([]evolution.Instance, error)
 }
 
-// selectionReader is the slice of the store the readiness poll needs.
+// selectionReader is the slice of the store the readiness poll needs. Coverage
+// is in it because the index is what the gateway remembers across a restart:
+// the process forgets when the last event arrived, its own database does not.
 type selectionReader interface {
 	SelectedInstance(context.Context) (string, error)
+	Coverage(context.Context, string) (store.Coverage, error)
 }
 
 // pollEvolution derives readiness from the instance the panel actually
@@ -117,6 +142,13 @@ type selectionReader interface {
 func pollEvolution(ctx context.Context, client instanceLister, selection selectionReader, state *health.State, interval, freshness time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// Start from what the index already knows. A restart wipes the in-memory
+	// notion of "last event", and the first poll then has nothing to weigh
+	// against Evolution's own instance record — so a deploy landing in a quiet
+	// minute announced a disconnected WhatsApp on a session that had delivered
+	// a message seconds earlier. The newest indexed message is that evidence,
+	// and it survives the restart because it is in Postgres.
+	seedLastEvent(ctx, selection, state, logger)
 	for {
 		connected := false
 		selected, err := selection.SelectedInstance(ctx)
