@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
@@ -76,5 +77,66 @@ func TestSeedLastEventSurvivesAStoreThatCannotAnswer(t *testing.T) {
 		if got := state.Snapshot().LastEventAt; !got.IsZero() {
 			t.Fatalf("last event = %s, want zero when the index could not be read", got)
 		}
+	}
+}
+
+type fakeLister struct {
+	instances []evolution.Instance
+	checkErr  error
+	checked   int
+	token     string
+	numbers   []string
+}
+
+func (f *fakeLister) FetchInstances(context.Context) ([]evolution.Instance, error) {
+	return f.instances, nil
+}
+func (f *fakeLister) CheckNumbers(_ context.Context, token string, numbers []string) ([]evolution.Presence, error) {
+	f.checked++
+	f.token, f.numbers = token, numbers
+	if f.checkErr != nil {
+		return nil, f.checkErr
+	}
+	return []evolution.Presence{{Number: numbers[0], JID: "55@s.whatsapp.net", OnWhatsApp: true}}, nil
+}
+
+// Answering "does this number have WhatsApp" requires the client to be
+// connected to WhatsApp, so a reply is proof of a live session whatever
+// Evolution's own record claims. The answer itself is not used.
+func TestProbeSessionTreatsAnyAnswerAsProofOfLife(t *testing.T) {
+	lister := &fakeLister{}
+	instance := evolution.Instance{ID: "inst-1", Token: "tok", Number: "5511923456789"}
+
+	if !probeSession(context.Background(), lister, instance) {
+		t.Fatal("a WhatsApp answer was not accepted as proof of a live session")
+	}
+	if lister.token != "tok" || len(lister.numbers) != 1 || lister.numbers[0] != "5511923456789" {
+		t.Fatalf("probe asked with token %q and numbers %v", lister.token, lister.numbers)
+	}
+}
+
+// An error proves nothing either way — it could be the session, the network or
+// Evolution — so it must not be read as a live session.
+func TestProbeSessionDoesNotInventLifeFromAnError(t *testing.T) {
+	lister := &fakeLister{checkErr: errors.New("connection refused")}
+	if probeSession(context.Background(), lister, evolution.Instance{Token: "tok", Number: "55"}) {
+		t.Fatal("a failed probe was read as a live session")
+	}
+}
+
+// With no token or no number there is nothing to ask, and a probe that cannot
+// be made must not count as one that failed meaningfully either.
+func TestProbeSessionNeedsSomethingToAskWith(t *testing.T) {
+	lister := &fakeLister{}
+	for _, instance := range []evolution.Instance{
+		{Token: "", Number: "55"},
+		{Token: "tok", Number: ""},
+	} {
+		if probeSession(context.Background(), lister, instance) {
+			t.Fatalf("probed with nothing to ask: %+v", instance)
+		}
+	}
+	if lister.checked != 0 {
+		t.Fatalf("reached WhatsApp %d times with nothing to ask", lister.checked)
 	}
 }

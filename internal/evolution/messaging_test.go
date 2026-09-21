@@ -57,3 +57,37 @@ func TestDeliveredSeparatesArrivalFromSilence(t *testing.T) {
 		})
 	}
 }
+
+// Evolution answers /user/check with {"data":{"Users":[…]}} and the field is
+// IsInWhatsapp. This asked for a bare array of {Query, JID, IsIn}, so every
+// call failed on the decode: the tool reported a WhatsApp error for a query
+// WhatsApp had answered correctly, which is the worst shape a bug can take —
+// it blames the wrong component. Captured from the live server.
+func TestCheckNumbersReadsEvolutionsActualShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/check" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":{"Users":[
+			{"Query":"+5511923456789","IsInWhatsapp":true,"JID":"5511923456789@s.whatsapp.net","RemoteJID":"5511923456789@s.whatsapp.net","LID":"100000000000001@lid","VerifiedName":""},
+			{"Query":"+5500000000000","IsInWhatsapp":false,"JID":"","RemoteJID":"","LID":"","VerifiedName":""}
+		]},"message":"success"}`))
+	}))
+	defer server.Close()
+
+	found, err := New(server.URL, "global", time.Second).CheckNumbers(context.Background(), "tok", []string{"5511923456789", "5500000000000"})
+	if err != nil {
+		t.Fatalf("CheckNumbers failed on the shape the server actually sends: %v", err)
+	}
+	if len(found) != 2 {
+		t.Fatalf("got %d results, want 2", len(found))
+	}
+	if !found[0].OnWhatsApp || found[0].JID != "5511923456789@s.whatsapp.net" || found[0].Number != "+5511923456789" {
+		t.Fatalf("first result = %+v", found[0])
+	}
+	// A number with no account has to stay negative: a caller uses this to
+	// decide whether sending is even possible.
+	if found[1].OnWhatsApp || found[1].JID != "" {
+		t.Fatalf("a number with no account was reported as reachable: %+v", found[1])
+	}
+}

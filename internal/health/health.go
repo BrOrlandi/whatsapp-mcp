@@ -196,6 +196,17 @@ func (s *State) ObserveInstance(connected bool, trafficWindow time.Duration) boo
 	return refused
 }
 
+// Receiving reports whether an event arrived recently enough to prove the
+// WhatsApp client is alive. It is the same question ObserveInstance asks
+// internally, exported because the caller needs it to decide whether a
+// liveness probe is worth making at all.
+func (s Snapshot) Receiving(window time.Duration) bool {
+	if s.LastEventAt.IsZero() || window <= 0 {
+		return false
+	}
+	return time.Since(s.LastEventAt) <= window
+}
+
 // specificFailure reports whether a state names something the operator has to
 // act on, as opposed to the two ways of saying "not connected" that carry no
 // instruction.

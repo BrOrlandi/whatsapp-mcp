@@ -381,17 +381,29 @@ func (c *Client) CheckNumbers(ctx context.Context, token string, numbers []strin
 	if len(numbers) == 0 {
 		return nil, errors.New("at least one number is required")
 	}
-	var raw []struct {
-		Query        string `json:"Query"`
-		JID          string `json:"JID"`
-		IsInWhatsapp bool   `json:"IsIn"`
+	// Evolution answers {"data":{"Users":[…]}}, and c.call already unwraps the
+	// "data", so what arrives here is an object with a Users array — not the
+	// bare array this used to ask for. The field is IsInWhatsapp too, not
+	// IsIn. Both were wrong, so every call failed on the decode and the tool
+	// reported a WhatsApp error for a query WhatsApp had answered correctly.
+	var raw struct {
+		Users []struct {
+			Query        string `json:"Query"`
+			JID          string `json:"JID"`
+			RemoteJID    string `json:"RemoteJID"`
+			IsInWhatsapp bool   `json:"IsInWhatsapp"`
+		} `json:"Users"`
 	}
 	if err := c.call(ctx, http.MethodPost, "/user/check", token, map[string]any{"number": numbers, "formatJid": true}, &raw); err != nil {
 		return nil, classify(err)
 	}
-	found := make([]Presence, 0, len(raw))
-	for _, item := range raw {
-		found = append(found, Presence{Number: item.Query, JID: item.JID, OnWhatsApp: item.IsInWhatsapp || item.JID != ""})
+	found := make([]Presence, 0, len(raw.Users))
+	for _, item := range raw.Users {
+		jid := item.JID
+		if jid == "" {
+			jid = item.RemoteJID
+		}
+		found = append(found, Presence{Number: item.Query, JID: jid, OnWhatsApp: item.IsInWhatsapp || jid != ""})
 	}
 	return found, nil
 }

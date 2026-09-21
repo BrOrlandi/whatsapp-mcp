@@ -96,6 +96,27 @@ func main() {
 	}
 }
 
+// probeInterval bounds how often the liveness probe reaches WhatsApp. It only
+// runs while Evolution claims the session is down and nothing is arriving, and
+// one round trip a minute is enough to keep a status page honest without
+// hammering anyone.
+const probeInterval = time.Minute
+
+// probeSession asks WhatsApp whether a number has an account, using the
+// instance's own. The answer is thrown away: what matters is that answering it
+// requires the WhatsApp client to be connected, so a reply is proof of a live
+// session and an error is not proof of anything either way.
+//
+// It needs the instance's token and its own number, both of which the listing
+// carries. Without either there is nothing to ask, and the poll stands.
+func probeSession(ctx context.Context, client instanceLister, instance evolution.Instance) bool {
+	if instance.Token == "" || instance.Number == "" {
+		return false
+	}
+	found, err := client.CheckNumbers(ctx, instance.Token, []string{instance.Number})
+	return err == nil && len(found) > 0
+}
+
 // seedLastEvent recovers the last-event time from the message index, so the
 // readiness rules have the same evidence after a restart that they had before
 // it. A failure here is not worth refusing to start over: it only means the
@@ -119,8 +140,12 @@ func seedLastEvent(ctx context.Context, selection selectionReader, state *health
 }
 
 // instanceLister is the slice of Evolution the readiness poll needs.
+// CheckNumbers is in it as a liveness probe rather than for its answer: it is
+// a round trip to WhatsApp's own servers, so a reply of any kind proves the
+// session is up. See probeSession.
 type instanceLister interface {
 	FetchInstances(context.Context) ([]evolution.Instance, error)
+	CheckNumbers(context.Context, string, []string) ([]evolution.Presence, error)
 }
 
 // selectionReader is the slice of the store the readiness poll needs. Coverage
@@ -149,8 +174,10 @@ func pollEvolution(ctx context.Context, client instanceLister, selection selecti
 	// a message seconds earlier. The newest indexed message is that evidence,
 	// and it survives the restart because it is in Postgres.
 	seedLastEvent(ctx, selection, state, logger)
+	var lastProbe time.Time
 	for {
 		connected := false
+		var probe evolution.Instance
 		selected, err := selection.SelectedInstance(ctx)
 		if err == nil && selected != "" {
 			instances, fetchErr := client.FetchInstances(ctx)
@@ -158,8 +185,22 @@ func pollEvolution(ctx context.Context, client instanceLister, selection selecti
 			for _, instance := range instances {
 				if instance.ID == selected {
 					connected = instance.Status == evolution.StatusConnected
+					probe = instance
 					break
 				}
+			}
+		}
+		// Evolution's instance record has been seen holding "disconnected"
+		// across a reconnect, through a burst of two hundred messages a
+		// minute, for as long as the process lived. On a quiet account there
+		// is no traffic to contradict it, so the panel would report a dead
+		// session indefinitely — which is what it did. Before believing it,
+		// ask WhatsApp something.
+		if err == nil && !connected && !state.Snapshot().Receiving(freshness) && time.Since(lastProbe) > probeInterval {
+			lastProbe = time.Now()
+			if probeSession(ctx, client, probe) {
+				logger.Warn("Evolution reports the instance disconnected, but WhatsApp answered a live query through it; treating the session as up and its record as stale")
+				connected = true
 			}
 		}
 		if err == nil {
