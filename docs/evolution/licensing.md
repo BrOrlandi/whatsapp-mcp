@@ -138,17 +138,19 @@ installation wizard at `/instalacao` (`internal/evolution/licensing.go`,
 
 **Automatic (the default, `EVOLUTION_LICENSE_AUTO=true`).** The wizard
 registers the licence with an address of this deployment's own —
-`whatsappmcp-<random>@EVOLUTION_LICENSE_EMAIL_DOMAIN` (default
-`brorlandi.xyz`); a fresh `whatsappmcp-*` per installation, so every deploy is
-its own registration in the licensing server's books. The magic-link email for
-those addresses is delivered by the domain's MX — Cloudflare Email Routing —
-to [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
+`whatsappmcp+<random>@EVOLUTION_LICENSE_EMAIL_DOMAIN` (default
+`brorlandi.xyz`); a fresh plus-addressed `whatsappmcp+…` per installation, so
+every deploy is its own registration in the licensing server's books. That
+address is chosen for how Cloudflare Email Routing routes it: one exact rule
+for the `whatsappmcp` base — with subaddressing enabled — matches every
+`whatsappmcp+<detail>` and nothing else, so no catch-all faces the worker and
+the domain's personal mail never passes through it. The magic-link email for
+those addresses is delivered to
+[whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
 (private), an Email Worker that finds the link in the message and does the GET
 a browser would: the same click, server-side. The licensing server redirects
 to the panel's activation callback, the wizard's poll notices the step change,
-and the operator typed nothing, opened no inbox, clicked nothing. Mail for
-the domain that is not `whatsappmcp-*` is forwarded by the worker to a
-fallback address, so a catch-all rule swallows no personal mail.
+and the operator typed nothing, opened no inbox, clicked nothing.
 
 **Manual (`EVOLUTION_LICENSE_AUTO=false`).** The operator confirms the email
 typed at setup and clicks the emailed link themself — the flow this

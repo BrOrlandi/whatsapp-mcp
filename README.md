@@ -149,7 +149,7 @@ you sign in with it.
 it is activated. There is nothing to type, nothing to open and nothing to
 click: with `EVOLUTION_LICENSE_AUTO` on (the default), the panel registers the
 licence with its own address on this project's domain
-(`whatsappmcp-…@brorlandi.xyz`), the email lands in
+(`whatsappmcp+…@brorlandi.xyz`), the email lands in
 [the licence worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
 and the click happens by itself — the wizard just keeps checking and moves on
 the moment the licence lands. Rebuilds that lose Evolution's data are

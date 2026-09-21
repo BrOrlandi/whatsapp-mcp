@@ -1266,7 +1266,7 @@ func (a *webApp) startLicense(r *http.Request, email string) bool {
 // registration every five seconds.
 func (a *webApp) startAutoLicense(r *http.Request, kept *string) bool {
 	email := *kept
-	if !strings.HasPrefix(email, "whatsappmcp-") {
+	if !strings.HasPrefix(email, "whatsappmcp+") {
 		generated, err := a.licenseEmailAddress()
 		if err != nil {
 			return false
@@ -1280,15 +1280,17 @@ func (a *webApp) startAutoLicense(r *http.Request, kept *string) bool {
 	return false
 }
 
-// licenseEmailAddress mints the address automatic licences register under: a
-// random local part — so each installation is its own registration — on the
-// domain whose email lands in the worker.
+// licenseEmailAddress mints the address automatic licences register under. The
+// plus-addressed local part is deliberate: Cloudflare Email Routing has a
+// single exact rule for the `whatsappmcp` base that routes everything with a
+// `+<detail>` to the licence worker — no catch-all, no other mail involved —
+// and the random detail keeps each installation its own registration.
 func (a *webApp) licenseEmailAddress() (string, error) {
 	raw := make([]byte, 8)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("whatsappmcp-%x@%s", raw, a.licenseEmailDomain), nil
+	return fmt.Sprintf("whatsappmcp+%x@%s", raw, a.licenseEmailDomain), nil
 }
 
 // autoLicense is the button behind both wizard and panel: it asks for an

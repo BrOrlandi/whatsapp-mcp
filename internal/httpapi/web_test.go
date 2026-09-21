@@ -1803,10 +1803,10 @@ func TestAutomaticLicenceRegistrationRunsItself(t *testing.T) {
 		t.Fatal("the automatic registration never went out")
 	}
 	address := evo.operatorEmail
-	if !strings.HasPrefix(address, "whatsappmcp-") || !strings.HasSuffix(address, "@brorlandi.xyz") {
-		t.Fatalf("registration address = %q, want whatsappmcp-…@brorlandi.xyz", address)
+	if !strings.HasPrefix(address, "whatsappmcp+") || !strings.HasSuffix(address, "@brorlandi.xyz") {
+		t.Fatalf("registration address = %q, want whatsappmcp+…@brorlandi.xyz", address)
 	}
-	mustContain(t, page, "wizard automatic", "ativada automaticamente", address, "Verificando a ativação")
+	mustContain(t, page, "wizard automatic", "ativada automaticamente", htmlEscaped(address), "Verificando a ativação")
 	if !strings.Contains(page, `data-onboarding="1"`) {
 		t.Fatal("the wizard did not keep polling for the licence to come in")
 	}
@@ -1817,7 +1817,7 @@ func TestAutomaticLicenceRegistrationRunsItself(t *testing.T) {
 	if evo.operatorEmail != address {
 		t.Fatalf("a poll re-registered as %q, want the same %q", evo.operatorEmail, address)
 	}
-	mustContain(t, second, "wizard automatic", address)
+	mustContain(t, second, "wizard automatic", htmlEscaped(address))
 }
 
 // The retry button goes back to the wizard it came from, and a failure to
@@ -1837,7 +1837,7 @@ func TestAutomaticLicenceRetryReturnsToItsWizard(t *testing.T) {
 	}
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	mustContain(t, string(body), "wizard automatic", "ativada automaticamente", "whatsappmcp-")
+	mustContain(t, string(body), "wizard automatic", "ativada automaticamente", "whatsappmcp&#43;")
 	if r.Request.URL.Path != "/instalacao" {
 		t.Fatalf("retry landed on %s", r.Request.URL.Path)
 	}
@@ -1854,14 +1854,16 @@ func TestAutomaticModeDoesNotWaitOnTheOperatorInbox(t *testing.T) {
 	evo := &fakeEvolution{err: evolution.ErrNotActivated, license: evolution.License{Status: "inactive"}}
 	ts, client := signedIn(t, repo, evo, true)
 	defer ts.Close()
-	if repo.license.OperatorEmail != "" && strings.HasPrefix(repo.license.OperatorEmail, "whatsappmcp-") == false {
-		// nothing: the personal email can be stored, only the licence must
-		// not wait on it
-		_ = repo.license.OperatorEmail
-	}
 	page := fetch(t, client, ts.URL+"/instalacao")
-	mustContain(t, page, "wizard automatic", "whatsappmcp-")
-	if strings.Contains(page, "Enviamos um link de ativação para") && !strings.Contains(page, "whatsappmcp-") {
+	mustContain(t, page, "wizard automatic", "whatsappmcp&#43;")
+	if strings.Contains(page, "Enviamos um link de ativação para") && !strings.Contains(page, "whatsappmcp&#43;") {
 		t.Fatal("the wait was put on the operator's own inbox")
 	}
+}
+
+// htmlEscaped renders what the address looks like inside a rendered page: the
+// plus-addressing character is one html/template escapes, so a test looking for
+// the raw form would miss a licence address that is right there.
+func htmlEscaped(value string) string {
+	return strings.ReplaceAll(value, "+", "&#43;")
 }
