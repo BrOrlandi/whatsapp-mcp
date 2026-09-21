@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -281,5 +282,90 @@ func TestRepeatedFailuresAreThrottled(t *testing.T) {
 	}
 	if !throttled {
 		t.Fatal("repeated failures were never throttled")
+	}
+}
+
+// reportingAuth is an Authenticator that also records the client behind a
+// credential, which is the optional half of the interface.
+type reportingAuth struct {
+	fakeAuth
+	mu    sync.Mutex
+	noted []string
+}
+
+func (r *reportingAuth) NoteClient(_ context.Context, secret, name, version string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.noted = append(r.noted, secret+"|"+name+"|"+version)
+}
+
+func (r *reportingAuth) seen() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.noted...)
+}
+
+// Every MCP client announces itself once, in the handshake. Catching that is
+// what lets the panel say "Claude Desktop" instead of naming a key, so the
+// transport hands it to whatever is authenticating — and only for the
+// handshake, since a tool call says nothing about who is calling.
+func TestTheHandshakeReportsWhichClientHoldsTheCredential(t *testing.T) {
+	live := &fakeLive{}
+	auth := &reportingAuth{fakeAuth: fakeAuth{valid: "wamcp-good", instance: "inst-1"}}
+	ts := newServer(t, auth, live)
+
+	resp := post(t, ts.URL, "wamcp-good", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"claude-ai","version":"0.14.2"}}}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	// The report is made off the request's own goroutine, so it is waited for
+	// rather than assumed to have landed by the time the response did.
+	var seen []string
+	for attempt := 0; attempt < 100; attempt++ {
+		if seen = auth.seen(); len(seen) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(seen) != 1 || seen[0] != "wamcp-good|claude-ai|0.14.2" {
+		t.Fatalf("handshake was not reported: %v", seen)
+	}
+
+	// A tool call carries no client name, so nothing is reported for it, and
+	// neither does a handshake from a client that left itself unnamed.
+	resp = post(t, ts.URL, "wamcp-good", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	resp.Body.Close()
+	resp = post(t, ts.URL, "wamcp-good", `{"jsonrpc":"2.0","id":3,"method":"initialize","params":{"clientInfo":{"name":"  "}}}`)
+	resp.Body.Close()
+	time.Sleep(50 * time.Millisecond)
+	if got := auth.seen(); len(got) != 1 {
+		t.Fatalf("something other than a named handshake was reported: %v", got)
+	}
+}
+
+// What a client calls itself is displayed in the panel, so an unbounded name is
+// a defacement. It is cut to something a row can hold.
+func TestAnOverlongClientNameIsCutBeforeItIsRecorded(t *testing.T) {
+	live := &fakeLive{}
+	auth := &reportingAuth{fakeAuth: fakeAuth{valid: "wamcp-good", instance: "inst-1"}}
+	ts := newServer(t, auth, live)
+
+	long := strings.Repeat("a", 500)
+	resp := post(t, ts.URL, "wamcp-good", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"`+long+`","version":"`+long+`"}}}`)
+	resp.Body.Close()
+	var seen []string
+	for attempt := 0; attempt < 100; attempt++ {
+		if seen = auth.seen(); len(seen) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(seen) != 1 {
+		t.Fatalf("handshake was not reported: %v", seen)
+	}
+	want := "wamcp-good|" + strings.Repeat("a", maxClientField) + "|" + strings.Repeat("a", maxClientField)
+	if seen[0] != want {
+		t.Fatalf("the client fields were not bounded: %q", seen[0])
 	}
 }

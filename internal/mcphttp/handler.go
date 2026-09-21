@@ -26,6 +26,55 @@ type Authenticator interface {
 	Authenticate(ctx context.Context, secret string) (instanceID string, err error)
 }
 
+// ClientReporter records which MCP client a credential is being used from. It
+// is optional: an Authenticator that does not implement it simply loses the
+// detail, and nothing else changes.
+//
+// The name comes from the client itself, in the `initialize` handshake, so it
+// is a claim rather than a proof. That is fine for what it is used for — the
+// panel saying "Claude Desktop" instead of a key prefix — and it is never
+// trusted for authorisation.
+type ClientReporter interface {
+	NoteClient(ctx context.Context, secret, name, version string)
+}
+
+// clientInfo is the slice of the `initialize` request worth keeping.
+type initializeRequest struct {
+	Method string `json:"method"`
+	Params struct {
+		ClientInfo struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"clientInfo"`
+	} `json:"params"`
+}
+
+// maxClientField bounds what a client can write into the panel. The values are
+// displayed, so an unbounded string is a defacement waiting to happen.
+const maxClientField = 60
+
+// handshakeClient reads the client's self-description out of a request body,
+// reporting false for anything that is not an `initialize` naming itself.
+func handshakeClient(body []byte) (name, version string, ok bool) {
+	var request initializeRequest
+	if err := json.Unmarshal(body, &request); err != nil || request.Method != "initialize" {
+		return "", "", false
+	}
+	name = strings.TrimSpace(request.Params.ClientInfo.Name)
+	version = strings.TrimSpace(request.Params.ClientInfo.Version)
+	if name == "" {
+		return "", "", false
+	}
+	return truncate(name, maxClientField), truncate(version, maxClientField), true
+}
+
+func truncate(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
+}
+
 const (
 	// maxBody bounds a single JSON-RPC request. Tool arguments are short; a
 	// larger body is a mistake or an attack, and either way is refused rather
@@ -90,6 +139,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 		return
+	}
+
+	// Every client announces itself once, when it connects. Catching it here is
+	// what lets the panel name the tool on the other end instead of only the
+	// key it presented.
+	if reporter, ok := h.auth.(ClientReporter); ok {
+		if name, version, isHandshake := handshakeClient(body); isHandshake {
+			go func() {
+				noteCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
+				defer done()
+				reporter.NoteClient(noteCtx, secret, name, version)
+			}()
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(mcp.WithSession(r.Context(), session), callTimeout)

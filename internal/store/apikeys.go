@@ -35,6 +35,12 @@ type APIKey struct {
 	CreatedAt  time.Time
 	LastUsedAt time.Time
 	Revoked    bool
+	// ClientName and ClientVersion are what the MCP client called itself in the
+	// handshake — "claude-ai", "claude-code", "cursor-vscode". They are the
+	// difference between a panel that lists credentials and one that lists the
+	// tools a person actually connected.
+	ClientName    string
+	ClientVersion string
 }
 
 // NewAPIKey mints a credential and returns both the secret, shown once, and the
@@ -114,9 +120,22 @@ func (s *Store) TouchAPIKey(ctx context.Context, id int64) error {
 	return err
 }
 
+// NoteAPIKeyClient records which MCP client presented a credential. It is
+// looked up by digest, like every other read of a key, so the secret never
+// reaches a query log; an unknown or revoked key simply updates nothing.
+func (s *Store) NoteAPIKeyClient(ctx context.Context, secret, name, version string) error {
+	if !strings.HasPrefix(secret, KeyPrefix) {
+		return ErrKeyUnknown
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE api_keys SET client_name=$2, client_version=$3 WHERE key_hash=$1 AND revoked_at IS NULL`,
+		HashAPIKey(secret), name, version)
+	return err
+}
+
 // ListAPIKeys returns the live credentials, newest first.
 func (s *Store) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,instance_id,key_prefix,created_at,last_used_at FROM api_keys WHERE revoked_at IS NULL ORDER BY created_at DESC`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,instance_id,key_prefix,created_at,last_used_at,client_name,client_version FROM api_keys WHERE revoked_at IS NULL ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +144,7 @@ func (s *Store) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 	for rows.Next() {
 		var key APIKey
 		var lastUsed sql.NullTime
-		if err := rows.Scan(&key.ID, &key.Name, &key.InstanceID, &key.Prefix, &key.CreatedAt, &lastUsed); err != nil {
+		if err := rows.Scan(&key.ID, &key.Name, &key.InstanceID, &key.Prefix, &key.CreatedAt, &lastUsed, &key.ClientName, &key.ClientVersion); err != nil {
 			return nil, err
 		}
 		if lastUsed.Valid {

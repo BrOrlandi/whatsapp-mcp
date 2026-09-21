@@ -252,3 +252,10 @@ func (a apiKeyAuth) Authenticate(ctx context.Context, secret string) (string, er
 	}()
 	return key.InstanceID, nil
 }
+
+// NoteClient records which AI tool is holding this credential, as the tool
+// itself reported in the MCP handshake. The panel shows it in place of a key
+// prefix, which is the difference between "Claude Desktop" and "wamcp-a1b2c3…".
+func (a apiKeyAuth) NoteClient(ctx context.Context, secret, name, version string) {
+	_ = a.store.NoteAPIKeyClient(ctx, secret, name, version)
+}
