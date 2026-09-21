@@ -223,13 +223,21 @@ func main() {
 	// The public address is what the panel puts into MCP snippets and into the
 	// licence callback. A made-up domain reads better in screenshots; pointing
 	// it at this server is what makes the licence link clickable here.
+	// PREVIEW_LICENSE_AUTO_WAIT=1s walks straight into the stalled state,
+	// which is otherwise a three-minute wait to look at.
+	autoWait := 3 * time.Minute
+	if raw := os.Getenv("PREVIEW_LICENSE_AUTO_WAIT"); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil {
+			autoWait = parsed
+		}
+	}
 	publicURL := os.Getenv("PREVIEW_PUBLIC_URL")
 	if publicURL == "" {
 		publicURL = "https://whatsapp-mcp.example.com"
 	}
 	// The preview defaults to the automatic licence path, which is what a real
 	// install shows; PREVIEW_LICENSE_AUTO=false previews the manual one.
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz")
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait)
 	// A second preview on the same machine would otherwise fail to bind and
 	// die silently, which reads as the panel being broken.
 	address := os.Getenv("PREVIEW_ADDR")

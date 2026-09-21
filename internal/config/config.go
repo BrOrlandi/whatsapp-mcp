@@ -31,6 +31,13 @@ type Config struct {
 	// email and their own click on the magic link.
 	LicenseAuto        bool
 	LicenseEmailDomain string
+	// LicenseAutoWait is how long the automatic registration is given before
+	// the wizard stops claiming a licence is on its way and offers the manual
+	// flow instead. The worker's click normally lands in seconds, so a wait
+	// this long past it means something between here and that inbox is broken
+	// — a routing rule, the worker, the licensing server's delivery — and none
+	// of those get better by waiting longer.
+	LicenseAutoWait time.Duration
 }
 
 func Load() Config {
@@ -57,6 +64,7 @@ func Load() Config {
 		// clicking anything. Opting out is a one-variable change.
 		LicenseAuto:        boolEnv("EVOLUTION_LICENSE_AUTO", true),
 		LicenseEmailDomain: env("EVOLUTION_LICENSE_EMAIL_DOMAIN", "brorlandi.xyz"),
+		LicenseAutoWait:    duration("EVOLUTION_LICENSE_AUTO_WAIT", 3*time.Minute),
 	}
 }
 

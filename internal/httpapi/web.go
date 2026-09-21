@@ -139,8 +139,15 @@ type webApp struct {
 	// fallback for when it is off or the worker is not reachable.
 	licenseAuto        bool
 	licenseEmailDomain string
-	sessions           *sessions
-	templates          *template.Template
+	// licenseAutoWait bounds the automatic wait. autoSince remembers when this
+	// process first tried, for the case where no link ever went out and there
+	// is therefore no stored timestamp to measure from; a restart resets it,
+	// which is the right answer because a restart is a fresh attempt.
+	licenseAutoWait time.Duration
+	autoMu          sync.Mutex
+	autoSince       time.Time
+	sessions        *sessions
+	templates       *template.Template
 	// logins throttles password guessing. The administrator password is the
 	// weakest credential the gateway holds — a person chose it — and it opens
 	// the panel that owns the WhatsApp session, so the login form needs the same
@@ -164,8 +171,11 @@ const (
 	maxPassword = 72
 )
 
-func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string) http.Handler {
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string, licenseAutoWait time.Duration) http.Handler {
+	if licenseAutoWait <= 0 {
+		licenseAutoWait = 3 * time.Minute
+	}
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -566,6 +576,8 @@ type selection struct {
 	// inbox, which is the difference between asking for an address and waiting
 	// on a click.
 	LinkSent bool
+	// LinkSentAt is when, which is what bounds a wait that is not ending.
+	LinkSentAt time.Time
 	// LicenseHealed marks the render where a licence the panel was already
 	// holding was put back into Evolution without anyone being asked for it.
 	LicenseHealed bool
@@ -614,7 +626,8 @@ func (a *webApp) readSelection(r *http.Request) selection {
 				state.RegisterURL = license.RegisterURL
 			}
 			if saved, savedErr := a.store.EvolutionLicense(r.Context()); savedErr == nil {
-				state.OperatorEmail, state.LinkSent = saved.OperatorEmail, !saved.LinkSentAt.IsZero()
+				state.OperatorEmail, state.LinkSentAt = saved.OperatorEmail, saved.LinkSentAt
+				state.LinkSent = !saved.LinkSentAt.IsZero()
 			}
 		}
 		return state
@@ -810,6 +823,9 @@ type onboardingPage struct {
 	// Auto means the registration went to an address this project's email
 	// worker reads — the wait is on a machine, not on a person's inbox.
 	Auto bool
+	// AutoStalled means that wait has gone on long past the seconds a working
+	// worker takes, so the wizard stops promising and offers the manual flow.
+	AutoStalled bool
 
 	Instances    []instanceView
 	NeedsPairing bool
@@ -837,21 +853,35 @@ func (a *webApp) onboardingState(r *http.Request) onboardingPage {
 		page.Step = 1
 		page.OperatorEmail, page.RegisterURL = state.OperatorEmail, state.RegisterURL
 		page.Sent = state.LinkSent
+		// Whether this is the automatic flow is a property of the pending
+		// registration, not of the setting: once the operator has fallen back
+		// to their own address, the wizard has to talk about their inbox even
+		// though EVOLUTION_LICENSE_AUTO is still on.
 		switch {
-		case a.licenseAuto:
+		case a.licenseAuto && (!page.Sent || autoAddress(page.OperatorEmail)):
 			// The automatic mode registers with an address of this
 			// deployment's own, whose mail is clicked by the email worker —
 			// nobody reads inboxes here. The first render asks for it, and
 			// every render after that is polling on the licence coming in.
 			page.Auto = true
-			if !page.Sent && a.startAutoLicense(r, &page.OperatorEmail) {
-				page.Sent = true
+			if !page.Sent {
+				a.markAutoAttempt()
+				if a.startAutoLicense(r, &page.OperatorEmail) {
+					page.Sent = true
+				}
 			}
+			// The click a working worker performs lands in seconds. Past the
+			// wait, something between here and that mailbox is broken and no
+			// amount of further waiting fixes it, so the operator gets their
+			// own inbox back — which is a flow that needs nothing of ours to
+			// be working. The poll stays armed either way: a late click still
+			// moves the page on.
+			page.AutoStalled = a.autoStalled(state)
 			// Once the link is out, the wizard's own poll (app.js, via
 			// /api/instalacao) watches for the activation; before that, this
 			// page is the retry loop — usually waiting for Evolution to
 			// accept a registration at all.
-			if !page.Sent {
+			if !page.Sent && !page.AutoStalled {
 				page.Refresh = true
 			}
 		case !page.Sent && page.OperatorEmail != "" && a.startLicense(r, page.OperatorEmail):
@@ -1266,7 +1296,7 @@ func (a *webApp) startLicense(r *http.Request, email string) bool {
 // registration every five seconds.
 func (a *webApp) startAutoLicense(r *http.Request, kept *string) bool {
 	email := *kept
-	if !strings.HasPrefix(email, "whatsappmcp+") {
+	if !autoAddress(email) {
 		generated, err := a.licenseEmailAddress()
 		if err != nil {
 			return false
@@ -1280,6 +1310,43 @@ func (a *webApp) startAutoLicense(r *http.Request, kept *string) bool {
 	return false
 }
 
+// autoLocalPart is the local part every automatically registered address
+// carries, and therefore how a pending registration is told apart from one
+// waiting on a person's inbox.
+const autoLocalPart = "whatsappmcp+"
+
+// autoAddress reports whether a pending registration belongs to this
+// deployment's own machine-read mailbox rather than to somebody's inbox.
+func autoAddress(email string) bool { return strings.HasPrefix(email, autoLocalPart) }
+
+// markAutoAttempt starts the clock on the automatic path the first time this
+// process tries it. It is only consulted when no link ever went out, since a
+// link that did leaves a timestamp in the database that outlives a restart.
+func (a *webApp) markAutoAttempt() {
+	a.autoMu.Lock()
+	defer a.autoMu.Unlock()
+	if a.autoSince.IsZero() {
+		a.autoSince = time.Now()
+	}
+}
+
+// autoStalled reports whether the automatic path has been given its chance and
+// has not delivered. Both failures it covers look the same to the operator and
+// have the same answer — take over with your own inbox:
+//
+//   - the link went out and nothing clicked it, measured from the stored
+//     timestamp so the verdict survives a restart mid-wait;
+//   - no link ever went out, because Evolution or the licensing server keeps
+//     refusing the registration, measured from this process's first attempt.
+func (a *webApp) autoStalled(state selection) bool {
+	if !state.LinkSentAt.IsZero() {
+		return time.Since(state.LinkSentAt) > a.licenseAutoWait
+	}
+	a.autoMu.Lock()
+	defer a.autoMu.Unlock()
+	return !a.autoSince.IsZero() && time.Since(a.autoSince) > a.licenseAutoWait
+}
+
 // licenseEmailAddress mints the address automatic licences register under. The
 // plus-addressed local part is deliberate: Cloudflare Email Routing has a
 // single exact rule for the `whatsappmcp` base that routes everything with a
@@ -1290,7 +1357,7 @@ func (a *webApp) licenseEmailAddress() (string, error) {
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("whatsappmcp+%x@%s", raw, a.licenseEmailDomain), nil
+	return fmt.Sprintf("%s%x@%s", autoLocalPart, raw, a.licenseEmailDomain), nil
 }
 
 // autoLicense is the button behind both wizard and panel: it asks for an

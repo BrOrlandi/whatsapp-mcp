@@ -313,6 +313,19 @@ func testSessionKey() []byte { return []byte("test-only-session-key-that-is-long
 
 // signedIn starts a panel with an existing administrator and returns a client
 // that already holds a valid session.
+// signedInAutoWait is how long the automatic licence path is given in tests.
+// A test that wants the stalled fallback shortens it with shortAutoWait.
+var signedInAutoWait = 3 * time.Minute
+
+// shortAutoWait makes the automatic wait expire immediately, for the tests
+// about what the wizard does once it has.
+func shortAutoWait(t *testing.T) {
+	t.Helper()
+	previous := signedInAutoWait
+	signedInAutoWait = time.Nanosecond
+	t.Cleanup(func() { signedInAutoWait = previous })
+}
+
 func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution, licenseAuto ...bool) (*httptest.Server, *http.Client) {
 	t.Helper()
 	hash, err := auth.HashPassword("senha segura 123")
@@ -326,7 +339,7 @@ func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution, licenseAuto ...b
 	for _, want := range licenseAuto {
 		auto = want
 	}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", auto, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", auto, "brorlandi.xyz", signedInAutoWait))
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -375,7 +388,7 @@ func mustNotContain(t *testing.T, page, name string, unwanted ...string) {
 
 func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -436,7 +449,7 @@ func TestEveryPageInlinesTheBrandLogo(t *testing.T) {
 	if !strings.HasPrefix(logo, "<svg") {
 		t.Fatalf("brand.LogoSVG is not inline SVG: %q", logo)
 	}
-	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer fresh.Close()
 	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="email"`, `name="password"`)
 
@@ -663,7 +676,7 @@ func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
 // The pairing QR arrives as a data: URI, so the policy must allow it for images
 // and for nothing else.
 func TestContentSecurityPolicyAllowsInlineQRImages(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/login")
 	if err != nil {
@@ -718,7 +731,7 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.user, repo.hash = "admin", hash
-	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -938,7 +951,7 @@ func TestKeyRequiresAName(t *testing.T) {
 // The copy helper is served from the panel itself, which is what lets the
 // content security policy stay at 'self'.
 func TestPanelServesItsOwnScript(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/assets/app.js")
 	if err != nil {
@@ -1100,7 +1113,7 @@ func TestProgressEndpointReportsTheChecklistAndNothingElse(t *testing.T) {
 // logged in: a browser asks for it on the login page, and an icon behind the
 // session cookie would just 302 into the login form forever.
 func TestPanelServesItsOwnIcons(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	for path, wantType := range map[string]string{
 		"/favicon.svg":          "image/svg+xml",
@@ -1238,7 +1251,7 @@ func newJar(t *testing.T) *cookiejar.Jar {
 func TestSetupNeedsTheInstallerToken(t *testing.T) {
 	const token = "9f2c1ab4d0e7"
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token, false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token, false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	client := &http.Client{Jar: newJar(t)}
 
@@ -1624,7 +1637,7 @@ func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
 		err:     evolution.ErrNotActivated,
 		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
 	}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1668,7 +1681,7 @@ func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
 func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
 	repo := newRepo()
 	evo := &fakeEvolution{err: errors.New("connection refused"), registerErr: errors.New("connection refused")}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1698,7 +1711,7 @@ func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
 // panel accepts, five is not, and the server decides either way — the form's
 // own minlength is a convenience the browser can be talked out of.
 func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
-	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer short.Close()
 	r, err := http.PostForm(short.URL+"/setup", url.Values{"email": {"bruno@example.com"}, "password": {"cinco"}})
 	if err != nil {
@@ -1709,7 +1722,7 @@ func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
 	mustContain(t, string(body), "setup", "pelo menos 6 caracteres")
 
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1759,7 +1772,7 @@ func TestAFailedActivationSaysWhyWhereverItWasClicked(t *testing.T) {
 // their own panel signed in and is shown the login form.
 func TestTheSessionCookieSurvivesAnExternalReturn(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
 	defer ts.Close()
 	// The redirect is not followed, because the cookie is set on the response
 	// that issues it and the jar would swallow it.
@@ -1866,4 +1879,93 @@ func TestAutomaticModeDoesNotWaitOnTheOperatorInbox(t *testing.T) {
 // the raw form would miss a licence address that is right there.
 func htmlEscaped(value string) string {
 	return strings.ReplaceAll(value, "+", "&#43;")
+}
+
+// A worker that never clicks is the failure automatic mode has to survive. The
+// wizard cannot keep promising a licence is on its way, and the answer it owes
+// the operator is the one flow that needs nothing of this project's own
+// infrastructure: their inbox, their click.
+func TestAutomaticLicenceFallsBackToTheOperatorInbox(t *testing.T) {
+	shortAutoWait(t)
+	repo := newRepo()
+	repo.mu.Lock()
+	repo.license = store.EvolutionLicense{OperatorEmail: "whatsappmcp+abc@brorlandi.xyz", LinkSentAt: time.Now().Add(-time.Hour)}
+	repo.mu.Unlock()
+	evo := &fakeEvolution{
+		err:     evolution.ErrNotActivated,
+		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+	}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+	repo.mu.Lock()
+	repo.user = "admin@example.com"
+	repo.mu.Unlock()
+
+	page := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, page, "wizard stalled", "não se completou", "E-mail para a licença", `name="email"`)
+	if strings.Contains(page, "Verificando a ativação") {
+		t.Fatal("the wizard was still promising an activation that is not coming")
+	}
+	// The licence address and the sign-in address are separate things: the
+	// licensing server registers one licence per address, ever, so offering
+	// the address the operator signs in with would be advice that fails for
+	// anyone who has licensed an installation before. The field starts empty.
+	if strings.Contains(page, `value="admin@example.com"`) {
+		t.Fatal("the fallback offered the sign-in address as the licence address")
+	}
+	// A late click still has to land, so the poll stays armed.
+	if !strings.Contains(page, `data-onboarding="1"`) {
+		t.Fatal("the wizard stopped watching for the licence")
+	}
+
+	// Taking over moves the wait to their inbox, and the wizard's copy follows
+	// it there even though automatic mode is still switched on.
+	r, err := client.PostForm(ts.URL+"/instancias/licenca", url.Values{"email": {"eu@example.com"}, "origem": {"instalacao"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if got := evo.operatorEmail; got != "eu@example.com" {
+		t.Fatalf("the registration went to %q, want the operator's own address", got)
+	}
+	mustContain(t, string(body), "wizard manual", "eu@example.com", "Abra o e-mail e clique no link")
+	if strings.Contains(string(body), "ativada automaticamente") {
+		t.Fatal("the wizard still described the automatic flow after the hand-over")
+	}
+}
+
+// The other way automatic mode fails is never getting a registration out at
+// all — Evolution refusing, or the licensing server refusing. It looks
+// different from the inside and identical to the operator, so it ends in the
+// same place.
+func TestAutomaticLicenceThatNeverSendsFallsBackToo(t *testing.T) {
+	shortAutoWait(t)
+	repo := newRepo()
+	evo := &fakeEvolution{err: evolution.ErrNotActivated, registerErr: errors.New("licensing server down")}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+
+	// The first render is the attempt that fails and starts the clock; the
+	// next one is past the wait.
+	fetch(t, client, ts.URL+"/instalacao")
+	page := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, page, "wizard stalled", "não se completou", "não chegou a sair", "E-mail para a licença")
+	if strings.Contains(page, `http-equiv="refresh"`) {
+		t.Fatal("the wizard kept reloading itself instead of handing over")
+	}
+}
+
+// Inside the wait, nothing changes: the automatic path is given its chance
+// before the operator is asked for anything.
+func TestAutomaticLicenceWaitsBeforeHandingOver(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{err: evolution.ErrNotActivated, license: evolution.License{Status: "inactive"}}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+	page := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, page, "wizard automatic", "ativada automaticamente", "Verificando a ativação")
+	if strings.Contains(page, "não se completou") {
+		t.Fatal("the wizard gave up on the automatic path inside its own wait")
+	}
 }

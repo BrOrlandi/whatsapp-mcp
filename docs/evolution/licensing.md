@@ -145,8 +145,9 @@ installation wizard at `/instalacao` (`internal/evolution/licensing.go`,
 `internal/httpapi/web.go`). There are two modes, chosen by
 `EVOLUTION_LICENSE_AUTO`:
 
-**Automatic (the default, `EVOLUTION_LICENSE_AUTO=true`).** The wizard
-registers the licence with an address of this deployment's own —
+**Automatic (the default, `EVOLUTION_LICENSE_AUTO=true`).** The licence
+address is never the operator's: the wizard registers with an address of this
+deployment's own —
 `whatsappmcp+<random>@EVOLUTION_LICENSE_EMAIL_DOMAIN` (default
 `brorlandi.xyz`); a fresh plus-addressed `whatsappmcp+…` per installation, so
 every deploy is its own registration in the licensing server's books. That
@@ -167,6 +168,27 @@ repository had before the worker: same wizard, one click, once per email,
 ever. (A URL had to be built by hand rather than `url.JoinPath`, which
 escapes a `?` written into a path segment.)
 
+**And automatic falls back to manual by itself.** Everything the automatic
+mode depends on is outside this gateway: an Email Routing rule, a worker, the
+licensing server's delivery. When any of it is broken the click never comes,
+and a wizard that keeps saying "activating…" is lying. So the wait is bounded
+by `EVOLUTION_LICENSE_AUTO_WAIT` (default 3 minutes, against a worker whose
+click normally lands in seconds). Past it the wizard says the automatic
+activation did not complete and asks for an address the operator can open —
+the manual flow above, reached without touching a variable or a shell. The
+field starts empty on purpose: the licence address and the sign-in address are
+separate things. The sign-in address is the administrator's; the licence
+address is whatever inbox answers this one registration, and since the
+licensing server registers one licence per address *ever*, offering the
+operator the address they sign in with would be advice that fails for anyone
+who has licensed an installation before. Two failures end there, because they
+have the same answer: a link that went out and was never clicked (measured
+from `link_sent_at`, so the verdict survives a restart mid-wait), and a
+registration that never went out at all because Evolution or the licensing
+server kept refusing it. The poll stays armed through the hand-over, so a late
+click still finishes the job; and *Prefiro tentar a automática de novo* goes
+back to the worker for someone who has just fixed their routing rule.
+
 Either way, the callback exchanges the one-time code for the `api_key`,
 activates Evolution with it, and keeps a copy in the panel's own database
 (`evolution_license`, migration `008`). **From then on, nobody is asked
@@ -184,7 +206,8 @@ startup fallback, documented above.
 ## If that is still too much
 
 With the email worker in place, there is no click left to remove in
-automatic mode. What could still be worth asking Evolution Foundation for is a
+automatic mode when it works — and when it does not, the fallback above is a
+person's single click, which is where this project started. What could still be worth asking Evolution Foundation for is a
 first-class non-interactive activation — a distribution identifier the
 installer presents, every deployment still counted, which is what the Usage
 Notification is for, without an email in the middle. It would simplify this

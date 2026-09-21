@@ -161,6 +161,10 @@ services:
       # email and their own click, via the manual wizard flow.
       EVOLUTION_LICENSE_AUTO: ${EVOLUTION_LICENSE_AUTO:-true}
       EVOLUTION_LICENSE_EMAIL_DOMAIN: ${EVOLUTION_LICENSE_EMAIL_DOMAIN:-brorlandi.xyz}
+      # How long the automatic path gets before the wizard hands the licence
+      # back to the operator's own inbox. Nothing automatic mode depends on
+      # lives in this container, so the hand-over is the point, not the number.
+      EVOLUTION_LICENSE_AUTO_WAIT: ${EVOLUTION_LICENSE_AUTO_WAIT:-3m}
     # Bound to loopback by default: the panel has no business facing the
     # internet directly. Put a TLS-terminating reverse proxy in front of it and
     # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens
