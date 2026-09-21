@@ -16,10 +16,10 @@ import (
 // tests can point it at a stub.
 var licensingServer = "https://license.evolutionfoundation.com.br"
 
-// LicenseActivation is what a completed registration yields: the credential
-// issued by the licensing server, which is what activating Evolution Go means.
-// The panel keeps a copy so a rebuild that loses Evolution's own database can
-// be reactivated without asking the operator to register again.
+// LicenseActivation is what a completed registration yields. Only InstanceID
+// is filled in: the credential itself is exchanged by Evolution and kept in
+// Evolution's own database, and /license/status reports it masked, so the
+// remaining fields exist for the store's shape rather than carrying anything.
 type LicenseActivation struct {
 	APIKey     string `json:"api_key"`
 	Tier       string `json:"tier"`
@@ -84,11 +84,9 @@ func registrationToken(registerURL string) (string, error) {
 }
 
 // CompleteActivation finishes what RegisterOperator started. The code arrives
-// in the link the operator clicked; only the licensing server can judge it, and
-// it can be used exactly once, so this is also the step that takes custody of
-// the api_key for the panel's own records. Activating with the key rather than
-// the code is deliberate: Evolution accepts either, and this way the code is
-// spent here while the key stays reusable for a rebuild.
+// in the link that was clicked; only the licensing server can judge it, and it
+// can be spent exactly once — which is why it is spent in the one place that
+// makes Evolution licensed.
 func (c *Client) CompleteActivation(ctx context.Context, code string) (LicenseActivation, error) {
 	var activation LicenseActivation
 	var status License
@@ -99,53 +97,56 @@ func (c *Client) CompleteActivation(ctx context.Context, code string) (LicenseAc
 	if code == "" {
 		return activation, fmt.Errorf("código de ativação ausente")
 	}
-	body, err := json.Marshal(map[string]string{"authorization_code": code, "instance_id": status.InstanceID})
-	if err != nil {
-		return activation, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, licensingServer+"/v1/register/exchange", strings.NewReader(string(body)))
-	if err != nil {
-		return activation, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return activation, fmt.Errorf("licensing server: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return activation, fmt.Errorf("licensing server returned HTTP %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&activation); err != nil {
-		return activation, fmt.Errorf("resposta do licensing server: %w", err)
-	}
-	activation.InstanceID = status.InstanceID
-	if activation.APIKey == "" {
-		return activation, fmt.Errorf("licensing server não devolveu a api_key")
-	}
-	if err := c.activateWithKey(ctx, activation.APIKey); err != nil {
+	// Hand the code to Evolution rather than spending it here.
+	//
+	// This panel used to POST /v1/register/exchange itself, keep the api_key,
+	// and then give Evolution the key. Evolution's GET /license/activate
+	// looks like it takes either — _58 (pkg/core/c0.go:891) falls back from
+	// code to key — but the route never reaches that: it POSTs whatever
+	// arrives in ?code= to /v1/register/exchange first and returns the
+	// licensing server's status on failure (c0.go:786-806). A key is not an
+	// authorization code, so every activation answered 401 while the
+	// registration itself was already marked completed upstream — the licence
+	// was issued and nothing here could use it.
+	//
+	// So the code goes through untouched and Evolution does the one exchange
+	// it is allowed. The cost is that the api_key never passes through this
+	// panel: Evolution stores it in its own database and /license/status only
+	// reports it masked (c0.go:694). Tier and CustomerID are unknown here for
+	// the same reason.
+	if err := c.activate(ctx, code); err != nil {
 		return activation, err
 	}
 	return activation, nil
 }
 
-// ReactivateLicense brings back a licence the panel already holds. Evolution
-// keeps its licence in a database volume that a rebuild can lose, and refuses
-// every request until it has one again — handing it a key it already owned is
-// enough; no registration, no email, no browser.
+// ReactivateLicense is kept for the caller's shape and cannot work through
+// this route.
+//
+// The idea was that a rebuild which loses Evolution's database volume could be
+// handed back a key this panel had kept. Evolution offers nowhere to put one:
+// GET /license/activate exchanges its ?code= with the licensing server before
+// anything else (pkg/core/c0.go:786), so a key arrives as an authorization
+// code and is refused. The only place Evolution accepts a bare key is at
+// startup, from GLOBAL_API_KEY (c0.go:476) — an environment variable, which a
+// running container cannot give itself.
+//
+// A rebuild that loses that volume therefore needs a new registration, which
+// in automatic mode the wizard performs by itself with no one asked anything.
 func (c *Client) ReactivateLicense(ctx context.Context, apiKey string) error {
-	return c.activateWithKey(ctx, apiKey)
+	return fmt.Errorf("a Evolution só aceita uma chave de licença em GLOBAL_API_KEY, na subida do processo")
 }
 
-// activateWithKey hands Evolution a licence credential. The route accepts
-// either an authorization code or the key itself, so the panel can use the
-// key it had kept.
-func (c *Client) activateWithKey(ctx context.Context, apiKey string) error {
+// activate gives Evolution the one-time authorization code from the callback.
+// Evolution exchanges it with the licensing server, stores what comes back and
+// starts serving. The code is all this route accepts, despite its ?code= also
+// being where a bare key would go: the exchange happens before anything else.
+func (c *Client) activate(ctx context.Context, code string) error {
 	endpoint, err := url.JoinPath(c.baseURL, "/license/activate")
 	if err != nil {
 		return err
 	}
-	params := url.Values{"code": []string{apiKey}}
+	params := url.Values{"code": []string{code}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
 	if err != nil {
 		return err

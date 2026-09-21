@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1390,6 +1391,13 @@ func (a *webApp) completeLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	activation, err := a.evolution.CompleteActivation(r.Context(), code)
 	if err != nil {
+		// This is the one failure nobody is watching. The click can arrive in
+		// a mail client's own browser, or from the licence worker, and the
+		// only place the reason went was a page rendered back to whoever made
+		// the request — so a refused activation left no trace on the server at
+		// all. It took reading a Cloudflare worker's logs to find out why one
+		// was failing. Now it is in the gateway's log.
+		slog.Error("licence activation refused", "error", err.Error())
 		a.licenseOutcome(w, r, "", "Não foi possível ativar a licença: "+err.Error())
 		return
 	}
