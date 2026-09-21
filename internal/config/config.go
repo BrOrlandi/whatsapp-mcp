@@ -25,6 +25,12 @@ type Config struct {
 	// to create anything without it. Empty means unguarded, which is the right
 	// default for a panel bound to loopback.
 	SetupToken string
+	// LicenseAuto registers the Evolution licence with an address on
+	// LicenseEmailDomain, whose mail is clicked by the licence Email Worker —
+	// activation then needs no person at all. False keeps the operator's own
+	// email and their own click on the magic link.
+	LicenseAuto        bool
+	LicenseEmailDomain string
 }
 
 func Load() Config {
@@ -46,6 +52,11 @@ func Load() Config {
 		// for: a server process reading stdin has no client on the other end.
 		StdioEnabled: os.Getenv("MCP_STDIO") == "true",
 		SetupToken:   os.Getenv("SETUP_TOKEN"),
+		// Automatic licence registration is the default: an install that can
+		// reach its own email domain's worker comes up licensed with nobody
+		// clicking anything. Opting out is a one-variable change.
+		LicenseAuto:        boolEnv("EVOLUTION_LICENSE_AUTO", true),
+		LicenseEmailDomain: env("EVOLUTION_LICENSE_EMAIL_DOMAIN", "brorlandi.xyz"),
 	}
 }
 
@@ -68,6 +79,19 @@ func list(key string) []string {
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return fallback
+}
+
+// boolEnv reads an on/off variable that defaults to on. "false" and "0" are
+// the off states; anything else is on, which keeps a typo from silently
+// disabling the licence automation and sending an operator to a form.
+func boolEnv(key string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "false", "0":
+		return false
+	case "true", "1":
+		return true
 	}
 	return fallback
 }

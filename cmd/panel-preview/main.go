@@ -227,7 +227,9 @@ func main() {
 	if publicURL == "" {
 		publicURL = "https://whatsapp-mcp.example.com"
 	}
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "")
+	// The preview defaults to the automatic licence path, which is what a real
+	// install shows; PREVIEW_LICENSE_AUTO=false previews the manual one.
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz")
 	// A second preview on the same machine would otherwise fail to bind and
 	// die silently, which reads as the panel being broken.
 	address := os.Getenv("PREVIEW_ADDR")

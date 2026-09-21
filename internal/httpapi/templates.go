@@ -704,29 +704,47 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <div class="card__head"><h2>Ativar a licença</h2></div>
 <div class="card__body">
 {{if .Sent}}
+{{if .Auto}}
+<p class="lead">Licença sendo ativada automaticamente.</p>
+<p class="muted">O registro usa o endereço <strong>{{.OperatorEmail}}</strong> e o e-mail &eacute; lido pelo robô de ativação — nenhum clique seu. Esta página segue sozinha assim que a licença entrar.</p>
+{{else}}
 <p class="lead">Enviamos um link de ativação para <strong>{{.OperatorEmail}}</strong>.</p>
 <p class="muted">Abra o e-mail e clique no link. Ele vale por 15 minutos, e esta página segue sozinha assim que a licença entrar.</p>
+{{end}}
 <p class="busy" role="status"><span class="spinner" aria-hidden="true"></span>Verificando a ativação…</p>
 <details class="resend">
 <summary>Não recebeu o e-mail?</summary>
+{{if .Auto}}
+<form method="post" action="/instancias/licenca/auto"><input type="hidden" name="origem" value="instalacao">
+<div class="actions"><button class="btn btn--ghost" type="submit">Pedir a ativação automática de novo</button></div>
+</form>
+{{else}}
 <form method="post" action="/instancias/licenca" data-busy="Enviando…">
 <label class="field" for="license-email"><span class="field__label">Enviar para outro endereço</span></label>
 <input id="license-email" type="email" name="email" maxlength="254" required value="{{.OperatorEmail}}" autocomplete="email" autocapitalize="none" spellcheck="false">
 <div class="actions"><button class="btn btn--ghost" type="submit">Enviar de novo</button></div>
 </form>
+{{end}}
 {{if .RegisterURL}}<p class="muted">Prefere fazer no site da Evolution? <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Abrir o registro</a> — leva ao mesmo lugar.</p>
-{{else}}<p class="muted">O link de registro não veio agora. Ele também sai no servidor com:</p>
+{{else}}<p class="muted">O link de registro não veio agora. Ele tamb&eacute;m sai no servidor com:</p>
 <pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}
 </details>
 {{else}}
-<p class="lead">Este servidor usa a Evolution Go para manter a sessão do WhatsApp, e ela pede uma licença gratuita. É uma vez só.</p>
+<p class="lead">Este servidor usa a Evolution Go para manter a sessão do WhatsApp, e ela pede uma licença gratuita. &Eacute; uma vez s&oacute;.</p>
+{{if .Auto}}
+<p class="muted">O pedido de ativação automática ainda não saiu — normalmente porque a Evolution acabou de subir e ainda não aceita registros. Esta página tenta sozinha a cada poucos segundos.</p>
+<form method="post" action="/instancias/licenca/auto"><input type="hidden" name="origem" value="instalacao">
+<div class="actions"><button class="btn btn--ghost" type="submit">Tentar agora</button></div>
+</form>
+{{else}}
 <form method="post" action="/instancias/licenca" data-busy="Enviando…">
 <label class="field" for="license-email"><span class="field__label">Seu e-mail</span>
-<span class="field__hint">Você recebe um link de ativação neste endereço.</span></label>
+<span class="field__hint">Voc&ecirc; recebe um link de ativação neste endereço.</span></label>
 <input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="email" autocapitalize="none" spellcheck="false"{{with .OperatorEmail}} value="{{.}}"{{end}}>
 <div class="actions"><button class="btn btn--block" type="submit">Enviar link de ativação</button></div>
 <p class="busy" data-busy-note role="status" hidden>Pedindo o link ao servidor de licenças.</p>
 </form>
+{{end}}
 {{end}}
 </div></section>
 {{end}}

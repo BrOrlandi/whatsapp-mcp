@@ -133,8 +133,14 @@ type webApp struct {
 	// setupToken guards the first-run form. Empty leaves it unguarded, which is
 	// right for loopback and wrong for anything the installer published.
 	setupToken string
-	sessions   *sessions
-	templates  *template.Template
+	// licenseAuto registers licences with an address on licenseEmailDomain —
+	// mail landing in this project's Email Worker, which clicks the magic link
+	// — so activation needs no person. The email form below is the manual
+	// fallback for when it is off or the worker is not reachable.
+	licenseAuto        bool
+	licenseEmailDomain string
+	sessions           *sessions
+	templates          *template.Template
 	// logins throttles password guessing. The administrator password is the
 	// weakest credential the gateway holds — a person chose it — and it opens
 	// the panel that owns the WhatsApp session, so the login form needs the same
@@ -158,8 +164,8 @@ const (
 	maxPassword = 72
 )
 
-func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string) http.Handler {
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string) http.Handler {
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -173,6 +179,7 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("GET /instancias", a.instances)
 	mux.HandleFunc("POST /instancias", a.createInstance)
 	mux.HandleFunc("POST /instancias/licenca", a.sendLicenseLink)
+	mux.HandleFunc("POST /instancias/licenca/auto", a.autoLicense)
 	mux.HandleFunc("GET /instancias/licenca/retorno", a.completeLicense)
 	mux.HandleFunc("POST /instancias/selecionar", a.selectInstance)
 	mux.HandleFunc("POST /instancias/conectar", a.connectInstance)
@@ -551,6 +558,10 @@ type selection struct {
 	NeedsActivation bool
 	RegisterURL     string
 	OperatorEmail   string
+	// AutoLicense says this panel registers licences with an address of its
+	// own, whose mail is clicked by the email worker — the operator's part in
+	// it shrinks to watching this page.
+	AutoLicense bool
 	// LinkSent marks an activation link that is sitting unanswered in that
 	// inbox, which is the difference between asking for an address and waiting
 	// on a click.
@@ -597,6 +608,7 @@ func (a *webApp) readSelection(r *http.Request) selection {
 				return state
 			}
 			state.NeedsActivation = true
+			state.AutoLicense = a.licenseAuto
 			state.Notice = "A licença ainda não foi ativada. Sem ela, a camada que mantém a sessão do WhatsApp não responde."
 			if license, licenseErr := a.evolution.License(r.Context(), a.licenseCallback()); licenseErr == nil {
 				state.RegisterURL = license.RegisterURL
@@ -795,6 +807,9 @@ type onboardingPage struct {
 	Sent          bool
 	OperatorEmail string
 	RegisterURL   string
+	// Auto means the registration went to an address this project's email
+	// worker reads — the wait is on a machine, not on a person's inbox.
+	Auto bool
 
 	Instances    []instanceView
 	NeedsPairing bool
@@ -822,10 +837,27 @@ func (a *webApp) onboardingState(r *http.Request) onboardingPage {
 		page.Step = 1
 		page.OperatorEmail, page.RegisterURL = state.OperatorEmail, state.RegisterURL
 		page.Sent = state.LinkSent
-		// The address was typed when the administrator account was created, so
-		// there is nothing left to ask: send the link and let the operator
-		// arrive at their inbox instead of at one more form.
-		if !page.Sent && page.OperatorEmail != "" && a.startLicense(r, page.OperatorEmail) {
+		switch {
+		case a.licenseAuto:
+			// The automatic mode registers with an address of this
+			// deployment's own, whose mail is clicked by the email worker —
+			// nobody reads inboxes here. The first render asks for it, and
+			// every render after that is polling on the licence coming in.
+			page.Auto = true
+			if !page.Sent && a.startAutoLicense(r, &page.OperatorEmail) {
+				page.Sent = true
+			}
+			// Once the link is out, the wizard's own poll (app.js, via
+			// /api/instalacao) watches for the activation; before that, this
+			// page is the retry loop — usually waiting for Evolution to
+			// accept a registration at all.
+			if !page.Sent {
+				page.Refresh = true
+			}
+		case !page.Sent && page.OperatorEmail != "" && a.startLicense(r, page.OperatorEmail):
+			// The address was typed when the administrator account was created, so
+			// there is nothing left to ask: send the link and let the operator
+			// arrive at their inbox instead of at one more form.
 			page.Sent = true
 		}
 	case state.Unavailable:
@@ -1225,6 +1257,55 @@ func (a *webApp) startLicense(r *http.Request, email string) bool {
 		return false
 	}
 	return a.store.MarkLicenseLinkSent(r.Context(), email) == nil
+}
+
+// startAutoLicense registers the licence with an address whose mail is read by
+// this project's email worker, which clicks the link — activation with no
+// inbox and no operator. The address is kept across renders through the same
+// slot the manual one uses, so a wait that spans reloads does not mint a new
+// registration every five seconds.
+func (a *webApp) startAutoLicense(r *http.Request, kept *string) bool {
+	email := *kept
+	if !strings.HasPrefix(email, "whatsappmcp-") {
+		generated, err := a.licenseEmailAddress()
+		if err != nil {
+			return false
+		}
+		email = generated
+	}
+	if a.startLicense(r, email) {
+		*kept = email
+		return true
+	}
+	return false
+}
+
+// licenseEmailAddress mints the address automatic licences register under: a
+// random local part — so each installation is its own registration — on the
+// domain whose email lands in the worker.
+func (a *webApp) licenseEmailAddress() (string, error) {
+	raw := make([]byte, 8)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("whatsappmcp-%x@%s", raw, a.licenseEmailDomain), nil
+}
+
+// autoLicense is the button behind both wizard and panel: it asks for an
+// automatic registration wherever the ask came from.
+func (a *webApp) autoLicense(w http.ResponseWriter, r *http.Request) {
+	if !a.require(w, r) {
+		return
+	}
+	var kept string
+	if saved, err := a.store.EvolutionLicense(r.Context()); err == nil {
+		kept = saved.OperatorEmail
+	}
+	if !a.startAutoLicense(r, &kept) {
+		a.fail(w, r, origin(r), "Não foi possível pedir a ativação automática ao servidor de licenças. Tente de novo em instantes.")
+		return
+	}
+	http.Redirect(w, r, origin(r), http.StatusSeeOther)
 }
 
 // completeLicense finishes the registration the magic link started. The

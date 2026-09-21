@@ -352,9 +352,9 @@ if [ -n "${SETUP_TOKEN}" ]; then
     # in past the administrator you already created.
     printf 'Open this to create your administrator:\n\n'
     printf '  https://%s/setup?token=%s\n\n' "${PUBLIC_HOST}" "${SETUP_TOKEN}"
-    printf 'You choose the email and the password. Use an email you can open:\n'
-    printf 'the licence step confirms it. If an administrator already exists, the\n'
-    printf 'link simply sends you to the sign-in page.\n\n'
+    printf 'You choose the email and the password. Use an email you check:\n'
+    printf 'it is your identity in the panel. If an administrator already\n'
+    printf 'exists, the link simply sends you to the sign-in page.\n\n'
 fi
 printf 'Installation directory:\n  %s\n\n' "${INSTALL_DIR}"
 printf 'Useful commands:\n'
@@ -368,8 +368,9 @@ printf 'so on) to 80, 443 and whichever port you reach SSH on. Never publish the
 printf 'databases, RabbitMQ, MinIO or Evolution.\n\n'
 printf 'Next: open the link above. The panel walks the rest itself.\n\n'
 printf '  1. Create your administrator with an email and a password.\n'
-printf '  2. The licence link is already in that inbox by the time the first\n'
-printf '     step appears - click it, and the page moves on by itself.\n'
+printf '  2. The licence activates itself - no email to open, no link to\n'
+printf '     click. (Want it in your own inbox instead? Set\n'
+printf '     EVOLUTION_LICENSE_AUTO=false and re-run this installer.)\n'
 printf '  3. Name your WhatsApp and scan the QR code from your phone, under\n'
 printf '     Linked devices -> Link a device.\n'
 printf '  4. The panel hands you the configuration block for your MCP client.\n'

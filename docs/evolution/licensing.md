@@ -133,36 +133,40 @@ deployments, and a revocation breaking every installation at once.
 
 The panel drives the whole registration itself, from the first step of the
 installation wizard at `/instalacao` (`internal/evolution/licensing.go`,
-`internal/httpapi/web.go`):
+`internal/httpapi/web.go`). There are two modes, chosen by
+`EVOLUTION_LICENSE_AUTO`:
 
-1. It detects the 503 and says the licence is missing rather than reporting a
-   transient outage — and says it as a step of the installation, not as an
-   alert, because a deployment that was installed a minute ago has no licence
-   yet and that is the normal starting state.
-2. The operator fills in an email **in the panel**. Behind the form
-   the panel asks Evolution for the registration URL with this panel as the
-   `redirect_uri`, extracts the token, and calls the licensing server's
-   `/v1/auth/magic-link` itself. No Evolution Manager, no registration form
-   on anyone else's site. (The plain registration link is kept as a manual
-   escape hatch. `url.JoinPath` had to be avoided to keep the query a query —
-   it escapes a `?` written into a path segment.)
-3. The operator clicks the email. The licensing server redirects them back to
-   `/instancias/licenca/retorno?code=…`, the panel exchanges the code for
-   the key, activates Evolution with it, and keeps a copy in its own
-   database (`evolution_license`, migration `008`). The wizard does not wait
-   on that tab: it polls `/api/instalacao` and moves to the next step on its
-   own, wherever the link was clicked.
-4. **From then on, nobody is asked anything.** If a rebuild loses the
-   Evolution volume, the panel notices the 503, hands Evolution the key it
-   kept, and carries on; rebuilding that loses both volumes would be a new
-   registration, and even then the saved email is prefilled in the form.
+**Automatic (the default, `EVOLUTION_LICENSE_AUTO=true`).** The wizard
+registers the licence with an address of this deployment's own —
+`whatsappmcp-<random>@EVOLUTION_LICENSE_EMAIL_DOMAIN` (default
+`brorlandi.xyz`); a fresh `whatsappmcp-*` per installation, so every deploy is
+its own registration in the licensing server's books. The magic-link email for
+those addresses is delivered by the domain's MX — Cloudflare Email Routing —
+to [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
+(private), an Email Worker that finds the link in the message and does the GET
+a browser would: the same click, server-side. The licensing server redirects
+to the panel's activation callback, the wizard's poll notices the step change,
+and the operator typed nothing, opened no inbox, clicked nothing. Mail for
+the domain that is not `whatsappmcp-*` is forwarded by the worker to a
+fallback address, so a catch-all rule swallows no personal mail.
+
+**Manual (`EVOLUTION_LICENSE_AUTO=false`).** The operator confirms the email
+typed at setup and clicks the emailed link themself — the flow this
+repository had before the worker: same wizard, one click, once per email,
+ever. (A URL had to be built by hand rather than `url.JoinPath`, which
+escapes a `?` written into a path segment.)
+
+Either way, the callback exchanges the one-time code for the `api_key`,
+activates Evolution with it, and keeps a copy in the panel's own database
+(`evolution_license`, migration `008`). **From then on, nobody is asked
+anything.** If a rebuild loses the Evolution volume, the panel notices the 503,
+hands Evolution the key it kept, and carries on; a rebuild that loses both
+volumes is a new registration, and even then the wizard does it again by
+itself in automatic mode.
 
 The callback accepts the code without a panel session: the code is a
 single-use, short-lived capability the licensing server issued exactly like the
 installer's setup token, and it stops meaning anything the moment it is spent.
-
-The residual cost is one click in the operator's inbox, once per email,
-ever — not per server, not per rebuild, and no page of Evolution's to open.
 `EVOLUTION_OPERATOR_EMAIL` in the Compose stack stays as a belt-and-braces
 startup fallback, documented above.
 

@@ -313,7 +313,7 @@ func testSessionKey() []byte { return []byte("test-only-session-key-that-is-long
 
 // signedIn starts a panel with an existing administrator and returns a client
 // that already holds a valid session.
-func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution) (*httptest.Server, *http.Client) {
+func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution, licenseAuto ...bool) (*httptest.Server, *http.Client) {
 	t.Helper()
 	hash, err := auth.HashPassword("senha segura 123")
 	if err != nil {
@@ -322,7 +322,11 @@ func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution) (*httptest.Serve
 	repo.mu.Lock()
 	repo.user, repo.hash = "admin", hash
 	repo.mu.Unlock()
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	auto := false
+	for _, want := range licenseAuto {
+		auto = want
+	}
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", auto, "brorlandi.xyz"))
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -371,7 +375,7 @@ func mustNotContain(t *testing.T, page, name string, unwanted ...string) {
 
 func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -432,7 +436,7 @@ func TestEveryPageInlinesTheBrandLogo(t *testing.T) {
 	if !strings.HasPrefix(logo, "<svg") {
 		t.Fatalf("brand.LogoSVG is not inline SVG: %q", logo)
 	}
-	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer fresh.Close()
 	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="email"`, `name="password"`)
 
@@ -659,7 +663,7 @@ func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
 // The pairing QR arrives as a data: URI, so the policy must allow it for images
 // and for nothing else.
 func TestContentSecurityPolicyAllowsInlineQRImages(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/login")
 	if err != nil {
@@ -714,7 +718,7 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.user, repo.hash = "admin", hash
-	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -934,7 +938,7 @@ func TestKeyRequiresAName(t *testing.T) {
 // The copy helper is served from the panel itself, which is what lets the
 // content security policy stay at 'self'.
 func TestPanelServesItsOwnScript(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/assets/app.js")
 	if err != nil {
@@ -1096,7 +1100,7 @@ func TestProgressEndpointReportsTheChecklistAndNothingElse(t *testing.T) {
 // logged in: a browser asks for it on the login page, and an icon behind the
 // session cookie would just 302 into the login form forever.
 func TestPanelServesItsOwnIcons(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	for path, wantType := range map[string]string{
 		"/favicon.svg":          "image/svg+xml",
@@ -1234,7 +1238,7 @@ func newJar(t *testing.T) *cookiejar.Jar {
 func TestSetupNeedsTheInstallerToken(t *testing.T) {
 	const token = "9f2c1ab4d0e7"
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token, false, "brorlandi.xyz"))
 	defer ts.Close()
 	client := &http.Client{Jar: newJar(t)}
 
@@ -1620,7 +1624,7 @@ func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
 		err:     evolution.ErrNotActivated,
 		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
 	}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1664,7 +1668,7 @@ func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
 func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
 	repo := newRepo()
 	evo := &fakeEvolution{err: errors.New("connection refused"), registerErr: errors.New("connection refused")}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1694,7 +1698,7 @@ func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
 // panel accepts, five is not, and the server decides either way — the form's
 // own minlength is a convenience the browser can be talked out of.
 func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
-	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer short.Close()
 	r, err := http.PostForm(short.URL+"/setup", url.Values{"email": {"bruno@example.com"}, "password": {"cinco"}})
 	if err != nil {
@@ -1705,7 +1709,7 @@ func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
 	mustContain(t, string(body), "setup", "pelo menos 6 caracteres")
 
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1755,7 +1759,7 @@ func TestAFailedActivationSaysWhyWhereverItWasClicked(t *testing.T) {
 // their own panel signed in and is shown the login form.
 func TestTheSessionCookieSurvivesAnExternalReturn(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz"))
 	defer ts.Close()
 	// The redirect is not followed, because the cookie is set on the response
 	// that issues it and the jar would swallow it.
@@ -1780,4 +1784,84 @@ func TestTheSessionCookieSurvivesAnExternalReturn(t *testing.T) {
 		return
 	}
 	t.Fatal("no session cookie was issued")
+}
+
+// In automatic mode nobody types an address: the wizard registers the licence
+// with an address of its own on the first render that can, and every later
+// render is only polling on the worker's click coming back.
+func TestAutomaticLicenceRegistrationRunsItself(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{
+		err:     evolution.ErrNotActivated,
+		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+	}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+
+	page := fetch(t, client, ts.URL+"/instalacao")
+	if !evo.did("register-operator") {
+		t.Fatal("the automatic registration never went out")
+	}
+	address := evo.operatorEmail
+	if !strings.HasPrefix(address, "whatsappmcp-") || !strings.HasSuffix(address, "@brorlandi.xyz") {
+		t.Fatalf("registration address = %q, want whatsappmcp-…@brorlandi.xyz", address)
+	}
+	mustContain(t, page, "wizard automatic", "ativada automaticamente", address, "Verificando a ativação")
+	if !strings.Contains(page, `data-onboarding="1"`) {
+		t.Fatal("the wizard did not keep polling for the licence to come in")
+	}
+
+	// Polling must not mint a second registration: the same address is the
+	// wait's identity until the click answers it.
+	second := fetch(t, client, ts.URL+"/instalacao")
+	if evo.operatorEmail != address {
+		t.Fatalf("a poll re-registered as %q, want the same %q", evo.operatorEmail, address)
+	}
+	mustContain(t, second, "wizard automatic", address)
+}
+
+// The retry button goes back to the wizard it came from, and a failure to
+// reach the licensing server says so rather than looking like a lost click.
+func TestAutomaticLicenceRetryReturnsToItsWizard(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{err: evolution.ErrNotActivated, registerErr: errors.New("licensing server down")}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+	evo.mu.Lock()
+	evo.registerErr = nil
+	evo.mu.Unlock()
+
+	r, err := client.PostForm(ts.URL+"/instancias/licenca/auto", url.Values{"origem": {"instalacao"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "wizard automatic", "ativada automaticamente", "whatsappmcp-")
+	if r.Request.URL.Path != "/instalacao" {
+		t.Fatalf("retry landed on %s", r.Request.URL.Path)
+	}
+	if !evo.did("register-operator") {
+		t.Fatal("the button did not ask for a registration")
+	}
+}
+
+// Signing in through the setup form is what fills the operator's address, and
+// automatic mode must not sit on it: the licence goes to the worker's address
+// even when a personal one is on file.
+func TestAutomaticModeDoesNotWaitOnTheOperatorInbox(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{err: evolution.ErrNotActivated, license: evolution.License{Status: "inactive"}}
+	ts, client := signedIn(t, repo, evo, true)
+	defer ts.Close()
+	if repo.license.OperatorEmail != "" && strings.HasPrefix(repo.license.OperatorEmail, "whatsappmcp-") == false {
+		// nothing: the personal email can be stored, only the licence must
+		// not wait on it
+		_ = repo.license.OperatorEmail
+	}
+	page := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, page, "wizard automatic", "whatsappmcp-")
+	if strings.Contains(page, "Enviamos um link de ativação para") && !strings.Contains(page, "whatsappmcp-") {
+		t.Fatal("the wait was put on the operator's own inbox")
+	}
 }

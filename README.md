@@ -142,20 +142,25 @@ installation, which lives in `/opt/whatsapp-mcp`.
 Sign in and the panel opens the wizard rather than a dashboard with nothing in
 it. There are two things to do and it asks for one at a time.
 
-That form asks for an email and a password. The email is the administrator —
-you sign in with it — and it has to be one you can open, because the next step
-confirms it.
+That form asks for an email and a password. The email is the administrator and
+you sign in with it.
 
 **Licence.** Evolution Go requires a licence to operate and answers 503 until
-it is activated. There is nothing to type: the panel already has your address,
-so it asks the licensing server for the activation link and the first screen
-you see is your inbox waiting to be opened. It keeps checking in the background
-and moves on by itself the moment the licence lands. If the mail never arrives,
-*Não recebeu o e-mail?* sends it again, to another address if you prefer.
-Nobody opens Evolution's own pages, and rebuilds that lose
-Evolution's data are re-licensed automatically from the copy the panel keeps.
-The residual step — clicking one emailed link — is your proof of identity, and
-no installer can honestly do it for you.
+it is activated. There is nothing to type, nothing to open and nothing to
+click: with `EVOLUTION_LICENSE_AUTO` on (the default), the panel registers the
+licence with its own address on this project's domain
+(`whatsappmcp-…@brorlandi.xyz`), the email lands in
+[the licence worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
+and the click happens by itself — the wizard just keeps checking and moves on
+the moment the licence lands. Rebuilds that lose Evolution's data are
+re-licensed automatically from the copy the panel keeps, and the same is true
+of a reinstall: the wizard does it again without asking.
+
+Prefer your own inbox? Set `EVOLUTION_LICENSE_AUTO=false` and the wizard
+sends the activation link to your email instead — same automation, except the
+one click on the emailed link is yours. That click is a proof of identity,
+and the automatic mode trades it for control of the domain where the mail
+lands. Either way, nobody opens Evolution's own pages.
 
 **WhatsApp.** Name the account. The panel registers it with Evolution,
 subscribes it to the event queues, starts the client and shows the QR code on

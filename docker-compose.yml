@@ -154,6 +154,13 @@ services:
       # would otherwise become the administrator. Empty leaves the form open,
       # which is right for a panel bound to loopback.
       SETUP_TOKEN: ${SETUP_TOKEN:-}
+      # Automatic licence activation: registrations go to an address on
+      # EVOLUTION_LICENSE_EMAIL_DOMAIN, whose mail is read by this project's
+      # email worker (see docs/evolution/licensing.md), which clicks the
+      # activation link — nobody opens an inbox. False keeps the operator's own
+      # email and their own click, via the manual wizard flow.
+      EVOLUTION_LICENSE_AUTO: ${EVOLUTION_LICENSE_AUTO:-true}
+      EVOLUTION_LICENSE_EMAIL_DOMAIN: ${EVOLUTION_LICENSE_EMAIL_DOMAIN:-brorlandi.xyz}
     # Bound to loopback by default: the panel has no business facing the
     # internet directly. Put a TLS-terminating reverse proxy in front of it and
     # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens
