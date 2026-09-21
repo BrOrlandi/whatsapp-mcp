@@ -33,13 +33,55 @@ type clientSetup struct {
 	Command    string
 	CommandEnv string
 	JSON       string
+	// AgentPrompt is the escape hatch for every client this panel has no
+	// screenshot of: instead of instructions the operator has to translate, it
+	// is a message they paste into the assistant itself, which then configures
+	// its own MCP connection or explains how.
+	AgentPrompt string
+	// Preferred is the tab that opens first, named by the operator's own answer
+	// to "where are you going to use this?". Landing on the wrong client's
+	// instructions is the moment the flow loses people.
+	Preferred string
 }
 
 // keyPlaceholder stands in for the secret once it can no longer be shown.
 const keyPlaceholder = "SUA_CHAVE"
 
+// clients are the setup routes the panel offers, in the order it offers them.
+// Claude Desktop leads because it is the one that needs no terminal.
+var clients = []struct{ Value, Label string }{
+	{"desktop", "Claude Desktop"},
+	{"code", "Claude Code"},
+	{"outros", "Outra ferramenta de IA"},
+}
+
+// clientChoice resolves the form value to a tab, falling back to the first
+// route rather than to an empty page.
+func clientChoice(value string) string {
+	for _, client := range clients {
+		if client.Value == value {
+			return client.Value
+		}
+	}
+	return clients[0].Value
+}
+
+// clientLabel names a chosen route, for use as the connection's own name.
+func clientLabel(value string) string {
+	for _, client := range clients {
+		if client.Value == value {
+			return client.Label
+		}
+	}
+	return clients[0].Label
+}
+
 func newClientSetup(endpoint, secret string) clientSetup {
-	setup := clientSetup{Endpoint: endpoint, Secret: secret, HasSecret: secret != ""}
+	return newClientSetupFor(endpoint, secret, clients[0].Value)
+}
+
+func newClientSetupFor(endpoint, secret, preferred string) clientSetup {
+	setup := clientSetup{Endpoint: endpoint, Secret: secret, HasSecret: secret != "", Preferred: clientChoice(preferred)}
 	if !setup.HasSecret {
 		setup.Secret = keyPlaceholder
 	}
@@ -47,17 +89,37 @@ func newClientSetup(endpoint, secret string) clientSetup {
 	setup.CommandEnv = fmt.Sprintf("export WHATSAPP_MCP_KEY=%s\nclaude mcp add --transport http whatsapp %s --header \"Authorization: Bearer \\${WHATSAPP_MCP_KEY}\"",
 		setup.Secret, endpoint)
 	setup.JSON = clientConfig(endpoint, setup.Secret)
+	setup.AgentPrompt = agentPrompt(endpoint, setup.Secret, setup.JSON)
 	return setup
+}
+
+// agentPrompt is written to the assistant, not to the operator: it hands over
+// every fact the connection needs and asks the assistant to do the work. That
+// is the only instruction that stays correct for clients this panel has never
+// heard of.
+func agentPrompt(endpoint, secret, config string) string {
+	return fmt.Sprintf(`Quero conectar um servidor MCP (Model Context Protocol) em você, para que você possa ler e usar o meu WhatsApp. Configure isso para mim. Se você não puder se configurar sozinho, me explique o passo a passo, bem devagar, para eu fazer na mão.
+
+Dados da conexão:
+- Nome do servidor: whatsapp
+- Transporte: HTTP (streamable HTTP)
+- URL: %s
+- Autenticação: cabeçalho HTTP "Authorization: Bearer %s"
+
+A maioria dos clientes MCP aceita esta configuração:
+%s
+
+Quando terminar, liste as ferramentas do servidor "whatsapp" e me diga quantas são e qual é o número de telefone conectado.`, endpoint, secret, config)
 }
 
 // verificationPrompt is what the operator pastes into the client to confirm the
 // connection end to end.
-const verificationPrompt = `Use as ferramentas do WhatsApp MCP para verificar a conexão e me diga:
-- o estado da sessão do WhatsApp e o nome da conta conectada;
-- quantas mensagens estão indexadas e desde quando;
-- os títulos das 5 conversas mais recentes.
+const verificationPrompt = `Use as ferramentas do WhatsApp e me diga:
+- se o meu WhatsApp está conectado e qual é o número;
+- quantas mensagens você consegue ver e desde quando;
+- os nomes das 5 conversas mais recentes.
 
-Não envie nenhuma mensagem. Se alguma ferramenta falhar, mostre o erro exato.`
+Não envie mensagem para ninguém. Se alguma coisa falhar, me mostre o erro exato.`
 
 // createKey issues a credential for the selected instance and renders it once.
 //
@@ -77,9 +139,17 @@ func (a *webApp) createKey(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "/", "Este painel não gerencia a instância selecionada, então não pode emitir chaves para ela.")
 		return
 	}
+	// The operator answers one question — where is this going to be used — and
+	// that answer is both the connection's name and the instructions they land
+	// on. Asking them to invent a label first is the step that used to make a
+	// simple thing feel like credential management.
+	preferred := clientChoice(r.FormValue("cliente"))
 	name := strings.TrimSpace(r.FormValue("name"))
-	if name == "" || len(name) > 60 {
-		a.fail(w, r, "/", "Dê um nome de até 60 caracteres para a chave, para você reconhecê-la depois.")
+	if name == "" {
+		name = clientLabel(preferred)
+	}
+	if len(name) > 60 {
+		a.fail(w, r, "/", "O apelido da conexão precisa ter até 60 caracteres.")
 		return
 	}
 	secret, digest, prefix, err := store.NewAPIKey()
@@ -92,10 +162,10 @@ func (a *webApp) createKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := keyPage{
-		layout: a.newLayout(r, "Chave criada", "conectar"),
+		layout: a.newLayout(r, "Conexão criada", "conectar"),
 		Name:   name,
 		Secret: secret,
-		Setup:  newClientSetup(a.endpoint(), secret),
+		Setup:  newClientSetupFor(a.endpoint(), secret, preferred),
 		Prompt: verificationPrompt,
 	}
 	a.render(w, "chave", page)

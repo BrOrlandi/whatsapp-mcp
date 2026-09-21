@@ -107,10 +107,11 @@ pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
 .nav a{position:relative;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;text-decoration:none;color:var(--muted);font-weight:600;font-size:.94rem;border-radius:var(--radius-sm) var(--radius-sm) 0 0;border-bottom:2px solid transparent;margin-bottom:-1px}
 .nav a:hover{color:var(--text);background:var(--surface-soft)}
 .nav a[aria-current=page]{color:var(--brand);border-bottom-color:var(--brand)}
-.nav__dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
-.nav__dot--ok{background:var(--ok)}
-.nav__dot--off{background:var(--off)}
-.nav__dot--warn{background:var(--warn)}
+/* The tab bar carries a marker only when something is wrong. A green dot that
+   is always green is read as decoration within a day, and then the one day it
+   turns amber nobody notices. */
+.nav__alert{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;flex:none;border-radius:50%;background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger-border);font-size:.68rem;font-weight:800;line-height:1}
+.nav__alert--warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
 .nav__spacer{flex:1}
 
 /* ---- cards ---- */
@@ -227,6 +228,42 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 .fact dd{margin:3px 0 0;font-weight:600;font-size:1.02rem}
 .fact__detail{display:block;font-weight:400;font-size:.82rem;color:var(--muted)}
 
+/* ---- overview ---- */
+/* The two sentences the landing page exists to say: this phone line is up, and
+   these AI tools are plugged into it. Tone lives on the item, so the badge
+   picks it up through currentColor and the prose stays readable. */
+.overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:0 0 20px}
+.overview__item{display:flex;align-items:flex-start;gap:13px;padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);color:var(--muted)}
+.overview__item--ok{color:var(--ok);border-color:var(--ok-border);background:var(--ok-bg)}
+.overview__item--wait{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.overview__icon{width:32px;height:32px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:1rem;font-weight:800;line-height:1;background:var(--surface);border:1px solid currentColor}
+.overview__body{min-width:0}
+.overview__title{margin:0;font-weight:700;color:var(--text);font-size:1rem;line-height:1.35}
+.overview__detail{margin:4px 0 0;color:var(--text-soft);font-size:.9rem;line-height:1.5;overflow-wrap:anywhere}
+.overview__phone{display:block;font-size:1.08rem;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+
+/* ---- connections ---- */
+.tool-mark{width:36px;height:36px;flex:none;border-radius:10px;display:grid;place-items:center;background:var(--brand-soft);color:var(--brand);border:1px solid var(--border);font-weight:800;font-size:1rem;text-transform:uppercase}
+.row--waiting .tool-mark{background:var(--warn-bg);color:var(--warn)}
+/* The primary action is a button, not a banner: stretched across the column
+   it read as a section header. It stays the width of its own label. */
+.hero{display:flex;justify-content:center;margin:0 0 22px}
+.btn--big{padding:11px 18px;font-size:.97rem}
+
+/* ---- picks (one question, whole-row targets) ---- */
+.disclose{margin:0}
+.disclose summary{cursor:pointer;font-weight:600;font-size:.94rem;color:var(--brand-strong);list-style:none}
+.disclose summary::-webkit-details-marker{display:none}
+.disclose[open] summary{margin-bottom:16px}
+.picks{list-style:none;margin:0 0 18px;padding:0;display:grid;gap:9px}
+.pick{display:flex;align-items:flex-start;gap:11px;padding:12px 13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer}
+.pick:hover{background:var(--surface-soft);border-color:var(--brand-strong)}
+.pick input{margin-top:3px}
+.pick:has(input:checked){border-color:var(--brand);background:var(--brand-soft)}
+.pick__text{min-width:0}
+.pick__title{display:block;font-weight:700;font-size:.95rem}
+.pick__hint{display:block;color:var(--muted);font-size:.85rem;line-height:1.5;margin-top:2px}
+
 /* ---- empty ---- */
 .empty{padding:28px 20px;text-align:center;border:1px dashed var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-soft)}
 .empty__title{font-weight:600;color:var(--text);margin:0}
@@ -263,12 +300,21 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 .tabs__tab{padding:8px 14px;font-weight:600;font-size:.92rem;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
 .tabs__tab:hover{color:var(--text);background:var(--surface-soft)}
 .tabs__panel{display:none}
-#tab-code:checked~.tabs__panel--code,#tab-desktop:checked~.tabs__panel--desktop{display:block}
-#tab-code:checked~.tabs__bar label[for=tab-code],#tab-desktop:checked~.tabs__bar label[for=tab-desktop]{color:var(--brand);border-bottom-color:var(--brand)}
+#tab-code:checked~.tabs__panel--code,#tab-desktop:checked~.tabs__panel--desktop,#tab-outros:checked~.tabs__panel--outros{display:block}
+#tab-code:checked~.tabs__bar label[for=tab-code],#tab-desktop:checked~.tabs__bar label[for=tab-desktop],#tab-outros:checked~.tabs__bar label[for=tab-outros]{color:var(--brand);border-bottom-color:var(--brand)}
 .tabs__radio:focus-visible~.tabs__bar label{outline:3px solid var(--ring);outline-offset:2px}
 .prompts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
 .prompt .snippet{margin:0}
-.prompt pre{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);padding:10px 12px;font-family:inherit;font-size:.92rem;white-space:pre-wrap}
+.prompt pre{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);padding:10px 12px;font-size:.92rem;white-space:pre-wrap}
+.prompt pre,.prompt pre code{font-family:inherit}
+/* The copy button floats over a headerless snippet, so the text has to keep
+   out from under it — otherwise a wrapped line runs beneath the button. */
+.prompt pre{padding-right:82px}
+.guide+.snippet{margin-top:16px}
+/* A block of plain Portuguese is not code: it gets the page's own colours and
+   wraps, instead of a terminal's palette and a sideways scrollbar. */
+pre.plain{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);white-space:pre-wrap;font-size:.92rem}
+pre.plain,pre.plain code{font-family:inherit}
 .qrcode{display:block;margin:0 auto;width:250px;height:250px;max-width:100%;background:#fff;padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .muted{color:var(--text-soft);font-size:.9rem;line-height:1.65}
@@ -352,7 +398,7 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <nav class="nav" aria-label="Seções">
 <a href="/"{{if eq .Active "conectar"}} aria-current="page"{{end}}>Conectar</a>
 <a href="/instancias"{{if eq .Active "instancias"}} aria-current="page"{{end}}>Instâncias</a>
-<a href="/estado"{{if eq .Active "estado"}} aria-current="page"{{end}}><span class="nav__dot nav__dot--{{.SessionTone}}"></span>Estado</a>
+<a href="/estado"{{if eq .Active "estado"}} aria-current="page"{{end}}>{{if ne .SessionTone "ok"}}<span class="nav__alert{{if eq .SessionTone "warn"}} nav__alert--warn{{end}}" aria-hidden="true">!</span><span class="sr-only">Atenção: </span>{{end}}Estado</a>
 <a href="/documentacao"{{if eq .Active "documentacao"}} aria-current="page"{{end}}>Documentação</a>
 <a href="/receitas"{{if eq .Active "receitas"}} aria-current="page"{{end}}>Receitas</a>
 </nav>
@@ -373,113 +419,142 @@ page. */}}
 </div>
 {{end}}{{end}}
 
+{{/* The three routes a person can take out of this panel, in the order they
+should try them: the app that needs no terminal, the terminal, and then the
+"whatever you are using" escape hatch — a message the assistant itself reads
+and acts on. */}}
 {{define "clientTabs"}}
 <div class="tabs">
-<input class="tabs__radio" type="radio" name="cliente" id="tab-code" checked>
-<input class="tabs__radio" type="radio" name="cliente" id="tab-desktop">
+<input class="tabs__radio" type="radio" name="aba" id="tab-desktop"{{if eq .Preferred "desktop"}} checked{{end}}>
+<input class="tabs__radio" type="radio" name="aba" id="tab-code"{{if eq .Preferred "code"}} checked{{end}}>
+<input class="tabs__radio" type="radio" name="aba" id="tab-outros"{{if eq .Preferred "outros"}} checked{{end}}>
 <div class="tabs__bar" role="tablist">
-<label class="tabs__tab" for="tab-code">Claude Code</label>
 <label class="tabs__tab" for="tab-desktop">Claude Desktop</label>
+<label class="tabs__tab" for="tab-code">Claude Code</label>
+<label class="tabs__tab" for="tab-outros">Outra ferramenta</label>
+</div>
+
+<div class="tabs__panel tabs__panel--desktop">
+<p class="muted">No aplicativo do Claude no seu computador:</p>
+<ol class="guide">
+<li>Abra o Claude e vá em <strong>Configurações → Desenvolvedor → Editar configuração</strong>.</li>
+<li>Copie o texto abaixo e cole no arquivo que abrir.</li>
+<li>Salve, feche o Claude e abra de novo.</li>
+</ol>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Cole isto no arquivo de configuração</span></div>
+<pre data-copy><code>{{.JSON}}</code></pre></div>
+<p class="muted">Se já houver outros servidores no arquivo, acrescente só o trecho <code>"whatsapp"</code> dentro de <code>mcpServers</code>, sem apagar o resto.</p>
 </div>
 
 <div class="tabs__panel tabs__panel--code">
-<p class="muted">Um comando no terminal, de dentro de qualquer projeto.</p>
+<p class="muted">Um comando no terminal, de dentro de qualquer pasta. Cole e aperte Enter.</p>
 <div class="snippet"><div class="snippet__head"><span class="snippet__title">Comando</span></div>
 <pre data-copy><code>{{.Command}}</code></pre></div>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Sem a chave no arquivo</span><span class="snippet__note">opcional</span></div>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Sem a chave no arquivo</span><span class="snippet__note">opcional, para quem prefere</span></div>
 <pre data-copy><code>{{.CommandEnv}}</code></pre></div>
 <p class="muted">Na segunda forma o Claude Code lê a chave de <code>WHATSAPP_MCP_KEY</code>, que você exporta no seu shell, e ela não fica na configuração. Confira depois com <code>claude mcp list</code>.</p>
 </div>
 
-<div class="tabs__panel tabs__panel--desktop">
-<p class="muted">Em <strong>Configurações → Desenvolvedor → Editar configuração</strong>, cole o bloco abaixo e reinicie o aplicativo.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">claude_desktop_config.json</span></div>
-<pre data-copy><code>{{.JSON}}</code></pre></div>
-<p class="muted">Se o arquivo já tiver outros servidores, acrescente só o trecho <code>"whatsapp"</code> dentro de <code>mcpServers</code>.</p>
+<div class="tabs__panel tabs__panel--outros">
+<p class="muted">Serve para Cursor, ChatGPT, Windsurf, n8n e qualquer outro assistente que aceite MCP. Em vez de você configurar, peça para ele: copie o texto abaixo e mande no chat da ferramenta.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Copie e mande para o seu assistente</span></div>
+<pre class="plain" data-copy><code>{{.AgentPrompt}}</code></pre></div>
+<p class="muted">Se ele não puder se configurar sozinho, vai responder com o passo a passo do próprio aplicativo.</p>
 </div>
 </div>
-{{if not .HasSecret}}<p class="muted">Troque <code>SUA_CHAVE</code> pela chave que você guardou. Se não guardou, gere outra — a chave é exibida uma única vez.</p>{{end}}
+{{if not .HasSecret}}<p class="muted">Onde aparece <code>SUA_CHAVE</code>, coloque a chave que você guardou quando criou a conexão. Não guardou? Crie uma conexão nova — é rápido, e a chave só aparece uma vez.</p>{{end}}
 {{end}}
 
 {{define "conectar"}}{{template "head" .}}{{template "nav" .}}
-<h1>Conectar um cliente a este MCP</h1>
-<p class="lead">O cliente precisa de uma única informação: a chave de API. Ela já identifica a conta e a instância do WhatsApp.</p>
+<h1>Seu WhatsApp nas suas ferramentas de IA</h1>
+<p class="lead">Aqui você vê se está tudo funcionando e liga o seu WhatsApp a um assistente de inteligência artificial — o Claude, o ChatGPT, o Cursor, o que você usar.</p>
 
 {{if .Ready}}
-<section class="card card--accent">
-<div class="card__head"><h2>Passo a passo</h2><span class="pill pill--ok">Instância {{.InstanceName}} conectada</span></div>
+{{/* The two sentences that answer "está tudo certo?" without anybody having to
+     read a status page. The progress marker rides here because this is the
+     block that changes the moment a tool connects. */}}
+<section class="overview"{{if and .HasKey (not .ClientConnected)}} data-progress data-connected="false"{{end}}>
+<div class="overview__item overview__item--ok">
+<span class="overview__icon" aria-hidden="true">&#10003;</span>
+<div class="overview__body">
+<p class="overview__title">WhatsApp conectado</p>
+<p class="overview__detail">{{if .Phone}}<strong class="overview__phone">{{.Phone}}</strong>{{end}}{{with .Account}}{{.}}{{else}}Conta &ldquo;{{$.InstanceName}}&rdquo;{{end}}</p>
+</div></div>
+
+{{if .ClientConnected}}
+<div class="overview__item overview__item--ok">
+<span class="overview__icon" aria-hidden="true">&#10003;</span>
+<div class="overview__body">
+<p class="overview__title">{{plural .LiveCount "ferramenta de IA conectada" "ferramentas de IA conectadas"}}</p>
+<p class="overview__detail">Já pode pedir coisas do seu WhatsApp para a sua IA. Última vez em uso: {{relativeSince .LastUse}}.</p>
+</div></div>
+{{else if .HasKey}}
+<div class="overview__item overview__item--wait">
+<span class="overview__icon" aria-hidden="true">&hellip;</span>
+<div class="overview__body">
+<p class="overview__title">Esperando a sua ferramenta de IA</p>
+<p class="overview__detail">A conexão já existe. Falta colar a configuração na ferramenta e reiniciar ela. Esta tela avisa sozinha quando ela aparecer.</p>
+</div></div>
+{{else}}
+<div class="overview__item">
+<span class="overview__icon" aria-hidden="true">+</span>
+<div class="overview__body">
+<p class="overview__title">Nenhuma ferramenta de IA conectada</p>
+<p class="overview__detail">Falta um passo: ligar o seu assistente de IA a este WhatsApp.</p>
+</div></div>
+{{end}}
+</section>
+
+<div class="hero"><a class="btn btn--big" href="#nova-conexao">Conectar uma ferramenta de IA</a></div>
+
+<section class="card">
+<div class="card__head"><h2>Suas conexões</h2>{{if .Connections}}<a class="btn btn--ghost btn--small" href="#nova-conexao">Nova conexão</a>{{end}}</div>
 <div class="card__body">
-
-<details class="step{{if .HasKey}} step--done{{end}}"{{if not .HasKey}} open{{end}}>
-<summary class="step__summary">
-<span class="step__n" aria-hidden="true">{{if .HasKey}}✓{{else}}1{{end}}</span>
-<span class="step__title">Gere uma chave</span>
-{{if .HasKey}}<span class="step__state">concluído</span>{{end}}
-</summary>
-<div class="step__body">
-{{if .HasKey}}
-<p class="muted">{{plural (len64 .Keys) "chave ativa" "chaves ativas"}}. Uma por cliente, para revogar um sem derrubar os outros.</p>
-<div class="actions"><a class="btn btn--ghost btn--small" href="#nova-chave">Gerar outra chave</a></div>
+{{if .Connections}}
+<ul class="rows">
+{{range $i, $conexao := .Connections}}<li class="row{{if not .Live}} row--waiting{{end}}">
+<span class="tool-mark" aria-hidden="true">{{initial .Tool}}</span>
+<span class="row__main"><span class="row__title">{{.Tool}}</span>
+<span class="row__meta">{{if .Live}}Funcionando &middot; usada {{relativeSince .LastUsedAt}}{{else}}Ainda não se conectou &middot; cole a configuração na ferramenta{{end}} &middot; <span class="mono">{{.Prefix}}&hellip;</span></span></span>
+{{if .Live}}<span class="pill pill--ok">Conectada</span>{{else}}<span class="pill pill--warn">Aguardando</span>{{end}}
+<a class="btn btn--danger btn--small" href="#desconectar-{{$i}}">Desconectar</a>
+</li>{{end}}
+</ul>
+<p class="muted">Cada ferramenta tem a sua própria conexão. Desconectar uma vale na hora e não mexe nas outras.</p>
 {{else}}
-<p class="muted">Uma chave por cliente. Assim dá para revogar um sem derrubar os outros.</p>
-<div class="actions"><a class="btn" href="#nova-chave">Gerar nova chave</a></div>
+<div class="empty"><p class="empty__title">Nenhuma ferramenta de IA conectada ainda</p>
+<p class="muted">Clique no botão acima, escolha onde você vai usar e siga o passo a passo. Leva menos de um minuto.</p></div>
 {{end}}
-</div></details>
+</div></section>
 
-<details class="step{{if .ClientConnected}} step--done{{end}}"{{if and .HasKey (not .ClientConnected)}} open{{end}}{{if not .HasKey}} data-locked="true"{{end}}>
-<summary class="step__summary">
-<span class="step__n" aria-hidden="true">{{if .ClientConnected}}✓{{else}}2{{end}}</span>
-<span class="step__title">Configure o cliente</span>
-{{if .ClientConnected}}<span class="step__state">concluído</span>{{else if .HasKey}}<span class="step__state step__state--waiting" data-progress data-connected="false">aguardando conexão</span>{{end}}
-</summary>
-<div class="step__body">
-{{if .ClientConnected}}<p class="muted">Um cliente se autenticou {{relativeSince .LastUse}}. Nada mais a fazer aqui.</p>{{end}}
-{{if .HasKey}}
-<p class="muted">Endpoint deste MCP: <code>{{.Endpoint}}</code> — fixo e não é segredo. A autenticação é o <code>Authorization: Bearer</code> com a sua chave.</p>
-{{template "clientTabs" .Setup}}
-{{if not .ClientConnected}}<p class="muted">Assim que o cliente fizer a primeira chamada, este passo se marca sozinho — esta página detecta e atualiza.</p>{{end}}
-{{else}}
-<p class="muted">Gere a chave primeiro. Ela vem com o comando e o JSON já preenchidos.</p>
-{{end}}
-</div></details>
-
-<details class="step{{if .ClientConnected}} step--done{{end}}"{{if .ClientConnected}} open{{end}}{{if not .ClientConnected}} data-locked="true"{{end}}>
-<summary class="step__summary">
-<span class="step__n" aria-hidden="true">{{if .ClientConnected}}✓{{else}}3{{end}}</span>
-<span class="step__title">Use</span>
-{{if .ClientConnected}}<span class="step__state">pronto</span>{{end}}
-</summary>
-<div class="step__body">
-<p class="muted">As ferramentas aparecem sozinhas depois que o cliente reinicia. Experimente pedir:</p>
+{{if .ClientConnected}}
+<section class="card">
+<div class="card__head"><h2>Experimente pedir</h2></div>
+<div class="card__body">
+<p class="muted">Escreva isso no chat da sua ferramenta de IA. Ler e procurar é seguro: mandar mensagem só acontece quando você pede.</p>
 <ul class="prompts">
 {{range .Prompts}}<li class="prompt"><div class="snippet"><pre data-copy><code>{{.}}</code></pre></div></li>{{end}}
 </ul>
-<p class="muted">Leitura e busca são seguras. Envio só acontece quando você pede explicitamente.</p>
-</div></details>
 </div></section>
-
-<section class="card">
-<div class="card__head"><h2>Chaves ativas</h2><a class="btn btn--ghost btn--small" href="#nova-chave">Nova chave</a></div>
-<div class="card__body">
-{{if .Keys}}
-<ul class="rows">
-{{range .Keys}}<li class="row">
-<span class="row__main"><span class="row__title">{{.Name}}</span><span class="row__meta mono">{{.Prefix}}…</span></span>
-<span class="muted">criada em {{moment .CreatedAt}} · último uso {{relativeSince .LastUsedAt}}</span>
-<form method="post" action="/chaves/revogar"><input type="hidden" name="id" value="{{.ID}}"><button class="btn btn--danger btn--small" type="submit">Revogar</button></form>
-</li>{{end}}
-</ul>
-<p class="muted">Revogar tem efeito imediato: cada requisição do MCP se autentica por conta própria.</p>
-{{else}}
-<div class="empty"><p class="empty__title">Nenhuma chave ativa</p><p class="muted">Gere a primeira para conectar um cliente.</p><div class="actions" style="justify-content:center;margin-top:14px"><a class="btn" href="#nova-chave">Gerar chave</a></div></div>
 {{end}}
+
+{{if .HasKey}}
+<section class="card">
+<div class="card__head"><h2>Ver o passo a passo de novo</h2></div>
+<div class="card__body">
+<details class="disclose">
+<summary>Mostrar como configurar uma ferramenta de IA</summary>
+{{template "clientTabs" .Setup}}
+<p class="muted">O endereço deste MCP é <code>{{.Endpoint}}</code>. Ele não é segredo — o segredo é a chave, que aparece uma única vez, quando a conexão é criada.</p>
+</details>
 </div></section>
+{{end}}
 
 {{else}}
 <section class="card">
-<div class="card__head"><h2>Conecte o WhatsApp primeiro</h2>{{with .SessionLabel}}<span class="pill pill--{{$.SessionTone}}">{{.}}</span>{{end}}</div>
+<div class="card__head"><h2>Conecte o seu WhatsApp primeiro</h2>{{with .SessionLabel}}<span class="pill pill--{{$.SessionTone}}">{{.}}</span>{{end}}</div>
 <div class="card__body">
-<div class="empty"><p class="empty__title">Ainda não dá para gerar uma chave</p><p class="muted">{{.Notice}}</p>
+<div class="empty"><p class="empty__title">Ainda não dá para conectar uma ferramenta de IA</p><p class="muted">{{.Notice}}</p>
 <div class="actions" style="justify-content:center;margin-top:14px">
 {{if .NeedsActivation}}<a class="btn" href="/instalacao">Ativar a licença</a>{{end}}
 {{if .NeedsPairing}}<a class="btn" href="/pair">Ler o QR code</a>{{end}}
@@ -488,45 +563,66 @@ page. */}}
 </div></section>
 {{end}}
 
-<div class="overlay" id="nova-chave" role="dialog" aria-modal="true" aria-labelledby="nova-chave-titulo">
+<div class="overlay" id="nova-conexao" role="dialog" aria-modal="true" aria-labelledby="nova-conexao-titulo">
 <div class="dialog">
-<div class="dialog__head"><h2 id="nova-chave-titulo">Gerar uma chave</h2><a class="dialog__close" href="#" aria-label="Fechar">×</a></div>
+<div class="dialog__head"><h2 id="nova-conexao-titulo">Conectar uma ferramenta de IA</h2><a class="dialog__close" href="#" aria-label="Fechar">&times;</a></div>
 <div class="dialog__body">
 <form method="post" action="/chaves">
-<label class="field" for="key-name"><span class="field__label">Onde esta chave vai ser usada?</span>
-<span class="field__hint">Só um rótulo para você reconhecer depois. Ex.: “Claude Code no notebook”.</span></label>
-<input id="key-name" type="text" name="name" maxlength="60" required placeholder="Claude Code no notebook" autocapitalize="sentences" spellcheck="false">
-<p class="muted">A chave é gerada agora e exibida uma única vez, junto com a configuração pronta.</p>
-<div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn" type="submit">Gerar chave</button></div>
+<p class="muted">Onde você vai usar o seu WhatsApp? Na tela seguinte aparece o passo a passo, pronto para copiar e colar.</p>
+<ul class="picks">
+{{range .Clients}}<li><label class="pick">
+<input type="radio" name="cliente" value="{{.Value}}"{{if .First}} checked{{end}}>
+<span class="pick__text"><span class="pick__title">{{.Label}}</span><span class="pick__hint">{{.Hint}}</span></span>
+</label></li>{{end}}
+</ul>
+<label class="field" for="key-name"><span class="field__label">Apelido desta conexão</span>
+<span class="field__hint">Opcional, só para você reconhecer depois. Ex.: &ldquo;meu notebook&rdquo;.</span></label>
+<input id="key-name" type="text" name="name" maxlength="60" placeholder="Deixe em branco para usar o nome da ferramenta" autocapitalize="sentences" spellcheck="false">
+<div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn" type="submit">Criar conexão</button></div>
 </form>
 </div></div></div>
+
+{{range $i, $conexao := .Connections}}
+<div class="overlay" id="desconectar-{{$i}}" role="dialog" aria-modal="true" aria-labelledby="desconectar-{{$i}}-titulo">
+<div class="dialog">
+<div class="dialog__head"><h2 id="desconectar-{{$i}}-titulo">Desconectar esta ferramenta?</h2><a class="dialog__close" href="#" aria-label="Fechar">&times;</a></div>
+<div class="dialog__body">
+<div class="target"><span class="target__name">{{.Tool}}</span><span class="target__meta mono">{{.Prefix}}&hellip;</span></div>
+<p><strong>{{.Tool}}</strong> perde o acesso ao seu WhatsApp na mesma hora. As suas outras conexões continuam funcionando normalmente.</p>
+<p class="muted">Se quiser ligar de novo depois, é só criar uma conexão nova.</p>
+<form method="post" action="/chaves/revogar"><input type="hidden" name="id" value="{{.ID}}">
+<div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn btn--danger" type="submit">Desconectar</button></div>
+</form>
+</div></div></div>
+{{end}}
 {{template "foot"}}{{end}}
 
 {{define "chave"}}{{template "head" .}}{{template "nav" .}}
-<h1>Chave criada</h1>
-<p class="lead">Copie agora: esta é a única vez que a chave aparece.</p>
+<h1>Conexão criada</h1>
+<p class="lead">Falta só levar isto para a sua ferramenta de IA. O passo a passo abaixo está pronto para copiar e colar.</p>
 
 <div class="secret">
-<p class="secret__title">{{.Name}}</p>
+<p class="secret__title">Guarde esta chave agora</p>
 <code class="secret__value">{{.Secret}}</code>
-<p class="muted">Guarde no gerenciador de credenciais do cliente. Nunca em um prompt compartilhável nem em arquivo versionado.</p>
+<p class="muted">Ela aparece uma única vez, aqui. Já vem preenchida no passo a passo abaixo, então normalmente você nem precisa copiá-la à parte. Se quiser guardar, use o seu gerenciador de senhas — nunca um arquivo que você compartilha.</p>
 </div>
 
 <section class="card card--accent">
-<div class="card__head"><h2>Configure o cliente</h2></div>
+<div class="card__head"><h2>Passo a passo</h2><span class="pill pill--accent pill--plain">{{.Name}}</span></div>
 <div class="card__body">
 {{template "clientTabs" .Setup}}
 </div></section>
 
 <section class="card">
-<div class="card__head"><h2>Primeiro teste</h2></div>
+<div class="card__head"><h2>Para saber se deu certo</h2></div>
 <div class="card__body">
-<p class="muted">Cole no chat depois de reiniciar o cliente, para confirmar que tudo respondeu.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Prompt de verificação</span></div>
-<pre data-copy><code>{{.Prompt}}</code></pre></div>
+<p class="muted">Depois de configurar e reiniciar a ferramenta, mande esta mensagem no chat dela. Se ela responder com os dados do seu WhatsApp, está funcionando.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Mensagem de teste</span></div>
+<pre class="plain" data-copy><code>{{.Prompt}}</code></pre></div>
+<p class="muted">A tela de conexões avisa sozinha quando a ferramenta se conectar pela primeira vez.</p>
 </div></section>
 
-<div class="actions"><a class="btn btn--ghost" href="/">Voltar para Conectar</a></div>
+<div class="actions"><a class="btn btn--ghost" href="/">Voltar para as minhas conexões</a></div>
 {{template "foot"}}{{end}}
 
 {{define "instancias"}}{{template "head" .}}{{template "nav" .}}
@@ -549,7 +645,7 @@ page. */}}
 {{range $i, $inst := .Instances}}<li class="row{{if .Selected}} row--on{{end}}">
 <label class="row__label" for="instance-{{.ID}}">
 <input id="instance-{{.ID}}" type="radio" name="instance_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
-<span class="row__main"><span class="row__title">{{.Name}}</span>{{if .Number}}<span class="row__meta mono">{{.Number}}</span>{{end}}</span>
+<span class="row__main"><span class="row__title">{{.Name}}</span>{{if .Number}}<span class="row__meta">{{phone .Number}}</span>{{end}}</span>
 </label>
 <span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
 {{if .Selected}}<span class="pill pill--ok pill--plain">Em uso pelo MCP</span>{{end}}
@@ -629,7 +725,7 @@ page. */}}
 <div class="dialog__body">
 <div class="target">
 <span class="target__name">{{.Name}}</span>
-{{if .Number}}<span class="target__meta mono">{{.Number}}</span>{{else}}<span class="target__meta">Sem número: ainda não pareada.</span>{{end}}
+{{if .Number}}<span class="target__meta">{{phone .Number}}</span>{{else}}<span class="target__meta">Sem número: ainda não pareada.</span>{{end}}
 <span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
 </div>
 <p>Esta instância é apagada e o WhatsApp é desconectado. As chaves de API emitidas para ela param de funcionar.</p>
@@ -817,7 +913,7 @@ page. */}}
 {{range .Instances}}<li class="row{{if .Selected}} row--on{{end}}">
 <label class="row__label" for="instance-{{.ID}}">
 <input id="instance-{{.ID}}" type="radio" name="instance_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
-<span class="row__main"><span class="row__title">{{.Name}}</span>{{if .Number}}<span class="row__meta mono">{{.Number}}</span>{{end}}</span>
+<span class="row__main"><span class="row__title">{{.Name}}</span>{{if .Number}}<span class="row__meta">{{phone .Number}}</span>{{end}}</span>
 </label>
 <span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
 </li>{{end}}

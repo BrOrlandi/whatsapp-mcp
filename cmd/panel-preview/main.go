@@ -74,7 +74,14 @@ func (f *fakeStore) CreateAPIKey(_ context.Context, name, instance, digest, pref
 	f.next++
 	key := store.APIKey{ID: f.next, Name: name, InstanceID: instance, Prefix: prefix, CreatedAt: time.Now()}
 	if f.used {
+		// A used credential is one whose client has shaken hands, so it also
+		// carries the name that client gave itself — which is what the panel
+		// shows in place of the label typed here.
 		key.LastUsedAt = time.Now().Add(-90 * time.Minute)
+		key.ClientName, key.ClientVersion = "claude-ai", "0.14.2"
+		if f.next%2 == 0 {
+			key.ClientName, key.ClientVersion = "claude-code", "2.1.0"
+		}
 	}
 	f.keys = append(f.keys, key)
 	return nil
@@ -147,7 +154,7 @@ func (f *fakeEvo) FetchInstances(context.Context) ([]evolution.Instance, error) 
 		status = evolution.StatusDisconnected
 	}
 	return []evolution.Instance{
-		{ID: "inst-1", Name: "pessoal", Number: "5511999999999", Status: status, Token: "tok"},
+		{ID: "inst-1", Name: "pessoal", Number: "5511923456789:89", Status: status, Token: "tok"},
 		{ID: "inst-2", Name: "trabalho", Number: "5511988887777", Status: evolution.StatusDisconnected},
 	}, nil
 }
@@ -219,7 +226,8 @@ func main() {
 	// keeps the panel from handing itself over to the installation wizard. The
 	// unlicensed preview is the first run, so it starts without one.
 	if !unlicensed {
-		_ = st.CreateAPIKey(context.Background(), "Claude Code no notebook", "inst-1", "d", "wamcp-a1B2c3")
+		_ = st.CreateAPIKey(context.Background(), "Claude Desktop", "inst-1", "d", "wamcp-a1B2c3")
+		_ = st.CreateAPIKey(context.Background(), "Claude Code", "inst-1", "e", "wamcp-Z9y8X7")
 	}
 	// The public address is what the panel puts into MCP snippets and into the
 	// licence callback. A made-up domain reads better in screenshots; pointing

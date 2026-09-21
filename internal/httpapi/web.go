@@ -562,8 +562,11 @@ type selection struct {
 	Instances    []instanceView
 	Selected     string
 	SelectedName string
-	Notice       string
-	Unavailable  bool
+	// SelectedNumber is the WhatsApp number of the chosen instance, as
+	// Evolution reports it. The pages format it before showing it.
+	SelectedNumber string
+	Notice         string
+	Unavailable    bool
 	// NeedsActivation separates the one unavailability that waiting will not
 	// fix. RegisterURL is where the operator fixes it, and OperatorEmail is
 	// the address already used for a licence here, offered back as prefill.
@@ -648,7 +651,7 @@ func (a *webApp) listedSelection(r *http.Request, selected string, managed map[s
 		}
 		view := instanceView{Instance: instance, Managed: isManaged, Selected: instance.ID == selected}
 		if view.Selected {
-			state.SelectedName = instance.Name
+			state.SelectedName, state.SelectedNumber = instance.Name, instance.Number
 			switch {
 			case instance.Status == evolution.StatusConnected:
 				state.Ready = true
@@ -711,8 +714,26 @@ func (a *webApp) readStatus(r *http.Request, selected string) *statusView {
 	return view
 }
 
-// connectPage is the landing page: everything needed to point a client at this
-// gateway, and nothing else.
+// connection is one issued credential told as what it is to the person who
+// issued it: an AI tool wired to their WhatsApp. The key behind it is an
+// implementation detail the page mentions only in passing, because "revoke the
+// key wamcp-a1b2c3" is not a sentence anybody wants to reason about.
+type connection struct {
+	store.APIKey
+	// Tool is what to call this connection: the name the tool gave itself in
+	// the MCP handshake when there is one, and otherwise whatever the operator
+	// chose when creating it.
+	Tool string
+	// Detected marks a Tool that the tool itself reported, as opposed to a
+	// label typed in this panel. Only the first is evidence of anything.
+	Detected bool
+	// Live means a client has authenticated with this credential at least once,
+	// which is the only proof the panel has that a connection actually works.
+	Live bool
+}
+
+// connectPage is the landing page: the state of the WhatsApp line, the AI tools
+// connected to it, and the one button that adds another.
 type connectPage struct {
 	layout
 	Ready        bool
@@ -722,17 +743,52 @@ type connectPage struct {
 	NeedsActivation bool
 	Notice          string
 	InstanceName    string
-	Endpoint        string
-	Keys            []store.APIKey
-	// HasKey and ClientConnected drive the checklist. They are facts the panel
-	// already holds rather than a stored notion of progress: a key exists or it
-	// does not, and a key that has been used proves a client authenticated with
-	// it. Revoking the last key therefore reopens the first step on its own.
+	// Phone is the connected line, written the way its owner writes it.
+	// Account is the profile name WhatsApp reports for it.
+	Phone    string
+	Account  string
+	Endpoint string
+	// Connections are the live credentials, presented as tools rather than
+	// keys. Keys keeps the raw rows for the parts of the page that still count
+	// them.
+	Connections []connection
+	Keys        []store.APIKey
+	// HasKey and ClientConnected are facts the panel already holds rather than
+	// a stored notion of progress: a key exists or it does not, and a key that
+	// has been used proves a client authenticated with it. Disconnecting the
+	// last tool therefore takes the page back to its empty state on its own.
 	HasKey          bool
 	ClientConnected bool
-	LastUse         time.Time
-	Setup           clientSetup
-	Prompts         []string
+	// LiveCount is how many connections have actually been used, which is the
+	// number worth putting on the page: a credential nobody has presented is a
+	// connection that does not exist yet.
+	LiveCount int64
+	LastUse   time.Time
+	Setup     clientSetup
+	Prompts   []string
+	// Clients is the list of setup routes the "new connection" dialog offers.
+	Clients []clientOption
+}
+
+// clientOption is one choice in the dialog that starts a connection.
+type clientOption struct {
+	Value, Label, Hint string
+	First              bool
+}
+
+// clientOptions describes each setup route in the words of someone who has
+// never heard of MCP.
+func clientOptions() []clientOption {
+	hints := map[string]string{
+		"desktop": "O aplicativo do Claude no computador. É o caminho mais simples: copiar, colar e reiniciar.",
+		"code":    "O Claude que roda no terminal. Um comando só.",
+		"outros":  "Cursor, ChatGPT, Windsurf, n8n… Geramos um texto pronto para você colar no seu assistente, e ele mesmo se configura.",
+	}
+	options := make([]clientOption, 0, len(clients))
+	for index, client := range clients {
+		options = append(options, clientOption{Value: client.Value, Label: client.Label, Hint: hints[client.Value], First: index == 0})
+	}
+	return options
 }
 
 // suggestedPrompts are starting points that exercise the tools people reach for
@@ -766,16 +822,29 @@ func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
 		NeedsActivation: state.NeedsActivation,
 		Notice:          state.Notice,
 		InstanceName:    state.SelectedName,
+		Phone:           phone(state.SelectedNumber),
 		Endpoint:        a.endpoint(),
+	}
+	if a.status != nil {
+		page.Account = a.status.Snapshot().WhatsApp.PushName
 	}
 	page.Keys = keys
 	page.Setup = newClientSetup(page.Endpoint, "")
 	page.Prompts = suggestedPrompts
+	page.Clients = clientOptions()
 	page.HasKey = len(page.Keys) > 0
 	for _, key := range page.Keys {
 		if key.LastUsedAt.After(page.LastUse) {
 			page.LastUse, page.ClientConnected = key.LastUsedAt, true
 		}
+		view := connection{APIKey: key, Tool: key.Name, Live: !key.LastUsedAt.IsZero()}
+		if reported := toolLabel(key.ClientName); reported != "" {
+			view.Tool, view.Detected = reported, true
+		}
+		if view.Live {
+			page.LiveCount++
+		}
+		page.Connections = append(page.Connections, view)
 	}
 	a.render(w, "conectar", page)
 }
@@ -1525,6 +1594,8 @@ var templateFuncs = template.FuncMap{
 	"plural":        plural,
 	"count":         count,
 	"len64":         len64,
+	"phone":         phone,
+	"initial":       initial,
 }
 
 // len64 gives templates a length the counters can consume, since plural counts

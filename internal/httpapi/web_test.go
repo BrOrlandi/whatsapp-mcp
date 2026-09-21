@@ -874,9 +874,9 @@ func TestPagesAreSeparateAndTheTabBarTracksThem(t *testing.T) {
 		path, heading, current string
 		absent                 []string
 	}{
-		{"/", "Conectar um cliente", `href="/" aria-current="page"`, []string{"Adicionar instância", "Filas de ingestão"}},
-		{"/instancias", "Instâncias", `href="/instancias" aria-current="page"`, []string{"Chaves ativas", "Filas de ingestão"}},
-		{"/estado", "Estado do serviço", `href="/estado" aria-current="page"`, []string{"Chaves ativas", "Adicionar instância"}},
+		{"/", "Seu WhatsApp nas suas ferramentas de IA", `href="/" aria-current="page"`, []string{"Adicionar instância", "Filas de ingestão"}},
+		{"/instancias", "Instâncias", `href="/instancias" aria-current="page"`, []string{"Suas conexões", "Filas de ingestão"}},
+		{"/estado", "Estado do serviço", `href="/estado" aria-current="page"`, []string{"Suas conexões", "Adicionar instância"}},
 	} {
 		body := fetch(t, client, ts.URL+page.path)
 		mustContain(t, body, page.path, page.heading, page.current, `href="/instancias"`, `href="/estado"`)
@@ -912,7 +912,7 @@ func TestDialogsAreMarkupOnly(t *testing.T) {
 	ts, client := signedIn(t, repo, evo)
 
 	connect := fetch(t, client, ts.URL+"/")
-	mustContain(t, connect, "connect", `id="nova-chave"`, `href="#nova-chave"`, `action="/chaves"`, "required")
+	mustContain(t, connect, "connect", `id="nova-conexao"`, `href="#nova-conexao"`, `action="/chaves"`, `name="cliente"`)
 
 	instances := fetch(t, client, ts.URL+"/instancias")
 	mustContain(t, instances, "instances", `id="nova-instancia"`, `id="remover-0"`, `id="encerrar-sessao"`, `action="/instancias"`)
@@ -925,9 +925,11 @@ func TestDialogsAreMarkupOnly(t *testing.T) {
 	mustContain(t, instances, "instances", `data-busy="Criando instância…"`, "data-busy-note")
 }
 
-// A key without a name is a key nobody can identify later, which is what made
-// the old flow confusing. It is refused rather than silently named.
-func TestKeyRequiresAName(t *testing.T) {
+// Naming a credential is work the panel can do itself. The operator answers
+// "where are you going to use this?" and that answer becomes the connection's
+// name, so nothing is refused for being unnamed; only a label too long to fit a
+// row is.
+func TestAConnectionNamesItselfAfterTheChosenTool(t *testing.T) {
 	repo := newRepo()
 	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
 		t.Fatal(err)
@@ -936,16 +938,30 @@ func TestKeyRequiresAName(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"   "}})
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"cliente": {"code"}, "name": {"   "}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	if len(repo.keys) != 0 {
-		t.Fatalf("an unnamed key was created: %+v", repo.keys)
+	if len(repo.keys) != 1 || repo.keys[0].Name != "Claude Code" {
+		t.Fatalf("the connection was not named after the chosen tool: %+v", repo.keys)
 	}
-	mustContain(t, string(body), "connect", "Dê um nome")
+	// The instructions open on the tool that was picked, not on the first tab.
+	mustContain(t, string(body), "key page", `id="tab-code" checked`)
+
+	// A label the operator does type is kept, and one that cannot fit a row is
+	// refused rather than truncated.
+	r, err = client.PostForm(ts.URL+"/chaves", url.Values{"cliente": {"desktop"}, "name": {strings.Repeat("x", 61)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(r.Body)
+	r.Body.Close()
+	if len(repo.keys) != 1 {
+		t.Fatalf("an over-long label was accepted: %+v", repo.keys)
+	}
+	mustContain(t, string(body), "connect", "até 60 caracteres")
 }
 
 // The copy helper is served from the panel itself, which is what lets the
@@ -1000,10 +1016,58 @@ func TestCountAndPluralReadNaturally(t *testing.T) {
 	}
 }
 
-// The checklist reflects facts the panel already holds rather than a stored
-// notion of progress, so revoking the last key reopens the first step on its
-// own and a key that has been used proves the client is configured.
-func TestConnectChecklistTracksTheRealState(t *testing.T) {
+// The landing page talks about tools, not credentials, and it works that out
+// from facts it already holds: a connection exists or it does not, a connection
+// that has been used is one that works, and a client that announced itself in
+// the MCP handshake is named by that instead of by the label typed here.
+func TestTheLandingPageDescribesConnectionsRatherThanKeys(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Number: "5511923456789:89", Status: evolution.StatusConnected}}}
+	ts, client := signedIn(t, repo, evo)
+
+	// Nothing connected yet: the page says so in those words and offers the one
+	// action that changes it. No phone number is left in its protocol shape.
+	page := fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "no connection", "Nenhuma ferramenta de IA conectada", "Conectar uma ferramenta de IA", "55 (16) 92345-6789")
+	mustNotContain(t, page, "no connection", "5511923456789", "Chaves ativas", "Gerar nova chave")
+
+	// A connection exists but has never been used: it is waiting, not working.
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"cliente": {"desktop"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	page = fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "waiting", "Esperando a sua ferramenta de IA", "Aguardando", "Claude Desktop", `data-connected="false"`)
+
+	// Once it has been used the page counts it, and the tool's own name from the
+	// MCP handshake wins over the label this panel chose.
+	repo.mu.Lock()
+	repo.keys[0].LastUsedAt = time.Now().Add(-5 * time.Minute)
+	repo.keys[0].ClientName = "claude-ai"
+	repo.mu.Unlock()
+	page = fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "connected", "1 ferramenta de IA conectada", "Conectada", "Claude Desktop", "Experimente pedir")
+	mustNotContain(t, page, "connected", `data-connected="false"`)
+
+	// Disconnecting is a confirmed action, and it takes the page back to empty.
+	mustContain(t, page, "connected", `id="desconectar-0"`, "Desconectar")
+	r, err = client.PostForm(ts.URL+"/chaves/revogar", url.Values{"id": {"1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	page = fetch(t, client, ts.URL+"/")
+	mustContain(t, page, "after disconnect", "Nenhuma ferramenta de IA conectada")
+}
+
+// The setup instructions lead with the client that needs no terminal, and they
+// carry a route for every other tool: a message the assistant itself reads.
+func TestSetupOffersDesktopFirstAndAnEscapeHatchForEveryOtherTool(t *testing.T) {
 	repo := newRepo()
 	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
 		t.Fatal(err)
@@ -1012,37 +1076,24 @@ func TestConnectChecklistTracksTheRealState(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	// No key yet: the first step is open and asks for one.
-	page := fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "checklist empty", "Gerar nova chave")
-	mustNotContain(t, page, "checklist empty", `class="step step--done"`, "concluído")
-
-	// A key exists but was never used: step one is done, step two is not.
-	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"notebook"}})
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"cliente": {"outros"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	page = fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "checklist with key", `class="step step--done"`, "concluído", "1 chave ativa", "Gerar outra chave")
-	mustNotContain(t, page, "checklist with key", "Um cliente se autenticou")
+	page := string(body)
 
-	// The key has been used: a client authenticated, so the remaining steps close.
-	repo.mu.Lock()
-	repo.keys[0].LastUsedAt = time.Now().Add(-5 * time.Minute)
-	repo.mu.Unlock()
-	page = fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "checklist used", "Um cliente se autenticou", "pronto")
-
-	// Revoking the last key reopens the first step without any extra bookkeeping.
-	r, err = client.PostForm(ts.URL+"/chaves/revogar", url.Values{"id": {"1"}})
-	if err != nil {
-		t.Fatal(err)
+	// Desktop is the first tab on the bar whichever one opens.
+	desktop := strings.Index(page, `for="tab-desktop"`)
+	code := strings.Index(page, `for="tab-code"`)
+	others := strings.Index(page, `for="tab-outros"`)
+	if desktop < 0 || code < 0 || others < 0 || !(desktop < code && code < others) {
+		t.Fatalf("the client tabs are not in the order desktop, code, outros: %d %d %d", desktop, code, others)
 	}
-	r.Body.Close()
-	page = fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "checklist after revoke", "Gerar nova chave")
-	mustNotContain(t, page, "checklist after revoke", `class="step step--done"`, "concluído")
+	// The chosen route is the one that opens, and it hands over a prompt the
+	// assistant can act on rather than instructions the operator must translate.
+	mustContain(t, page, "key page", `id="tab-outros" checked`, "Quero conectar um servidor MCP", "https://mcp.example/mcp")
 }
 
 // The connect page notices a client authenticating without a manual reload, so
@@ -2031,5 +2082,54 @@ func TestManualRegistrationIsOfferedDuringTheAutomaticWait(t *testing.T) {
 	// the operator in this mode.
 	if strings.Contains(page, "Não recebeu o e-mail") {
 		t.Fatal("the automatic wait asked about an email the operator never gets")
+	}
+}
+
+// The tab bar marks the status page only when there is something to look at.
+// A green dot that is always green stops being read within a day, and then the
+// one day it changes nobody notices.
+func TestTheStatusTabIsMarkedOnlyWhenSomethingIsWrong(t *testing.T) {
+	for _, session := range []struct {
+		state  string
+		marked bool
+		class  string
+	}{
+		{"connected", false, ""},
+		{"pairing", true, `class="nav__alert nav__alert--warn"`},
+		{"logged_out", true, `class="nav__alert"`},
+	} {
+		repo := newRepo()
+		if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+			t.Fatal(err)
+		}
+		repo.selected = "one"
+		hash, err := auth.HashPassword("senha segura 123")
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo.user, repo.hash = "admin", hash
+		evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
+
+		state := health.NewState()
+		state.SetDependencies(true, true, true)
+		state.MarkEvent(time.Now())
+		state.SetWhatsApp(session.state, "", "", "Bruno")
+
+		ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+		jar, _ := cookiejar.New(nil)
+		client := &http.Client{Jar: jar}
+		r, err := client.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {"senha segura 123"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		page := fetch(t, client, ts.URL+"/")
+		ts.Close()
+
+		if session.marked {
+			mustContain(t, page, session.state, session.class, "Atenção: ")
+		} else {
+			mustNotContain(t, page, session.state, `class="nav__alert`, "Atenção: ")
+		}
 	}
 }
