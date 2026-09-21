@@ -157,7 +157,7 @@ for the `whatsappmcp` base — with subaddressing enabled — matches every
 the domain's personal mail never passes through it. The magic-link email for
 those addresses is delivered to
 [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
-(private), an Email Worker that finds the link in the message and does the GET
+(a separate MIT-licensed project), an Email Worker that finds the link in the message and does the GET
 a browser would: the same click, server-side. The licensing server redirects
 to the panel's activation callback, the wizard's poll notices the step change,
 and the operator typed nothing, opened no inbox, clicked nothing.

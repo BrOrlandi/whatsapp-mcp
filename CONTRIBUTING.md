@@ -50,17 +50,12 @@ For a security vulnerability, do not open an issue — see [SECURITY.md](SECURIT
 
 ## Licence and the DCO
 
-This project is released under the [PolyForm Noncommercial
-1.0.0](LICENSE) licence, which is source-available rather than open source in
-the OSI sense: free for any noncommercial use, and commercial use needs a
-separate licence from the author.
+This project is released under the [MIT licence](LICENSE): free to use,
+modify, fork, distribute and sell, with the copyright notice kept in place.
 
 By contributing you certify the [Developer Certificate of
 Origin](https://developercertificate.org/) and you agree that your contribution
-is licensed to the project's author under terms that allow relicensing —
-including under a different licence in the future. That last part is not
-boilerplate: without it, a single merged patch would permanently freeze the
-licence, and the ability to open the project up later would be gone.
+is licensed to the project under the same MIT terms.
 
 Sign off your commits:
 
