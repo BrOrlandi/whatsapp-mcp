@@ -1376,19 +1376,23 @@ func TestLicenseRegistrationRunsThroughThePanel(t *testing.T) {
 	}
 
 	// The click comes back to the panel without a session behind it, because
-	// it is the one-time code that carries the authority. The confirmation
-	// says the licence is in, not that it is pending.
-	bare := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
+	// it is the one-time code that carries the authority and because a mail
+	// client opens links in a browser of its own. It must answer there rather
+	// than send that visitor to a login form.
+	bare := &http.Client{}
 	r, err = bare.Get(ts.URL + "/instancias/licenca/retorno?code=one-time-code")
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ = io.ReadAll(r.Body)
 	r.Body.Close()
-	if r.StatusCode != http.StatusSeeOther {
+	if r.StatusCode != http.StatusOK {
 		t.Fatalf("callback returned %d", r.StatusCode)
 	}
+	if r.Request.URL.Path != "/instancias/licenca/retorno" {
+		t.Fatalf("a session-less click was sent to %s", r.Request.URL.Path)
+	}
+	mustContain(t, string(body), "callback", "Licença ativada")
 	saved, err := repo.EvolutionLicense(context.Background())
 	if err != nil {
 		t.Fatalf("no licence was kept: %v", err)
@@ -1711,4 +1715,69 @@ func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
 	if repo.user != "bruno@example.com" {
 		t.Fatalf("a six-character password was refused: administrator = %q", repo.user)
 	}
+}
+
+// A failed activation has to be readable by whoever clicked, which is the
+// whole point of the click landing on a page of its own. Sending them to a
+// page that needs a session threw the reason away on the redirect and left the
+// wizard waiting on a licence that had already been refused.
+func TestAFailedActivationSaysWhyWhereverItWasClicked(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{
+		err:           evolution.ErrNotActivated,
+		license:       evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+		activationErr: errors.New("licensing server returned HTTP 400"),
+	}
+	ts, client := signedIn(t, repo, evo)
+
+	// From the mail client's own browser: no session, and it still answers.
+	bare := &http.Client{}
+	r, err := bare.Get(ts.URL + "/instancias/licenca/retorno?code=spent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.Request.URL.Path != "/instancias/licenca/retorno" {
+		t.Fatalf("a session-less failure was sent to %s", r.Request.URL.Path)
+	}
+	mustContain(t, string(body), "callback failure", "licensing server returned HTTP 400", "Não recebeu o e-mail?")
+	mustNotContain(t, string(body), "callback failure", `name="password"`)
+
+	// And from the browser that is already signed in, the same reason lands on
+	// the wizard, where the next attempt is.
+	page := fetch(t, client, ts.URL+"/instancias/licenca/retorno?code=spent")
+	mustContain(t, page, "wizard failure", "licensing server returned HTTP 400", "Ativar a licença")
+}
+
+// The cookie has to survive the return from the licensing server, which is a
+// cross-site navigation. Strict drops it there, and the operator arrives at
+// their own panel signed in and is shown the login form.
+func TestTheSessionCookieSurvivesAnExternalReturn(t *testing.T) {
+	repo := newRepo()
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	defer ts.Close()
+	// The redirect is not followed, because the cookie is set on the response
+	// that issues it and the jar would swallow it.
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	r, err := client.PostForm(ts.URL+"/setup", url.Values{"email": {"bruno@example.com"}, "password": {"senha segura 123"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	for _, cookie := range r.Cookies() {
+		if cookie.Name != "whatsapp_mcp_session" {
+			continue
+		}
+		if cookie.SameSite == http.SameSiteStrictMode {
+			t.Fatal("the session cookie is Strict, so it is not sent when the licensing server sends the operator back")
+		}
+		if !cookie.HttpOnly {
+			t.Fatal("the session cookie is readable from scripting")
+		}
+		return
+	}
+	t.Fatal("no session cookie was issued")
 }

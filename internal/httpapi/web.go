@@ -451,15 +451,24 @@ func (a *webApp) login(w http.ResponseWriter, r *http.Request) {
 	a.setSession(w, r)
 	http.Redirect(w, r, "/", 303)
 }
+
+// setSession issues the panel cookie.
+//
+// SameSite is Lax rather than Strict because the licensing server sends the
+// operator back here by a cross-site navigation, and a Strict cookie is not
+// sent on one — the operator arrived at their own panel already signed in and
+// was shown the login form. Lax still refuses the cookie on cross-site POSTs,
+// and every route that changes anything here is a POST, so the protection that
+// mattered is intact.
 func (a *webApp) setSession(w http.ResponseWriter, r *http.Request) {
 	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-	http.SetCookie(w, &http.Cookie{Name: "whatsapp_mcp_session", Value: a.sessions.create(), Path: "/", MaxAge: 86400, HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "whatsapp_mcp_session", Value: a.sessions.create(), Path: "/", MaxAge: 86400, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 }
 func (a *webApp) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("whatsapp_mcp_session"); err == nil {
 		a.sessions.remove(c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "whatsapp_mcp_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "whatsapp_mcp_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/login", 303)
 }
 
@@ -486,6 +495,15 @@ type setupPageData struct {
 	// Email is given back after a rejected submission, so a typo in the
 	// password does not cost the operator their address as well.
 	Email string
+}
+
+// licensePageData is what the magic-link click renders when it arrives without
+// a panel session, which is the ordinary case for a link opened from a mail
+// client.
+type licensePageData struct {
+	layout
+	OK     string
+	Reason string
 }
 
 // passwordPageData is the password page's own shape rather than two more
@@ -1217,12 +1235,12 @@ func (a *webApp) startLicense(r *http.Request, email string) bool {
 func (a *webApp) completeLicense(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
-		a.fail(w, r, "/instalacao", "O link de ativação veio sem o código. Peça o e-mail de novo.")
+		a.licenseOutcome(w, r, "", "O link de ativação veio sem o código. Peça outro no painel.")
 		return
 	}
 	activation, err := a.evolution.CompleteActivation(r.Context(), code)
 	if err != nil {
-		a.fail(w, r, "/instalacao", "Não foi possível ativar a licença: "+err.Error())
+		a.licenseOutcome(w, r, "", "Não foi possível ativar a licença: "+err.Error())
 		return
 	}
 	if err := a.store.SaveEvolutionLicense(r.Context(), store.EvolutionLicense{
@@ -1233,10 +1251,35 @@ func (a *webApp) completeLicense(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		// Evolution is alive; only the panel's copy of the credential failed to
 		// persist. The deployment works — say so, losing only rebuild comfort.
-		a.fail(w, r, "/instalacao", "A licença foi ativada, mas este painel não conseguiu guardar uma cópia dela para rebuilds futuros.")
+		a.licenseOutcome(w, r, "A licença foi ativada, mas este painel não conseguiu guardar uma cópia dela para reativar rebuilds futuros.", "")
 		return
 	}
-	http.Redirect(w, r, "/instalacao?ok="+url.QueryEscape("Licença ativada."), http.StatusSeeOther)
+	a.licenseOutcome(w, r, "Licença ativada.", "")
+}
+
+// licenseOutcome reports how the magic-link click went.
+//
+// The click can land in any browser: mail clients open links in their own
+// in-app one, where this panel has no session at all. Sending that visitor to
+// a page that requires one lost them on a login form and threw the reason
+// away with the redirect — which is how a failed activation came to look like
+// a wizard that simply never finished. So the answer is a page of its own,
+// readable without a session, and the return into the wizard only happens for
+// the browser that already has one.
+func (a *webApp) licenseOutcome(w http.ResponseWriter, r *http.Request, ok, reason string) {
+	if a.authenticated(r) {
+		if reason != "" {
+			a.fail(w, r, "/instalacao", reason)
+			return
+		}
+		http.Redirect(w, r, "/instalacao?ok="+url.QueryEscape(ok), http.StatusSeeOther)
+		return
+	}
+	page := licensePageData{layout: layout{Title: "Ativação da licença"}, OK: ok, Reason: reason}
+	if reason != "" {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	a.render(w, "licenca", page)
 }
 
 func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {

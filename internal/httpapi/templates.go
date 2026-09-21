@@ -817,6 +817,21 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 </div>
 {{template "foot"}}{{end}}
 
+{{define "licenca"}}{{template "head" .}}
+<div style="max-width:460px;margin:0 auto;padding-top:8vh">
+<div class="masthead" style="justify-content:center">{{template "brandmark"}}</div>
+<section class="card">
+<div class="card__head"><h2>{{if .OK}}Licença ativada{{else}}A ativação não foi concluída{{end}}</h2></div>
+<div class="card__body">
+{{if .OK}}<p class="lead">{{.OK}}</p>
+<p class="muted">Pode fechar esta aba: a instalação já seguiu sozinha na aba onde você começou.</p>
+{{else}}<p class="alert" role="alert">{{.Reason}}</p>
+<p class="muted">Volte ao painel e peça outro link em <strong>Não recebeu o e-mail?</strong>. Cada link vale por 15 minutos e só pode ser usado uma vez.</p>{{end}}
+<div class="actions"><a class="btn btn--block" href="/instalacao">Abrir o painel</a></div>
+</div></section>
+</div>
+{{template "foot"}}{{end}}
+
 {{define "senha"}}{{template "head" .}}
 {{if .Forced}}<div style="max-width:460px;margin:0 auto;padding-top:8vh">
 <div class="masthead" style="justify-content:center">{{template "brandmark"}}</div>
