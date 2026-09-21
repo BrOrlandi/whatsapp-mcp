@@ -55,6 +55,7 @@ type ControlStore interface {
 	ForgetInstance(context.Context, string) error
 	ManagedInstances(context.Context) (map[string]string, error)
 	SaveOperatorEmail(context.Context, string) error
+	MarkLicenseLinkSent(context.Context, string) error
 	SaveEvolutionLicense(context.Context, store.EvolutionLicense) error
 	EvolutionLicense(context.Context) (store.EvolutionLicense, error)
 }
@@ -147,6 +148,16 @@ const (
 	loginLockout  = 5 * time.Minute
 )
 
+// minPassword is the shortest administrator password the panel accepts. It is
+// short on purpose: what actually stops guessing here is the per-address
+// lockout on the login form, which gives up after loginFailures attempts, and
+// a length rule long enough to be annoying mostly buys passwords written on
+// paper. The ceiling is bcrypt's own — it silently truncates past 72 bytes.
+const (
+	minPassword = 6
+	maxPassword = 72
+)
+
 func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string) http.Handler {
 	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
 	mux := http.NewServeMux()
@@ -158,6 +169,7 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("GET /senha", a.passwordPage)
 	mux.HandleFunc("POST /senha", a.changePassword)
+	mux.HandleFunc("GET /instalacao", a.onboarding)
 	mux.HandleFunc("GET /instancias", a.instances)
 	mux.HandleFunc("POST /instancias", a.createInstance)
 	mux.HandleFunc("POST /instancias/licenca", a.sendLicenseLink)
@@ -180,6 +192,7 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	}
 	mux.HandleFunc("GET /api/selected-instance", a.selectedJSON)
 	mux.HandleFunc("GET /api/progresso", a.progress)
+	mux.HandleFunc("GET /api/instalacao", a.onboardingJSON)
 	return securityHeaders(mux)
 }
 
@@ -280,9 +293,9 @@ func (a *webApp) changePassword(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "senha", page)
 		return
 	}
-	if len(next) < 10 || len([]byte(next)) > 72 {
+	if len(next) < minPassword || len([]byte(next)) > maxPassword {
 		page := a.passwordLayout(r)
-		page.Error = "Use uma senha com pelo menos 10 caracteres."
+		page.Error = "Use uma senha com pelo menos 6 caracteres."
 		a.render(w, "senha", page)
 		return
 	}
@@ -378,10 +391,18 @@ func (a *webApp) setup(w http.ResponseWriter, r *http.Request) {
 		}
 		a.logins.Succeed(source)
 	}
-	u := strings.TrimSpace(r.FormValue("username"))
+	// The administrator is identified by their email rather than by a name they
+	// invent. It is one field instead of two, it is the credential people
+	// already expect to sign in with, and it is the address the next step has
+	// to reach — which is why it has to be one the operator can actually open.
+	email := strings.TrimSpace(r.FormValue("email"))
 	p := r.FormValue("password")
-	if u == "" || len(p) < 10 || len([]byte(p)) > 72 {
-		a.render(w, "setup", setupPageData{layout: layout{Title: "Configuração inicial", Error: "Use um usuário e uma senha com pelo menos 10 caracteres."}, Token: a.setupToken})
+	if !strings.Contains(email, "@") || len(email) > 254 {
+		a.render(w, "setup", setupPageData{layout: layout{Title: "Configuração inicial", Error: "Informe um e-mail válido. Você vai precisar confirmá-lo no passo seguinte."}, Token: a.setupToken, Email: email})
+		return
+	}
+	if len(p) < minPassword || len([]byte(p)) > maxPassword {
+		a.render(w, "setup", setupPageData{layout: layout{Title: "Configuração inicial", Error: "Use uma senha com pelo menos 6 caracteres."}, Token: a.setupToken, Email: email})
 		return
 	}
 	h, err := auth.HashPassword(p)
@@ -389,10 +410,14 @@ func (a *webApp) setup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erro interno", 500)
 		return
 	}
-	if err = a.store.CreateAdmin(r.Context(), u, h); err != nil {
+	if err = a.store.CreateAdmin(r.Context(), email, h); err != nil {
 		http.Error(w, "O administrador já existe.", 409)
 		return
 	}
+	// Remembering the address is all that happens here. Asking Evolution for
+	// the link is the wizard's job, because Evolution is usually still coming
+	// up at this exact moment.
+	_ = a.store.SaveOperatorEmail(r.Context(), email)
 	a.setSession(w, r)
 	http.Redirect(w, r, "/", 303)
 }
@@ -458,6 +483,9 @@ type setupPageData struct {
 	// the installer printed, and the form is not offered at all.
 	Token  string
 	Locked bool
+	// Email is given back after a rejected submission, so a typo in the
+	// password does not cost the operator their address as well.
+	Email string
 }
 
 // passwordPageData is the password page's own shape rather than two more
@@ -505,6 +533,10 @@ type selection struct {
 	NeedsActivation bool
 	RegisterURL     string
 	OperatorEmail   string
+	// LinkSent marks an activation link that is sitting unanswered in that
+	// inbox, which is the difference between asking for an address and waiting
+	// on a click.
+	LinkSent bool
 	// LicenseHealed marks the render where a licence the panel was already
 	// holding was put back into Evolution without anyone being asked for it.
 	LicenseHealed bool
@@ -547,12 +579,12 @@ func (a *webApp) readSelection(r *http.Request) selection {
 				return state
 			}
 			state.NeedsActivation = true
-			state.Notice = "A Evolution Go ainda não foi ativada. Ela exige uma licença e responde 503 em todas as rotas até ser registrada — esperar não resolve."
+			state.Notice = "A licença ainda não foi ativada. Sem ela, a camada que mantém a sessão do WhatsApp não responde."
 			if license, licenseErr := a.evolution.License(r.Context(), a.licenseCallback()); licenseErr == nil {
 				state.RegisterURL = license.RegisterURL
 			}
 			if saved, savedErr := a.store.EvolutionLicense(r.Context()); savedErr == nil {
-				state.OperatorEmail = saved.OperatorEmail
+				state.OperatorEmail, state.LinkSent = saved.OperatorEmail, !saved.LinkSentAt.IsZero()
 			}
 		}
 		return state
@@ -640,10 +672,13 @@ type connectPage struct {
 	layout
 	Ready        bool
 	NeedsPairing bool
-	Notice       string
-	InstanceName string
-	Endpoint     string
-	Keys         []store.APIKey
+	// NeedsActivation carries the one blocker this page cannot resolve on its
+	// own, so it can point at the wizard that can instead of only naming it.
+	NeedsActivation bool
+	Notice          string
+	InstanceName    string
+	Endpoint        string
+	Keys            []store.APIKey
 	// HasKey and ClientConnected drive the checklist. They are facts the panel
 	// already holds rather than a stored notion of progress: a key exists or it
 	// does not, and a key that has been used proves a client authenticated with
@@ -671,15 +706,24 @@ func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := a.readSelection(r)
-	page := connectPage{
-		layout:       a.newLayout(r, "Conectar", "conectar"),
-		Ready:        state.Ready,
-		NeedsPairing: state.NeedsPairing,
-		Notice:       state.Notice,
-		InstanceName: state.SelectedName,
-		Endpoint:     a.endpoint(),
+	keys, _ := a.store.ListAPIKeys(r.Context())
+	// A deployment that has never worked does not need a panel; it needs the
+	// one next step. The wizard is that, and it is where this page's own
+	// "cannot do anything yet" card used to send people anyway.
+	if firstRun(state, len(keys)) {
+		http.Redirect(w, r, "/instalacao", http.StatusSeeOther)
+		return
 	}
-	page.Keys, _ = a.store.ListAPIKeys(r.Context())
+	page := connectPage{
+		layout:          a.newLayout(r, "Conectar", "conectar"),
+		Ready:           state.Ready,
+		NeedsPairing:    state.NeedsPairing,
+		NeedsActivation: state.NeedsActivation,
+		Notice:          state.Notice,
+		InstanceName:    state.SelectedName,
+		Endpoint:        a.endpoint(),
+	}
+	page.Keys = keys
 	page.Setup = newClientSetup(page.Endpoint, "")
 	page.Prompts = suggestedPrompts
 	page.HasKey = len(page.Keys) > 0
@@ -704,6 +748,159 @@ func (a *webApp) instances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, "instancias", instancesPage{layout: a.newLayout(r, "Instâncias", "instancias"), selection: a.readSelection(r), OK: r.URL.Query().Get("ok")})
+}
+
+// wizardStep is one dot in the installation stepper.
+type wizardStep struct {
+	Number int
+	Label  string
+	// State is done, now or next, and is the only thing the stylesheet reads,
+	// so the class attribute never carries an unbounded value.
+	State string
+}
+
+// onboardingPage is the first run, and nothing else. A deployment that has
+// just been installed has no licence and no paired phone: that is the normal
+// starting state, not a fault, and the panel used to greet its owner with the
+// same red banners it uses for an outage. The wizard says one thing at a time,
+// carries no tab bar to wander off into, and hands over to the panel as soon
+// as the gateway can actually do something.
+type onboardingPage struct {
+	layout
+	// Step is the open step: 1 licence, 2 WhatsApp, 3 done.
+	Step  int
+	Steps []wizardStep
+	OK    string
+
+	// Sent means the licensing server accepted a registration for
+	// OperatorEmail, so this step is a wait on an inbox rather than a form.
+	Sent          bool
+	OperatorEmail string
+	RegisterURL   string
+
+	Instances    []instanceView
+	NeedsPairing bool
+	QRCode       template.URL
+	QRNotice     string
+	Unavailable  bool
+	Notice       string
+}
+
+func (a *webApp) onboarding(w http.ResponseWriter, r *http.Request) {
+	if !a.require(w, r) {
+		return
+	}
+	a.render(w, "instalacao", a.onboardingState(r))
+}
+
+// onboardingState works out which step is open from what the gateway reports,
+// not from a stored notion of progress: a licence that was revoked reopens the
+// first step on its own, and a phone that was unlinked reopens the second.
+func (a *webApp) onboardingState(r *http.Request) onboardingPage {
+	page := onboardingPage{layout: layout{Title: "Instalação", Error: r.URL.Query().Get("erro")}, OK: r.URL.Query().Get("ok")}
+	state := a.readSelection(r)
+	switch {
+	case state.NeedsActivation:
+		page.Step = 1
+		page.OperatorEmail, page.RegisterURL = state.OperatorEmail, state.RegisterURL
+		page.Sent = state.LinkSent
+		// The address was typed when the administrator account was created, so
+		// there is nothing left to ask: send the link and let the operator
+		// arrive at their inbox instead of at one more form.
+		if !page.Sent && page.OperatorEmail != "" && a.startLicense(r, page.OperatorEmail) {
+			page.Sent = true
+		}
+	case state.Unavailable:
+		// Not a licence problem, so not something this wizard can fix. Say so
+		// plainly and keep looking, rather than offering a form that will fail.
+		page.Step, page.Unavailable, page.Notice, page.Refresh = 2, true, state.Notice, true
+	case state.Ready:
+		page.Step = 3
+	default:
+		page.Step, page.Instances, page.NeedsPairing = 2, state.Instances, state.NeedsPairing
+		if state.NeedsPairing {
+			page.Refresh = true
+			page.QRCode, page.QRNotice = a.pairingCode(r)
+		}
+	}
+	page.Steps = wizardSteps(page.Step)
+	return page
+}
+
+// wizardSteps labels the stepper. The third step is a hand-off rather than a
+// screen: connecting a client is the panel's own page, and a second copy of
+// that checklist here would be one more thing to keep in sync.
+func wizardSteps(open int) []wizardStep {
+	labels := []string{"Licença", "WhatsApp", "Cliente"}
+	steps := make([]wizardStep, 0, len(labels))
+	for i, label := range labels {
+		step := wizardStep{Number: i + 1, Label: label, State: "next"}
+		switch {
+		case i+1 < open:
+			step.State = "done"
+		case i+1 == open:
+			step.State = "now"
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+// firstRun reports whether this deployment has never been finished, which is
+// the only time the panel hands its owner the wizard instead of itself. An
+// issued key is proof the installation once worked, so a later outage lands on
+// the panel — where the state page and the instance controls are — instead of
+// on an install screen that cannot help with it.
+func firstRun(state selection, keys int) bool {
+	if keys > 0 {
+		return false
+	}
+	if state.NeedsActivation {
+		return true
+	}
+	if state.Unavailable {
+		return false
+	}
+	return !state.Ready
+}
+
+// onboardingJSON is what the wizard polls while it waits on the one thing no
+// automation can do: the operator clicking a link in their own inbox. It
+// answers with the step that is open and nothing else, so the page can move on
+// by itself instead of asking for a reload nobody knows to perform.
+func (a *webApp) onboardingJSON(w http.ResponseWriter, r *http.Request) {
+	if !a.authenticated(r) {
+		http.Error(w, `{"error":"unauthenticated"}`, http.StatusUnauthorized)
+		return
+	}
+	step := 2
+	instances, err := a.evolution.FetchInstances(r.Context())
+	switch {
+	case errors.Is(err, evolution.ErrNotActivated):
+		step = 1
+	case err != nil:
+		// An outage is not progress; leave the wizard where it is.
+	default:
+		selected, _ := a.store.SelectedInstance(r.Context())
+		for _, instance := range instances {
+			if instance.ID == selected && instance.Status == evolution.StatusConnected {
+				step = 3
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"step": step})
+}
+
+// origin is the page a form was submitted from. The wizard reuses the panel's
+// own handlers rather than growing copies of them, so each form says where it
+// came from and every handler stays a single path.
+func origin(r *http.Request) string {
+	if r.FormValue("origem") == "instalacao" {
+		return "/instalacao"
+	}
+	return "/instancias"
 }
 
 // statusPage is the diagnostic view.
@@ -746,35 +943,42 @@ func (a *webApp) createInstance(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
+	back := origin(r)
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" || len(name) > 60 {
-		a.fail(w, r, "/instancias", "Informe um nome de instância com até 60 caracteres.")
+		a.fail(w, r, back, "Informe um nome de instância com até 60 caracteres.")
 		return
 	}
 	token, err := newInstanceToken()
 	if err != nil {
-		a.fail(w, r, "/instancias", "Não foi possível gerar as credenciais da instância.")
+		a.fail(w, r, back, "Não foi possível gerar as credenciais da instância.")
 		return
 	}
 	created, err := a.evolution.CreateInstance(r.Context(), name, token)
 	if err != nil {
 		if errors.Is(err, evolution.ErrNotActivated) {
-			a.fail(w, r, "/instancias", "A Evolution Go ainda não foi ativada. Registre a licença dela e tente de novo.")
+			a.fail(w, r, back, "A licença ainda não foi ativada. Ative-a e tente de novo.")
 			return
 		}
-		a.fail(w, r, "/instancias", "O WhatsApp recusou a criação da instância: "+err.Error())
+		a.fail(w, r, back, "O WhatsApp recusou a criação da instância: "+err.Error())
 		return
 	}
 	if err := a.store.SaveInstance(r.Context(), created.ID, created.Name, token); err != nil {
-		a.fail(w, r, "/instancias", "A instância foi criada, mas não foi possível guardar suas credenciais.")
+		a.fail(w, r, back, "A instância foi criada, mas não foi possível guardar suas credenciais.")
 		return
 	}
 	if err := a.store.SelectInstance(r.Context(), created.ID); err != nil {
-		a.fail(w, r, "/instancias", "A instância foi criada, mas não foi possível selecioná-la.")
+		a.fail(w, r, back, "A instância foi criada, mas não foi possível selecioná-la.")
 		return
 	}
 	if err := a.evolution.ConnectInstance(r.Context(), token); err != nil {
-		a.fail(w, r, "/instancias", "A instância foi criada, mas não foi possível iniciá-la: "+err.Error())
+		a.fail(w, r, back, "A instância foi criada, mas não foi possível iniciá-la: "+err.Error())
+		return
+	}
+	// The wizard shows the QR code on its own second step; the panel has a
+	// page for it.
+	if back == "/instalacao" {
+		http.Redirect(w, r, back, http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/pair", http.StatusSeeOther)
@@ -784,14 +988,15 @@ func (a *webApp) selectInstance(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
+	back := origin(r)
 	id := r.FormValue("instance_id")
 	instances, err := a.evolution.FetchInstances(r.Context())
 	if err != nil {
 		if errors.Is(err, evolution.ErrNotActivated) {
-			a.fail(w, r, "/instancias", "A Evolution Go ainda não foi ativada; registre a licença antes de criar uma instância.")
+			a.fail(w, r, back, "A licença ainda não foi ativada; ative-a antes de escolher uma instância.")
 			return
 		}
-		a.fail(w, r, "/instancias", "A API do WhatsApp está indisponível no momento.")
+		a.fail(w, r, back, "A API do WhatsApp está indisponível no momento.")
 		return
 	}
 	valid := id == ""
@@ -806,10 +1011,10 @@ func (a *webApp) selectInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = a.store.SelectInstance(r.Context(), id); err != nil {
-		a.fail(w, r, "/instancias", "Não foi possível salvar a seleção.")
+		a.fail(w, r, back, "Não foi possível salvar a seleção.")
 		return
 	}
-	http.Redirect(w, r, "/instancias", http.StatusSeeOther)
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 // pairPageData drives the pairing screen, which refreshes itself so a scanned
@@ -846,29 +1051,39 @@ func (a *webApp) pairPage(w http.ResponseWriter, r *http.Request) {
 	}
 	page := pairPageData{layout: a.newLayout(r, "Conectar o WhatsApp", "instancias"), Name: state.SelectedName}
 	page.Refresh = true
+	page.QRCode, page.Notice = a.pairingCode(r)
+	a.render(w, "pair", page)
+}
+
+// pairingCode asks Evolution for the QR of the selected instance, and says why
+// there is none when there is none. Both the pairing page and the installation
+// wizard show the same code, so the reasons are worded once.
+func (a *webApp) pairingCode(r *http.Request) (template.URL, string) {
+	const notReady = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
 	token, err := a.selectedToken(r)
 	if err != nil {
-		page.Notice = "Nenhuma instância deste painel está selecionada."
-		a.render(w, "pair", page)
-		return
+		return "", "Nenhuma instância deste painel está selecionada."
 	}
 	code, err := a.evolution.QRCode(r.Context(), token)
 	switch {
 	case errors.Is(err, evolution.ErrLoggedIn):
-		page.Notice = "A sessão já está pareada. Aguardando a conexão ficar ativa."
+		return "", "A sessão já está pareada. Aguardando a conexão ficar ativa."
 	case err != nil:
-		page.Notice = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
-	default:
-		page.QRCode = qrImageSource(code.Image)
-		if page.QRCode == "" {
-			page.Notice = "O QR code ainda não está pronto. Esta página tenta de novo sozinha."
-		}
+		return "", notReady
 	}
-	a.render(w, "pair", page)
+	image := qrImageSource(code.Image)
+	if image == "" {
+		return "", notReady
+	}
+	return image, ""
 }
 
 func (a *webApp) connectInstance(w http.ResponseWriter, r *http.Request) {
-	a.instanceAction(w, r, "/pair", func(ctx context.Context, token string) error {
+	destination := "/pair"
+	if origin(r) == "/instalacao" {
+		destination = "/instalacao"
+	}
+	a.instanceAction(w, r, destination, func(ctx context.Context, token string) error {
 		return a.evolution.ConnectInstance(ctx, token)
 	})
 }
@@ -893,11 +1108,11 @@ func (a *webApp) instanceAction(w http.ResponseWriter, r *http.Request, destinat
 	}
 	token, err := a.selectedToken(r)
 	if err != nil {
-		a.fail(w, r, "/instancias", "Selecione uma instância deste painel antes desta ação.")
+		a.fail(w, r, origin(r), "Selecione uma instância deste painel antes desta ação.")
 		return
 	}
 	if err := run(r.Context(), token); err != nil {
-		a.fail(w, r, "/instancias", "O WhatsApp recusou a operação: "+err.Error())
+		a.fail(w, r, origin(r), "O WhatsApp recusou a operação: "+err.Error())
 		return
 	}
 	http.Redirect(w, r, destination, http.StatusSeeOther)
@@ -957,7 +1172,7 @@ func (a *webApp) sendLicenseLink(w http.ResponseWriter, r *http.Request) {
 	}
 	email := strings.TrimSpace(r.FormValue("email"))
 	if !strings.Contains(email, "@") || len(email) > 254 {
-		a.fail(w, r, "/instancias", "Informe um e-mail válido para ativar.")
+		a.fail(w, r, "/instalacao", "Informe um e-mail válido para ativar.")
 		return
 	}
 	// The licensing server's registry wants a {token, email, name}, but the
@@ -965,15 +1180,33 @@ func (a *webApp) sendLicenseLink(w http.ResponseWriter, r *http.Request) {
 	// its own and the operator has one field to type. A person who prefers
 	// their own name on the registry can still use Evolution's own link below.
 	if err := a.evolution.RegisterOperator(r.Context(), email, brand.Name, a.licenseCallback()); err != nil {
-		a.fail(w, r, "/instancias", "Não foi possível enviar o e-mail de ativação: "+err.Error())
+		a.fail(w, r, "/instalacao", "Não foi possível enviar o e-mail de ativação: "+err.Error())
 		return
 	}
-	if err := a.store.SaveOperatorEmail(r.Context(), email); err != nil {
+	if err := a.store.MarkLicenseLinkSent(r.Context(), email); err != nil {
 		// The link is already on its way; losing the prefill is not worth
 		// telling the operator about, but it is worth noticing in logs one day.
 		_ = err
 	}
-	http.Redirect(w, r, "/instancias?ok="+url.QueryEscape("Enviamos um e-mail de ativação para "+email+". Ele expira em 15 minutos; depois de clicar o link dele, a licença entra sozinha."), http.StatusSeeOther)
+	// The wizard's own copy names the address and the deadline, so the banner
+	// only has to confirm that this click did something — which is what the
+	// operator needs when they asked for the link a second time.
+	http.Redirect(w, r, "/instalacao?ok="+url.QueryEscape("Link de ativação enviado."), http.StatusSeeOther)
+}
+
+// startLicense puts an activation link in an inbox the panel already knows
+// about, and reports whether one is now waiting there.
+//
+// It runs from the wizard's own render rather than from the form that created
+// the administrator, because right after an install Evolution is usually still
+// booting and cannot mint a registration token yet. Doing it here means the
+// link goes out on the first render that finds Evolution awake and unlicensed,
+// and the stored timestamp is what keeps it to one link per wait.
+func (a *webApp) startLicense(r *http.Request, email string) bool {
+	if err := a.evolution.RegisterOperator(r.Context(), email, brand.Name, a.licenseCallback()); err != nil {
+		return false
+	}
+	return a.store.MarkLicenseLinkSent(r.Context(), email) == nil
 }
 
 // completeLicense finishes the registration the magic link started. The
@@ -984,12 +1217,12 @@ func (a *webApp) sendLicenseLink(w http.ResponseWriter, r *http.Request) {
 func (a *webApp) completeLicense(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
-		a.fail(w, r, "/instancias", "O link de ativação veio sem o código. Peça o e-mail de novo.")
+		a.fail(w, r, "/instalacao", "O link de ativação veio sem o código. Peça o e-mail de novo.")
 		return
 	}
 	activation, err := a.evolution.CompleteActivation(r.Context(), code)
 	if err != nil {
-		a.fail(w, r, "/instancias", "Não foi possível ativar a licença: "+err.Error())
+		a.fail(w, r, "/instalacao", "Não foi possível ativar a licença: "+err.Error())
 		return
 	}
 	if err := a.store.SaveEvolutionLicense(r.Context(), store.EvolutionLicense{
@@ -1000,10 +1233,10 @@ func (a *webApp) completeLicense(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		// Evolution is alive; only the panel's copy of the credential failed to
 		// persist. The deployment works — say so, losing only rebuild comfort.
-		a.fail(w, r, "/instancias", "A licença foi ativada, mas este painel não conseguiu guardar uma cópia dela para rebuilds futuros.")
+		a.fail(w, r, "/instalacao", "A licença foi ativada, mas este painel não conseguiu guardar uma cópia dela para rebuilds futuros.")
 		return
 	}
-	http.Redirect(w, r, "/instancias?ok="+url.QueryEscape("Licença ativada. A Evolution Go já está respondendo — recarregue se as instâncias não aparecerem."), http.StatusSeeOther)
+	http.Redirect(w, r, "/instalacao?ok="+url.QueryEscape("Licença ativada."), http.StatusSeeOther)
 }
 
 func (a *webApp) selectedJSON(w http.ResponseWriter, r *http.Request) {

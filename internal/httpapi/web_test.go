@@ -152,19 +152,32 @@ func (f *fakeRepo) ManagedInstances(context.Context) (map[string]string, error) 
 func (f *fakeRepo) SaveOperatorEmail(_ context.Context, email string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.operatorEmail = email
+	// The real store writes the address into the same singleton row the
+	// licence lives in, so an address saved before any activation is readable
+	// on its own. The fake has to do the same or the wizard's waiting state
+	// would never be reachable in a test.
+	f.operatorEmail, f.license.OperatorEmail = email, email
+	return nil
+}
+func (f *fakeRepo) MarkLicenseLinkSent(_ context.Context, email string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.operatorEmail, f.license.OperatorEmail = email, email
+	f.license.LinkSentAt = time.Now()
 	return nil
 }
 func (f *fakeRepo) SaveEvolutionLicense(_ context.Context, license store.EvolutionLicense) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// The real store clears the pending link, because the click that answered
+	// it is what got us here.
 	f.license = license
 	return nil
 }
 func (f *fakeRepo) EvolutionLicense(context.Context) (store.EvolutionLicense, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.license.APIKey == "" {
+	if f.license.APIKey == "" && f.license.OperatorEmail == "" {
 		return store.EvolutionLicense{}, store.ErrNoLicense
 	}
 	return f.license, nil
@@ -369,8 +382,20 @@ func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 		}
 		return r
 	}
-	r := post("/setup", url.Values{"username": {"admin"}, "password": {"senha segura 123"}})
-	if r.Request.URL.Path != "/" {
+	// The identity is an address, and it has to be one: the next step of the
+	// installation is a link sent to it.
+	r := post("/setup", url.Values{"email": {"admin"}, "password": {"senha segura 123"}})
+	rejected, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if repo.user != "" {
+		t.Fatalf("an administrator was created under %q, which is not an address", repo.user)
+	}
+	mustContain(t, string(rejected), "setup", "Informe um e-mail válido")
+
+	// An installation that has never been finished lands on the wizard rather
+	// than on a panel with nothing in it.
+	r = post("/setup", url.Values{"email": {"bruno@example.com"}, "password": {"senha segura 123"}})
+	if r.Request.URL.Path != "/instalacao" {
 		t.Fatalf("setup ended at %s", r.Request.URL.Path)
 	}
 	r.Body.Close()
@@ -378,8 +403,9 @@ func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 		t.Fatalf("second admin: %v", err)
 	}
 	post("/logout", nil).Body.Close()
-	r = post("/login", url.Values{"username": {"admin"}, "password": {"senha segura 123"}})
-	if r.Request.URL.Path != "/" {
+	// The administrator signs in with the address they were created under.
+	r = post("/login", url.Values{"username": {"bruno@example.com"}, "password": {"senha segura 123"}})
+	if r.Request.URL.Path != "/instalacao" {
 		t.Fatalf("login ended at %s", r.Request.URL.Path)
 	}
 	r.Body.Close()
@@ -408,7 +434,7 @@ func TestEveryPageInlinesTheBrandLogo(t *testing.T) {
 	}
 	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
 	defer fresh.Close()
-	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="username"`, `name="password"`)
+	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="email"`, `name="password"`)
 
 	repo := newRepo()
 	evo := &fakeEvolution{}
@@ -1137,7 +1163,7 @@ func TestBootstrapPasswordMustBeReplacedBeforeAnythingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Body.Close()
-	if r.Request.URL.Path != "/" {
+	if r.Request.URL.Path != "/instalacao" {
 		t.Fatalf("after the change the panel landed on %s", r.Request.URL.Path)
 	}
 	if repo.mustChange {
@@ -1153,8 +1179,8 @@ func TestPasswordCanBeChangedOnPurpose(t *testing.T) {
 	evo := &fakeEvolution{}
 	ts, client := signedIn(t, repo, evo)
 
-	// The masthead offers the way in.
-	mustContain(t, fetch(t, client, ts.URL+"/"), "connect", `href="/senha"`)
+	// The masthead offers the way in, on every page that carries it.
+	mustContain(t, fetch(t, client, ts.URL+"/instancias"), "instances", `href="/senha"`)
 
 	page := fetch(t, client, ts.URL+"/senha")
 	mustContain(t, page, "senha", "Trocar a senha", `name="current_password"`)
@@ -1249,19 +1275,19 @@ func TestSetupNeedsTheInstallerToken(t *testing.T) {
 		t.Fatalf("an administrator was created without the token: %q", repo.user)
 	}
 
-	// The link works, and the operator picks both the name and the password.
+	// The link works, and the operator picks both the address and the password.
 	page := fetch(t, client, ts.URL+"/setup?token="+token)
-	mustContain(t, page, "setup", `name="username"`, `name="setup_token"`, token)
+	mustContain(t, page, "setup", `name="email"`, `name="setup_token"`, token)
 
 	r, err = client.PostForm(ts.URL+"/setup", url.Values{
-		"setup_token": {token}, "username": {"bruno"}, "password": {"uma senha bem longa"},
+		"setup_token": {token}, "email": {"bruno@example.com"}, "password": {"uma senha bem longa"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r.Body.Close()
-	if repo.user != "bruno" {
-		t.Fatalf("administrator = %q, want the name the operator chose", repo.user)
+	if repo.user != "bruno@example.com" {
+		t.Fatalf("administrator = %q, want the address the operator typed", repo.user)
 	}
 	// And it is a real sign-in, not a password waiting to be replaced.
 	if must, _ := repo.AdminMustChangePassword(context.Background()); must {
@@ -1280,13 +1306,23 @@ func TestUnactivatedEvolutionIsNotReportedAsAnOutage(t *testing.T) {
 	}
 	ts, client := signedIn(t, repo, evo)
 
-	page := fetch(t, client, ts.URL+"/instancias")
-	// A missing licence is offered as a form that can be filled here, rather
-	// than a link into somebody else's site.
-	mustContain(t, page, "instancias", "ainda não foi ativada", "Ativar a Evolution Go", `action="/instancias/licenca"`, `name="email"`, "Prefere o site da Evolution?", "https://license.example/register?token=abc")
+	// A missing licence is the first step of the installation wizard, offered
+	// as a form that can be filled here rather than a link into somebody
+	// else's site.
+	page := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, page, "instalacao", "Ativar a licença", `action="/instancias/licenca"`, `name="email"`)
 	if strings.Contains(page, "Tente novamente em instantes") {
 		t.Fatal("a missing licence is described as a transient outage")
 	}
+	// None of it arrives as an alert: a deployment that was installed a minute
+	// ago has no licence yet, and that is the normal starting state.
+	mustNotContain(t, page, "instalacao", `class="alert"`, "503")
+
+	// The panel itself only points at the wizard, so the activation form
+	// exists in exactly one place.
+	panel := fetch(t, client, ts.URL+"/instancias")
+	mustContain(t, panel, "instancias", "ainda não foi ativada", `href="/instalacao"`)
+	mustNotContain(t, panel, "instancias", `action="/instancias/licenca"`)
 
 	// Creating an instance says the same thing rather than leaking the raw
 	// Evolution error at the operator.
@@ -1332,7 +1368,9 @@ func TestLicenseRegistrationRunsThroughThePanel(t *testing.T) {
 	if got := evo.operatorName; got != brand.Name {
 		t.Fatalf("register-operator handled name %q, want the product name %q", got, brand.Name)
 	}
-	mustContain(t, string(body), "instancias", "bruno@example.com", "15 minutos")
+	// The send lands back on the wizard, which now waits on the inbox instead
+	// of asking for the address again.
+	mustContain(t, string(body), "instalacao", "bruno@example.com", "15 minutos", "Não recebeu o e-mail?")
 	if repo.operatorEmail != "bruno@example.com" {
 		t.Fatal("the operator email was not kept for the callback")
 	}
@@ -1374,7 +1412,7 @@ func TestLicenseCallbackRefusesAnEmptyOrRejectedCode(t *testing.T) {
 	}
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	mustContain(t, string(body), "instâncias", "veio sem o código")
+	mustContain(t, string(body), "instalacao", "veio sem o código")
 
 	r, err = client.Get(ts.URL + "/instancias/licenca/retorno?code=spent")
 	if err != nil {
@@ -1382,7 +1420,7 @@ func TestLicenseCallbackRefusesAnEmptyOrRejectedCode(t *testing.T) {
 	}
 	body, _ = io.ReadAll(r.Body)
 	r.Body.Close()
-	mustContain(t, string(body), "instâncias", "Não foi possível ativar a licença")
+	mustContain(t, string(body), "instalacao", "Não foi possível ativar a licença")
 
 	// The licence form does not accept a nonsense e-mail either.
 	r, err = client.PostForm(ts.URL+"/instancias/licenca", url.Values{"email": {"not-an-email"}})
@@ -1418,7 +1456,7 @@ func TestASavedLicenceReactivatesItself(t *testing.T) {
 		t.Fatal("the panel did not hand Evolution the licence it was keeping")
 	}
 	mustContain(t, page, "instancias", "reativada automaticamente", "pessoal")
-	if strings.Contains(page, "Ativar a Evolution Go") {
+	if strings.Contains(page, "ainda não foi ativada") {
 		t.Fatal("an operator was asked to register again although the panel had the licence")
 	}
 
@@ -1432,6 +1470,245 @@ func TestASavedLicenceReactivatesItself(t *testing.T) {
 	}
 	ts2, client2 := signedIn(t, repo2, evo2)
 	defer ts2.Close()
-	page2 := fetch(t, client2, ts2.URL+"/instancias")
-	mustContain(t, page2, "instancias", `value="bruno@example.com"`, "Ativar a Evolution Go")
+	page2 := fetch(t, client2, ts2.URL+"/instalacao")
+	mustContain(t, page2, "instalacao", `value="bruno@example.com"`, "Ativar a licença")
+}
+
+// The first run is a wizard, not a panel full of red. A deployment that was
+// installed a minute ago has no licence and no paired phone: that is the
+// normal starting state, and the panel used to greet its owner with an outage
+// banner on three pages at once.
+func TestTheFirstRunIsAWizardAndNotAnOutage(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{
+		err:        evolution.ErrNotActivated,
+		license:    evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+		activation: evolution.LicenseActivation{APIKey: "evo-key-1", Tier: "evolution-go", InstanceID: "inst-9"},
+	}
+	ts, client := signedIn(t, repo, evo)
+
+	// Signing in lands on the wizard rather than on a panel that cannot do
+	// anything yet, and the wizard carries no tab bar to wander off into.
+	r, err := client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.Request.URL.Path != "/instalacao" {
+		t.Fatalf("a fresh installation landed on %s", r.Request.URL.Path)
+	}
+	licence := string(page)
+	mustContain(t, licence, "wizard step 1", "Ativar a licença", `name="email"`, `class="wizard`, "wizard__step--now")
+	mustNotContain(t, licence, "wizard step 1", `class="nav"`, `href="/estado"`, `href="/documentacao"`, `class="alert"`)
+
+	// Sending the link turns the step into a wait on an inbox, with a way to
+	// try another address for the operator whose mail never arrives.
+	r, err = client.PostForm(ts.URL+"/instancias/licenca", url.Values{"email": {"bruno@example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ = io.ReadAll(r.Body)
+	r.Body.Close()
+	waiting := string(page)
+	mustContain(t, waiting, "wizard waiting", "bruno@example.com", "Não recebeu o e-mail?", `data-onboarding="1"`, "Verificando a ativação")
+
+	// The wizard polls for the one thing only the operator can do, and the
+	// answer is the open step and nothing else.
+	var step struct {
+		Step int `json:"step"`
+	}
+	if err := json.Unmarshal([]byte(fetch(t, client, ts.URL+"/api/instalacao")), &step); err != nil {
+		t.Fatal(err)
+	}
+	if step.Step != 1 {
+		t.Fatalf("the poller reported step %d while the licence was missing", step.Step)
+	}
+
+	// Clicking the link in the inbox is what moves it on: the callback comes
+	// back to the wizard, which is now asking for the WhatsApp account.
+	r, err = client.Get(ts.URL + "/instancias/licenca/retorno?code=one-time-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ = io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.Request.URL.Path != "/instalacao" {
+		t.Fatalf("the activation link landed on %s", r.Request.URL.Path)
+	}
+	mustContain(t, string(page), "wizard step 2", "Conectar o WhatsApp", `name="name"`, `value="instalacao"`)
+}
+
+// Each step of the wizard is the state of the gateway, not a stored notion of
+// progress, and every form it borrows from the panel comes back to it.
+func TestTheWizardWalksFromPairingToTheHandover(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{qr: evolution.QRCode{Image: "data:image/png;base64," + smallPNG}}
+	ts, client := signedIn(t, repo, evo)
+
+	// Creating the account from the wizard returns to the wizard, which is now
+	// showing the QR code instead of sending the operator to another page.
+	r, err := client.PostForm(ts.URL+"/instancias", url.Values{"name": {"pessoal"}, "origem": {"instalacao"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.Request.URL.Path != "/instalacao" {
+		t.Fatalf("creating an instance from the wizard landed on %s", r.Request.URL.Path)
+	}
+	mustContain(t, string(page), "wizard pairing", "Dispositivos conectados", "data:image/png;base64,", `http-equiv="refresh"`)
+
+	// Once the phone is paired the wizard is done and hands over to the panel,
+	// which is where connecting a client already lives.
+	evo.mu.Lock()
+	evo.instances[0].Status = evolution.StatusConnected
+	evo.mu.Unlock()
+	done := fetch(t, client, ts.URL+"/instalacao")
+	mustContain(t, done, "wizard done", "Tudo pronto", `href="/"`)
+	mustNotContain(t, done, "wizard done", "Ativar a licença", "Dispositivos conectados")
+
+	// And the panel takes over from there: nothing redirects back.
+	r, err = client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.Request.URL.Path != "/" {
+		t.Fatalf("a finished installation was sent back to %s", r.Request.URL.Path)
+	}
+}
+
+// A deployment that has already issued a key is past its installation, so a
+// later outage belongs on the panel — where the state page and the instance
+// controls are — and not on a wizard that cannot help with it.
+func TestALaterOutageDoesNotReopenTheWizard(t *testing.T) {
+	repo := newRepo()
+	if err := repo.SaveInstance(context.Background(), "one", "Pessoal", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	repo.selected = "one"
+	evo := &fakeEvolution{err: errors.New("connection refused")}
+	ts, client := signedIn(t, repo, evo)
+	if _, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"notebook"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.Request.URL.Path != "/" {
+		t.Fatalf("an outage on a working deployment landed on %s", r.Request.URL.Path)
+	}
+}
+
+// smallPNG is a one-pixel image, which is all the QR assertions need.
+const smallPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+// The address is collected once, on the form that creates the administrator,
+// and the wizard spends it: the first sign-in lands on an inbox to check
+// rather than on a second form asking for the same thing.
+func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{
+		err:     evolution.ErrNotActivated,
+		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
+	}
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+
+	r, err := client.PostForm(ts.URL+"/setup", url.Values{
+		"email": {"bruno@example.com"}, "password": {"senha segura 123"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.Request.URL.Path != "/instalacao" {
+		t.Fatalf("creating the administrator ended at %s", r.Request.URL.Path)
+	}
+	if !evo.did("register-operator") {
+		t.Fatal("the wizard asked for an address it had already been given")
+	}
+	mustContain(t, string(page), "wizard after setup", "Enviamos um link de ativação", "bruno@example.com", "Verificando a ativação")
+
+	// And exactly one link goes out however many times the page is rendered:
+	// the wait is recorded, so a refresh is a refresh and not another email.
+	fetch(t, client, ts.URL+"/instalacao")
+	fetch(t, client, ts.URL+"/instalacao")
+	sent := 0
+	evo.mu.Lock()
+	for _, call := range evo.calls {
+		if call == "register-operator" {
+			sent++
+		}
+	}
+	evo.mu.Unlock()
+	if sent != 1 {
+		t.Fatalf("%d activation links were sent for one wait", sent)
+	}
+}
+
+// Evolution is usually still booting when the administrator is created, so the
+// link cannot go out yet. The wizard sends it on the first render that finds
+// Evolution awake, and asks for nothing in the meantime beyond a button.
+func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
+	repo := newRepo()
+	evo := &fakeEvolution{err: errors.New("connection refused"), registerErr: errors.New("connection refused")}
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+	if _, err := client.PostForm(ts.URL+"/setup", url.Values{
+		"email": {"bruno@example.com"}, "password": {"senha segura 123"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Evolution comes up, without a licence.
+	evo.mu.Lock()
+	evo.err, evo.registerErr = evolution.ErrNotActivated, nil
+	evo.license = evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"}
+	evo.mu.Unlock()
+
+	page := fetch(t, client, ts.URL+"/instalacao")
+	if !evo.did("register-operator") {
+		t.Fatal("the link was never sent although Evolution was up and unlicensed")
+	}
+	mustContain(t, page, "wizard once awake", "bruno@example.com", "Verificando a ativação")
+	if repo.license.LinkSentAt.IsZero() {
+		t.Fatal("the wait was not recorded, so a refresh would send another link")
+	}
+}
+
+// The length rule is a boundary, so it is worth pinning: six is a password the
+// panel accepts, five is not, and the server decides either way — the form's
+// own minlength is a convenience the browser can be talked out of.
+func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
+	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	defer short.Close()
+	r, err := http.PostForm(short.URL+"/setup", url.Values{"email": {"bruno@example.com"}, "password": {"cinco"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	mustContain(t, string(body), "setup", "pelo menos 6 caracteres")
+
+	repo := newRepo()
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", ""))
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+	if _, err := client.PostForm(ts.URL+"/setup", url.Values{"email": {"bruno@example.com"}, "password": {"seisok"}}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.user != "bruno@example.com" {
+		t.Fatalf("a six-character password was refused: administrator = %q", repo.user)
+	}
 }

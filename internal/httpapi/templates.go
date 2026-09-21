@@ -274,6 +274,25 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 .muted{color:var(--text-soft);font-size:.9rem;line-height:1.65}
 .stack>*+*{margin-top:16px}
 @media (max-width:520px){.row{align-items:flex-start}.row form,.row .btn{width:100%}}
+/* ---- installation wizard ---- */
+/* The first run is one column, one card and one question at a time: the panel
+   proper is what comes after it. */
+.wizard-shell{max-width:520px;margin:0 auto}
+.wizard{list-style:none;display:flex;align-items:center;gap:10px;margin:8px 0 22px;padding:0}
+.wizard__step{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:.85rem;font-weight:600;white-space:nowrap}
+.wizard__step+.wizard__step{flex:1;min-width:0}
+.wizard__step+.wizard__step::before{content:"";flex:1;min-width:14px;height:1px;background:var(--border-strong)}
+.wizard__n{width:26px;height:26px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:.8rem;font-weight:700;background:var(--surface-sunken);color:var(--muted);border:1px solid var(--border-strong)}
+.wizard__step--now{color:var(--brand)}
+.wizard__step--now .wizard__n{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.wizard__step--done{color:var(--ok)}
+.wizard__step--done .wizard__n{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-border)}
+.wizard__escape{display:flex;justify-content:center;margin-top:10px}
+.resend{margin-top:20px;border-top:1px solid var(--border);padding-top:14px}
+.resend summary{cursor:pointer;font-size:.9rem;font-weight:600;color:var(--brand-strong);list-style:none}
+.resend summary::-webkit-details-marker{display:none}
+.resend[open] summary{margin-bottom:12px}
+@media (max-width:460px){.wizard__label{display:none}}
 /* ---- colophon ---- */
 .colophon{margin-top:40px;padding:18px 0 4px;border-top:1px solid var(--border)}
 .colophon__line{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;margin:0;font-size:.85rem;color:var(--muted)}
@@ -437,6 +456,7 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <div class="card__body">
 <div class="empty"><p class="empty__title">Ainda não dá para gerar uma chave</p><p class="muted">{{.Notice}}</p>
 <div class="actions" style="justify-content:center;margin-top:14px">
+{{if .NeedsActivation}}<a class="btn" href="/instalacao">Ativar a licença</a>{{end}}
 {{if .NeedsPairing}}<a class="btn" href="/pair">Ler o QR code</a>{{end}}
 <a class="btn btn--ghost" href="/instancias">Ir para Instâncias</a>
 </div></div>
@@ -493,21 +513,11 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <section class="card">
 <div class="card__head"><h2>Instâncias disponíveis</h2><a class="btn btn--ghost btn--small" href="#nova-instancia">Adicionar instância</a></div>
 <div class="card__body">
-{{if .Unavailable}}<p class="alert" role="alert">{{.Notice}}</p>
-{{if .NeedsActivation}}<div class="card" style="margin-bottom:14px"><div class="card__body">
-<h3 style="margin-bottom:8px">Ativar a Evolution Go</h3>
-<p class="muted">A Evolution Go &eacute; a camada que mant&eacute;m a sess&atilde;o do WhatsApp, e ela exige uma licen&ccedil;a pr&oacute;pria. &Eacute; uma etapa &uacute;nica: depois de registrada, nada aqui volta a pedir isso.</p>
-<form method="post" action="/instancias/licenca" style="margin-top:12px">
-<label class="field" for="license-email"><span class="field__label">Seu e-mail</span>
-<span class="field__hint">Chega um link de ativa&ccedil;&atilde;o neste endere&ccedil;o; clicar nele completa o registro. O registro fica em nome do {{product}}, e o e-mail &eacute; o titular da licen&ccedil;a.</span></label>
-<input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="email"{{with .OperatorEmail}} value="{{.}}"{{end}}>
-<div class="actions"><button class="btn" type="submit">Ativar por e-mail</button></div>
-</form>
-<p class="muted" style="margin-top:10px">O e-mail vale para sempre: em qualquer outra instala&ccedil;&atilde;o, registrar com o mesmo endere&ccedil;o re&aacute;prova o mesmo titular em um clique, e a licen&ccedil;a desta implanta&ccedil;&atilde;o fica guardada pelo painel para reativar rebuilds sem ajuda humana.</p>
-{{if .RegisterURL}}<p class="muted" style="margin-top:10px">Prefere o site da Evolution? <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Abrir o registro no servidor deles</a> — leva ao mesmo lugar, s&oacute; que em vez de redirecionar aqui.</p>
-{{else}}<p class="muted" style="margin-top:10px">N&atilde;o foi poss&iacute;vel obter o link de registro agora. Ele tamb&eacute;m sai no servidor com:</p>
-<pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}
-</div></div>{{end}}
+{{if .Unavailable}}
+{{if .NeedsActivation}}<div class="empty"><p class="empty__title">A licença ainda não foi ativada</p>
+<p class="muted">Sem ela, a camada que mantém a sessão do WhatsApp não responde. É um e-mail e um clique, uma vez só.</p>
+<div class="actions" style="justify-content:center;margin-top:14px"><a class="btn" href="/instalacao">Ativar a licença</a></div></div>
+{{else}}<p class="alert" role="alert">{{.Notice}}</p>{{end}}
 {{else if .Instances}}
 <form method="post" action="/instancias/selecionar">
 <ul class="rows">
@@ -530,7 +540,9 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 {{end}}
 </div></section>
 
-{{if .Selected}}
+{{/* An instance the panel cannot even list is not one it can operate, so the
+     controls for it stay out of the way until Evolution answers again. */}}
+{{if and .Selected (not .Unavailable)}}
 <section class="card">
 <div class="card__head"><h2>Instância em uso: {{.SelectedName}}</h2>{{with .SessionLabel}}<span class="pill pill--{{$.SessionTone}}">{{.}}</span>{{end}}</div>
 <div class="card__body stack">
@@ -676,6 +688,108 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 </div></section>
 {{template "foot"}}{{end}}
 
+{{define "instalacao"}}{{template "head" .}}
+<header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
+<div class="masthead__tools">{{template "themeswitch"}}</div></header>
+<div class="wizard-shell"{{if and (eq .Step 1) .Sent}} data-onboarding="1"{{end}}>
+<ol class="wizard" aria-label="Etapas da instalação">
+{{range .Steps}}<li class="wizard__step wizard__step--{{.State}}"{{if eq .State "now"}} aria-current="step"{{end}}>
+<span class="wizard__n" aria-hidden="true">{{if eq .State "done"}}✓{{else}}{{.Number}}{{end}}</span><span class="wizard__label">{{.Label}}</span></li>{{end}}
+</ol>
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+{{with .OK}}<p class="alert alert--ok" role="status">{{.}}</p>{{end}}
+
+{{if eq .Step 1}}
+<section class="card">
+<div class="card__head"><h2>Ativar a licença</h2></div>
+<div class="card__body">
+{{if .Sent}}
+<p class="lead">Enviamos um link de ativação para <strong>{{.OperatorEmail}}</strong>.</p>
+<p class="muted">Abra o e-mail e clique no link. Ele vale por 15 minutos, e esta página segue sozinha assim que a licença entrar.</p>
+<p class="busy" role="status"><span class="spinner" aria-hidden="true"></span>Verificando a ativação…</p>
+<details class="resend">
+<summary>Não recebeu o e-mail?</summary>
+<form method="post" action="/instancias/licenca" data-busy="Enviando…">
+<label class="field" for="license-email"><span class="field__label">Enviar para outro endereço</span></label>
+<input id="license-email" type="email" name="email" maxlength="254" required value="{{.OperatorEmail}}" autocomplete="email" autocapitalize="none" spellcheck="false">
+<div class="actions"><button class="btn btn--ghost" type="submit">Enviar de novo</button></div>
+</form>
+{{if .RegisterURL}}<p class="muted">Prefere fazer no site da Evolution? <a href="{{.RegisterURL}}" rel="noopener noreferrer" target="_blank">Abrir o registro</a> — leva ao mesmo lugar.</p>
+{{else}}<p class="muted">O link de registro não veio agora. Ele também sai no servidor com:</p>
+<pre><code>whatsapp-mcp logs evolution-go | grep -i license</code></pre>{{end}}
+</details>
+{{else}}
+<p class="lead">Este servidor usa a Evolution Go para manter a sessão do WhatsApp, e ela pede uma licença gratuita. É uma vez só.</p>
+<form method="post" action="/instancias/licenca" data-busy="Enviando…">
+<label class="field" for="license-email"><span class="field__label">Seu e-mail</span>
+<span class="field__hint">Você recebe um link de ativação neste endereço.</span></label>
+<input id="license-email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="email" autocapitalize="none" spellcheck="false"{{with .OperatorEmail}} value="{{.}}"{{end}}>
+<div class="actions"><button class="btn btn--block" type="submit">Enviar link de ativação</button></div>
+<p class="busy" data-busy-note role="status" hidden>Pedindo o link ao servidor de licenças.</p>
+</form>
+{{end}}
+</div></section>
+{{end}}
+
+{{if eq .Step 2}}
+<section class="card">
+<div class="card__head"><h2>Conectar o WhatsApp</h2></div>
+<div class="card__body">
+{{if .Unavailable}}
+<p class="lead">{{.Notice}}</p>
+<p class="muted">Esta página tenta de novo sozinha a cada 5 segundos.</p>
+{{else if .NeedsPairing}}
+<ol class="guide">
+<li>Abra o <strong>WhatsApp</strong> no celular.</li>
+<li>Toque em <strong>Configurações</strong> (no Android, o menu <strong>⋮</strong>).</li>
+<li>Toque em <strong>Dispositivos conectados</strong>, depois em <strong>Conectar um dispositivo</strong>.</li>
+<li>Aponte a câmera para o código abaixo.</li>
+</ol>
+{{if .QRCode}}<img class="qrcode" src="{{.QRCode}}" alt="QR code para conectar o WhatsApp" width="250" height="250">
+{{else}}<div class="empty"><p class="empty__title">Aguardando o QR code</p><p class="muted">{{.QRNotice}}</p></div>{{end}}
+<p class="muted">O código expira rápido; esta página busca outro sozinha.</p>
+<div class="actions"><form method="post" action="/instancias/conectar"><input type="hidden" name="origem" value="instalacao"><button class="btn btn--ghost btn--small" type="submit">Gerar outro código</button></form></div>
+{{else if .Instances}}
+<p class="lead">Escolha qual conta de WhatsApp o MCP deve usar.</p>
+<form method="post" action="/instancias/selecionar">
+<input type="hidden" name="origem" value="instalacao">
+<ul class="rows">
+{{range .Instances}}<li class="row{{if .Selected}} row--on{{end}}">
+<label class="row__label" for="instance-{{.ID}}">
+<input id="instance-{{.ID}}" type="radio" name="instance_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
+<span class="row__main"><span class="row__title">{{.Name}}</span>{{if .Number}}<span class="row__meta mono">{{.Number}}</span>{{end}}</span>
+</label>
+<span class="pill pill--{{statusTone .Status}}">{{statusLabel .Status}}</span>
+</li>{{end}}
+</ul>
+<div class="actions" style="margin-top:14px"><button class="btn btn--block" type="submit">Usar esta conta</button></div>
+</form>
+{{else}}
+<p class="lead">Dê um nome para esta conta de WhatsApp. É só um rótulo para você reconhecer depois.</p>
+<form method="post" action="/instancias" data-busy="Criando…">
+<input type="hidden" name="origem" value="instalacao">
+<label class="field" for="new-instance"><span class="field__label">Nome</span></label>
+<input id="new-instance" type="text" name="name" maxlength="60" required value="pessoal" autocapitalize="none" spellcheck="false">
+<div class="actions"><button class="btn btn--block" type="submit">Criar e gerar o QR code</button></div>
+<p class="busy" data-busy-note role="status" hidden>Criando a conta no WhatsApp. Isso leva alguns segundos; o QR code aparece assim que ela estiver pronta.</p>
+</form>
+{{end}}
+</div></section>
+{{end}}
+
+{{if eq .Step 3}}
+<section class="card card--accent">
+<div class="card__head"><h2>Tudo pronto</h2><span class="pill pill--ok">WhatsApp conectado</span></div>
+<div class="card__body">
+<p class="lead">Falta apontar um cliente para este MCP. O painel mostra a chave e o comando já preenchidos.</p>
+<div class="actions"><a class="btn btn--block" href="/">Ir para o painel</a></div>
+</div></section>
+{{end}}
+
+{{if ne .Step 3}}<div class="wizard__escape"><form method="post" action="/logout"><button class="btn btn--quiet" type="submit">Sair</button></form></div>{{end}}
+</div>
+{{template "foot"}}{{end}}
+
 {{define "setup"}}{{template "head" .}}
 <div style="max-width:460px;margin:0 auto;padding-top:8vh">
 <div class="masthead" style="justify-content:center">{{template "brandmark"}}</div>
@@ -690,11 +804,12 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 <form method="post">
 {{with .Token}}<input type="hidden" name="setup_token" value="{{.}}">{{end}}
-<label class="field" for="username"><span class="field__label">Usuário</span></label>
-<input id="username" type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false">
+<label class="field" for="email"><span class="field__label">E-mail</span>
+<span class="field__hint">Use um e-mail válido e que você consiga abrir: o próximo passo pede uma confirmação nele.</span></label>
+<input id="email" type="email" name="email" maxlength="254" required placeholder="voce@exemplo.com" autocomplete="username" autocapitalize="none" spellcheck="false"{{with .Email}} value="{{.}}"{{end}}>
 <label class="field" for="password"><span class="field__label">Senha</span>
-<span class="field__hint">Mínimo de 10 caracteres.</span></label>
-<input id="password" type="password" name="password" minlength="10" required autocomplete="new-password">
+<span class="field__hint">Mínimo de 6 caracteres.</span></label>
+<input id="password" type="password" name="password" minlength="6" required autocomplete="new-password">
 <div class="actions"><button class="btn btn--block" type="submit">Criar administrador</button></div>
 </form>{{end}}
 </div></section>
@@ -717,10 +832,10 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <label class="field" for="current"><span class="field__label">Senha atual</span></label>
 <input id="current" type="password" name="current_password" required autocomplete="current-password">
 <label class="field" for="password"><span class="field__label">Nova senha</span>
-<span class="field__hint">M&iacute;nimo de 10 caracteres.</span></label>
-<input id="password" type="password" name="password" minlength="10" required autocomplete="new-password">
+<span class="field__hint">Mínimo de 6 caracteres.</span></label>
+<input id="password" type="password" name="password" minlength="6" required autocomplete="new-password">
 <label class="field" for="confirm"><span class="field__label">Repita a nova senha</span></label>
-<input id="confirm" type="password" name="confirm_password" minlength="10" required autocomplete="new-password">
+<input id="confirm" type="password" name="confirm_password" minlength="6" required autocomplete="new-password">
 <div class="actions"><button class="btn btn--block" type="submit">Salvar senha</button></div>
 </form>
 </div></section>
@@ -736,8 +851,8 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <div class="card__body">
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 <form method="post">
-<label class="field" for="username"><span class="field__label">Usuário</span></label>
-<input id="username" type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false">
+<label class="field" for="username"><span class="field__label">E-mail</span></label>
+<input id="username" type="text" inputmode="email" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false">
 <label class="field" for="password"><span class="field__label">Senha</span></label>
 <input id="password" type="password" name="password" required autocomplete="current-password">
 <div class="actions"><button class="btn btn--block" type="submit">Entrar</button></div>

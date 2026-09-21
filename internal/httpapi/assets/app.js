@@ -65,6 +65,37 @@
     }, 4000);
   }
 
+  // The installation wizard waits on the one thing no automation can do: the
+  // operator clicking a link in their own inbox. Asking the server which step
+  // is open turns that wait into the page moving on by itself, instead of a
+  // reload nobody knows to perform. The pairing step reloads on its own, so
+  // only the licence step carries the marker.
+  var wizard = document.querySelector("[data-onboarding]");
+  if (wizard) {
+    var openStep = wizard.getAttribute("data-onboarding");
+    var polls = 0;
+    var watch = window.setInterval(function () {
+      polls += 1;
+      if (polls > 150) {
+        window.clearInterval(watch);
+        return;
+      }
+      fetch("/api/instalacao", { headers: { Accept: "application/json" } })
+        .then(function (response) {
+          return response.ok ? response.json() : null;
+        })
+        .then(function (state) {
+          if (state && String(state.step) !== openStep) {
+            window.clearInterval(watch);
+            window.location.reload();
+          }
+        })
+        .catch(function () {
+          /* A failed poll is not worth reporting: the next one may succeed. */
+        });
+    }, 4000);
+  }
+
   // Some of these forms wait on WhatsApp: creating an instance only answers
   // once Evolution has the session up, which is several seconds of a page that
   // looks idle. People read that as a dead click and press the button again,

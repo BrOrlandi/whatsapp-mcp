@@ -145,6 +145,12 @@ preview:
     @echo "Painel de demonstração em http://127.0.0.1:8090  (usuário: admin / senha: senha segura 123)"
     go run ./cmd/panel-preview
 
+# A instalação inteira, do /setup ao pareamento: sem admin, sem licença, sem chave.
+preview-instalacao:
+    @echo "Comece em http://127.0.0.1:8090/setup — crie o administrador com um e-mail qualquer."
+    @echo "O link que chegaria por e-mail é impresso aqui; abra-o em outra aba."
+    PREVIEW_SETUP=true PREVIEW_UNLICENSED=true PREVIEW_PAIRED=false PREVIEW_PUBLIC_URL=http://127.0.0.1:8090 go run ./cmd/panel-preview
+
 # ------------------------------------------------------------------- inspeção
 
 # Mostra o estado do gateway local.
