@@ -134,10 +134,67 @@ func (s *State) Snapshot() Snapshot {
 	return snapshot
 }
 
+// SetEvolution records that Evolution itself could not be asked. It is the
+// unknown case rather than a verdict about the session, and it is separate
+// from ObserveInstance because a failed poll carries no evidence at all.
 func (s *State) SetEvolution(connected bool) {
 	s.mu.Lock()
 	s.snapshot.EvolutionConnected = connected
 	s.mu.Unlock()
+}
+
+// ObserveInstance records what a poll of Evolution's own instance record said,
+// and is the only place a poll is allowed to decide the session is down.
+//
+// The two signals disagree, and not symmetrically. Evolution's AMQP connection
+// events come from the WhatsApp client itself; its instance record is a row it
+// updates alongside, and that row has been seen to stay false through a
+// reconnect — the client talking to WhatsApp the whole time. A 15-second poll
+// then overwrote connection events from 13 seconds earlier, and the panel
+// announced a disconnected session while 200 messages a minute were being
+// indexed from it.
+//
+// So a poll may confirm a session and may report one that was already down,
+// but it may not take down a session that is currently receiving: messages
+// arriving through a client are proof that the client is connected, and no row
+// in a database outranks that. trafficWindow is how recent an event has to be
+// to count as proof.
+//
+// It reports whether it refused the poll, which is worth a log line: the
+// contradiction means Evolution's record is wrong and will stay wrong until
+// something reconnects the instance.
+func (s *State) ObserveInstance(connected bool, trafficWindow time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	refused := false
+	// Only a downgrade is refused, and only from "connected". An explicit
+	// disconnected, logged_out or banned event is authoritative — those arrive
+	// from the client too, and this must never argue with them.
+	if !connected && s.snapshot.WhatsApp.State == "connected" && s.receiving(trafficWindow) {
+		connected, refused = true, true
+	}
+	s.snapshot.EvolutionConnected = connected
+	current := &s.snapshot.WhatsApp
+	switch {
+	case connected:
+		if current.State != "connected" {
+			current.ChangedAt = time.Now().UTC()
+		}
+		current.State, current.Reason = "connected", ""
+	case current.State == "" || current.State == "connected":
+		current.State = "disconnected"
+		current.ChangedAt = time.Now().UTC()
+	}
+	return refused
+}
+
+// receiving reports whether an event has arrived recently enough to prove the
+// WhatsApp client is alive. Callers hold the lock.
+func (s *State) receiving(window time.Duration) bool {
+	if s.snapshot.LastEventAt.IsZero() || window <= 0 {
+		return false
+	}
+	return time.Since(s.snapshot.LastEventAt) <= window
 }
 func (s *State) SetRabbit(connected bool) {
 	s.mu.Lock()
@@ -193,22 +250,6 @@ func (s *State) SetWhatsApp(state, reason, jid, pushName string) {
 // it is not allowed to overwrite a specific failure such as a logged-out or
 // banned session with a vague "disconnected", because that would erase the only
 // explanation the operator has.
-func (s *State) ReconcileWhatsApp(connected bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current := &s.snapshot.WhatsApp
-	switch {
-	case connected:
-		if current.State != "connected" {
-			current.ChangedAt = time.Now().UTC()
-		}
-		current.State, current.Reason = "connected", ""
-	case current.State == "" || current.State == "connected":
-		current.State = "disconnected"
-		current.ChangedAt = time.Now().UTC()
-	}
-}
-
 // SetReprojection records what the repair pass is doing, so a long rebuild is
 // visible rather than looking like a stall.
 func (s *State) SetReprojection(running bool, events, messages int, orphans int64) {

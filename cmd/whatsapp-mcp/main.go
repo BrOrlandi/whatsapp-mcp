@@ -53,7 +53,7 @@ func main() {
 		logger.Error("generate session key", "error", err)
 		os.Exit(1)
 	}
-	go pollEvolution(ctx, evolutionClient, db, state, cfg.StatusPollInterval, logger)
+	go pollEvolution(ctx, evolutionClient, db, state, cfg.StatusPollInterval, cfg.FreshnessWindow, logger)
 	go pollDatabase(ctx, db, state)
 	consumer := &rabbit.Consumer{URL: cfg.RabbitURL, Queues: cfg.RabbitQueues, Store: db, State: state, Logger: logger}
 	go func() {
@@ -114,7 +114,7 @@ type selectionReader interface {
 //
 // Connection events are the primary signal and arrive on their own queues; this
 // poll exists to recover the truth after a restart and to notice a silent drop.
-func pollEvolution(ctx context.Context, client instanceLister, selection selectionReader, state *health.State, interval time.Duration, logger *slog.Logger) {
+func pollEvolution(ctx context.Context, client instanceLister, selection selectionReader, state *health.State, interval, freshness time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -130,10 +130,15 @@ func pollEvolution(ctx context.Context, client instanceLister, selection selecti
 				}
 			}
 		}
-		state.SetEvolution(err == nil && connected)
 		if err == nil {
-			state.ReconcileWhatsApp(connected)
+			// The window is the freshness window: if the index is being kept
+			// current, the session feeding it is up, whatever Evolution's own
+			// record says about it.
+			if state.ObserveInstance(connected, freshness) {
+				logger.Warn("Evolution reports the instance disconnected while its messages keep arriving; its instance record is stale until something reconnects it")
+			}
 		} else if ctx.Err() == nil {
+			state.SetEvolution(false)
 			logger.Warn("Evolution readiness poll failed", "error", err)
 		}
 		select {
