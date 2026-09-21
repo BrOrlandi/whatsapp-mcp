@@ -93,7 +93,14 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
 case "${BRANCH}" in HEAD|"") BRANCH=main ;; esac
 
 if [ -n "${REPO_REF:-}" ]; then
-    TARGET_REF="${REPO_REF}"
+    # A branch name has to resolve through the remote. Once an update has
+    # detached HEAD onto a release tag, the local branch stops moving, so a
+    # plain "main" here would name whatever commit it was left at.
+    if git rev-parse --quiet --verify "refs/remotes/origin/${REPO_REF}" >/dev/null; then
+        TARGET_REF="origin/${REPO_REF}"
+    else
+        TARGET_REF="${REPO_REF}"
+    fi
     info "moving to ${TARGET_REF}, as REPO_REF asks"
 else
     # The newest tag reachable from the branch's own history, which is what a
@@ -187,10 +194,12 @@ CURRENT_STEP="pinning the image"
 # Compose defaults to `edge`, which follows main. An installation that has just
 # been moved to a release tag must run that release's image, not whatever main
 # built last night.
-if [ "${TARGET_REF}" = "origin/${BRANCH}" ] || [ "${TARGET_REF}" = "${BRANCH}" ]; then
-    IMAGE_TAG="edge"
-else
+# Only a tag has an image published under its own name. Anything else is a
+# branch, and the only image built from a branch is `edge`, which follows main.
+if git rev-parse --quiet --verify "refs/tags/${TARGET_REF}" >/dev/null; then
     IMAGE_TAG="${TO_VERSION}"
+else
+    IMAGE_TAG="edge"
 fi
 if grep -q "^WHATSAPP_MCP_TAG=" .env; then
     sed -i "s|^WHATSAPP_MCP_TAG=.*|WHATSAPP_MCP_TAG=${IMAGE_TAG}|" .env
