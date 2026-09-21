@@ -57,36 +57,38 @@ PostgreSQL migrations run automatically when it starts.
 ## 3. Activate Evolution Go
 
 [Evolution Go](https://github.com/EvolutionAPI/evolution-go) requires a licence
-to operate: until it is activated, its endpoints answer 503. Activation happens
-once, and the panel drives it — the first sign-in opens the installation wizard
-on that step, which asks for an email, requests the magic link itself and polls
-until the licence lands. Nobody opens Evolution's own manager. See
+to operate: until it is activated, its endpoints answer 503. Activation is a
+wizard step the panel itself drives, and by default it needs nothing from you:
+with `EVOLUTION_LICENSE_AUTO` on (the default), the panel registers the licence
+with this project's own address (`whatsappmcp+…@brorlandi.xyz`), whose mail is
+read by [the licence worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
+— the link gets clicked, the wizard notices the licence and moves on by itself.
+Nobody types an email, opens an inbox, or opens Evolution's own manager. See
 [evolution/licensing.md](evolution/licensing.md) for what the licence is and
-why one click cannot be automated away.
+how each piece of this works.
 
-### Activating without a browser
+Prefer your own inbox? Set `EVOLUTION_LICENSE_AUTO=false` before install (or
+in `.env`, then `whatsapp-mcp restart`) and the wizard sends the activation link
+to your email instead — same automation, except the one click on the emailed
+link is yours. That click is the identity proof the licence is issued for;
+the automatic mode trades it for control of the domain the mail lands on.
 
-The registration is **once per email, not once per server**. Evolution Go has a
-headless activation for exactly this: put the email you registered with into
-`EVOLUTION_OPERATOR_EMAIL` and it calls their licensing server on startup and
-activates itself, with no browser step.
+### The startup fallback
+
+Evolution Go also documents a headless startup activation: an email that has
+registered before, put in `EVOLUTION_OPERATOR_EMAIL`, makes Evolution call
+their licensing server itself on boot with no browser step.
 
 ```sh
 EVOLUTION_OPERATOR_EMAIL=you@example.com
 ```
 
-`install.sh` reads it from its own environment, so a second server is one
-command with nothing to click:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh \
-  | sudo EVOLUTION_OPERATOR_EMAIL=you@example.com bash
-```
-
-An email that has never registered falls back to the manual flow, so the first
-time is still a browser visit. After that, every rebuild and every new machine
-comes up already activated — which also means a redeploy that recreates the
-Evolution container does not leave the panel waiting on a form.
+It is belt and braces rather than the main path — as of this writing the live
+licensing server answers that route with 401 "missing token" for a request
+that Evolution Go 0.7.2 sends no header for, so it may be dead until they
+reconcile versions. The panel's own flow does not depend on it: every rebuild
+that loses the Evolution volume is re-licensed from the copy the panel keeps,
+and every reinstall registers again by itself in the wizard.
 
 Evolution Go is Apache-2.0 with additional brand-protection conditions, and
 "Evolution", "Evolution Go" and "Evolution Foundation" are trademarks. Review

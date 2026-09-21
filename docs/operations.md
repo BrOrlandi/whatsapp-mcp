@@ -60,7 +60,9 @@ Read by the `whatsapp-mcp` binary:
 | `EVOLUTION_URL` | `http://evolution-go:4000` | Evolution Go's internal address. |
 | `EVOLUTION_API_KEY` | — | Evolution's global key, for administrative routes only. Required. |
 | `EVOLUTION_TIMEOUT` | `5s` | Per-request timeout against Evolution. |
-| `EVOLUTION_OPERATOR_EMAIL` | unset | Read by Evolution Go, not by the gateway. An email that has registered a licence once before makes Evolution activate itself on startup instead of waiting for the browser flow. |
+| `EVOLUTION_LICENSE_AUTO` | `true` | Automatic licence activation: registrations go to an address on `EVOLUTION_LICENSE_EMAIL_DOMAIN`, whose mail is clicked by this project's email worker. `false` keeps the operator's own email and their own click on the wizard's link. |
+| `EVOLUTION_LICENSE_EMAIL_DOMAIN` | `brorlandi.xyz` | Domain of the automatic licence address. Its MX must be the Cloudflare Email Routing zone the licence worker lives in. |
+| `EVOLUTION_OPERATOR_EMAIL` | unset | Read by Evolution Go, not by the gateway. An email that has registered a licence once before makes Evolution activate itself on startup — Evolution's own headless path, believed broken against the current licensing server (it answers 401 without a `Bearer` header 0.7.2 never sends). Kept as a fallback. |
 | `FRESHNESS_WINDOW` | `5m` | How old the newest persisted event may be before `/readyz` reports 503. |
 | `STATUS_POLL_INTERVAL` | `15s` | How often the gateway reconciles session state with Evolution. |
 | `SETUP_TOKEN` | unset | Guards the first-run form: it opens only at `/setup?token=<value>`. Set it whenever the panel is reachable from the internet; leave it empty on loopback. Stops mattering once an administrator exists. |

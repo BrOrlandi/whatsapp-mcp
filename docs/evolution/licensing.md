@@ -1,11 +1,12 @@
 # Evolution Go licensing, and what this panel automates of it
 
-The one step in this project's installation that no code can finish on its own
-is the first registration of an operator's email with Evolution Foundation's
-licensing server — because that registration *is* the proof that the email is
-theirs. This explains what the licence is, what the licensing server exposes,
-how far this project drives it without a browser, and the one click that is
-left and why it stays.
+The one step in this project's installation that used to need a person was the
+first registration with Evolution Foundation's licensing server — because that
+registration is the proof that the registering address belongs to whoever
+controls the deployment. This explains what the licence is, what the licensing
+server exposes, and the two modes this panel registers it in: automatically,
+through an email worker that does the clicking, or manually, with the
+operator's own single click in their own inbox.
 
 Everything below was read from
 [`evolution-foundation/evolution-go`](https://github.com/evolution-foundation/evolution-go)
@@ -99,18 +100,26 @@ identical). So the shipped headless path may be dead against the current
 server; the panel's flow below does not depend on it at all. It is kept in
 `.env` as a fallback that costs nothing if the server accepts it again.
 
-## Why the first registration still needs a person
+## Why the registration needs an identity, not a person
 
 There is no input an installer could invent that would produce a licence. The
 credential is issued by a server this project does not control, in exchange
-for an identity the operator has to establish once — by clicking a link in the
-inbox they own.
+for the proof that the registering address belongs to whoever controls the
+deployment. That proof was originally a person clicking a link in their inbox;
+this project's automatic mode moves it to the deployment's own domain — an
+email address whose MX the operator controls and whose worker does the
+clicking. The identity being registered changes from "the operator's inbox" to
+"the operator's domain", which is why the automatic mode does not weaken the
+proof: it relocates it, the way Let's Encrypt's DNS-01 challenge relocates
+HTTP-01.
 
-That step is not incidental. Evolution Go is Apache-2.0 **with additional
-brand-protection conditions, including a Usage Notification requirement**, and
-the registration is how that notification happens. It is a condition of the
-grant under which this project is allowed to depend on and redistribute
-Evolution Go at all.
+What stays true in either mode: no licence without a registration, and no
+registration the licensee did not stand behind. Evolution Go is Apache-2.0
+**with additional brand-protection conditions, including a Usage Notification
+requirement**, and the registration is how that notification happens — one per
+installation, since every deployment mints its own random address. It is a
+condition of the grant under which this project is allowed to depend on and
+redistribute Evolution Go at all.
 
 ## Why forging one is not an option
 
@@ -174,13 +183,14 @@ startup fallback, documented above.
 
 ## If that is still too much
 
-The way to remove the click is to ask, not to route around it. Evolution
-Foundation lists a contact for licensing enquiries, and an open-source
-installer that puts Evolution Go on third-party servers is a distribution
-channel rather than lost revenue. What to ask for is a distribution
-identifier or a non-interactive per-installation activation: every deployment
-still counted, which is what the Usage Notification is for, without a form
-in the middle.
+With the email worker in place, there is no click left to remove in
+automatic mode. What could still be worth asking Evolution Foundation for is a
+first-class non-interactive activation — a distribution identifier the
+installer presents, every deployment still counted, which is what the Usage
+Notification is for, without an email in the middle. It would simplify this
+stack (no Email Routing, no worker) at the cost of depending on them wanting
+it too. Until then, the worker route stays within infrastructure the operator
+already controls.
 
 The alternative that removes the dependency entirely is talking to
 [whatsmeow](https://github.com/tulir/whatsmeow) directly — the MIT-licensed
