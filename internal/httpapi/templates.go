@@ -729,7 +729,6 @@ input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
 <p class="busy" role="status"><span class="spinner" aria-hidden="true"></span>Ativando…</p>
 <details class="resend">
 <summary>Prefiro ativar manualmente</summary>
-<p class="muted">Não &eacute; necess&aacute;rio — a ativação automática costuma resolver em segundos, e se travar esta página oferece isto sozinha. Mas se voc&ecirc; preferir registrar a licença voc&ecirc; mesmo, informe um e-mail que consiga abrir e clique no link que chegar.</p>
 {{template "licencaform" .}}
 </details>
 {{else if .Sent}}
