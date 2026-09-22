@@ -1032,7 +1032,7 @@ func TestTheLandingPageDescribesConnectionsRatherThanKeys(t *testing.T) {
 	// Nothing connected yet: the page says so in those words and offers the one
 	// action that changes it. No phone number is left in its protocol shape.
 	page := fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "no connection", "Nenhuma ferramenta de IA conectada", "Conectar uma ferramenta de IA", "55 (16) 92345-6789")
+	mustContain(t, page, "no connection", "Nenhuma ferramenta de IA conectada", "Conectar uma ferramenta de IA", "55 (11) 92345-6789")
 	mustNotContain(t, page, "no connection", "5511923456789", "Chaves ativas", "Gerar nova chave")
 
 	// A connection exists but has never been used: it is waiting, not working.
