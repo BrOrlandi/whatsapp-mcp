@@ -36,345 +36,223 @@
 
 Peça ao Claude para ler uma conversa, buscar em um ano de mensagens, enviar um
 arquivo, criar uma enquete — no seu próprio WhatsApp, no seu próprio servidor.
-Você sobe uma stack, vincula seu número por QR code e entrega ao seu agente uma
-única chave de API.
 
 <p align="center">
   <img src="docs/assets/panel-conectar.png" alt="A página Conectar do painel de controle" width="820">
 </p>
 
-### Feito para ser fácil de instalar — inclusive por quem não é técnico
+## Como instalar
 
-Este projeto não pressupõe que você saiba Docker, TLS ou linha de comando. São
-dois momentos: um comando copiado e colado no terminal do servidor, e depois um
-assistente passo a passo dentro do próprio painel, que faz o resto e não deixa
-você avançar com algo pela metade.
+São três passos, e você não precisa saber Docker, TLS nem linha de comando.
 
-O gateway vem com o seu próprio painel de controle. O primeiro acesso abre o
-assistente de instalação — licença, WhatsApp, cliente — e só entrega o controle
-quando o gateway já consegue fazer alguma coisa de fato. Cada etapa explica o
-que está acontecendo, verifica sozinha se deu certo e avança sozinha quando dá.
-Ao final, o painel mostra o bloco de configuração do MCP **já preenchido com o
-seu endereço e a sua chave**, pronto para colar no Claude — sem editar arquivo
-de configuração na mão, sem descobrir qual URL usar.
+### 1. Alugue um servidor
 
-Depois disso o painel é dividido por tarefa: **Conectar** emite chaves de
-cliente e imprime o bloco de configuração já preenchido, **Instâncias** cuida da
-conexão com o WhatsApp, **Estado** é a visão de diagnóstico, **Documentação**
-lista as ferramentas e **Receitas** mostra o que dá para pedir ao assistente.
+Este projeto roda em uma máquina sua, não existe versão hospedada — o ponto é
+que as suas mensagens fiquem num computador que é seu. Você aluga uma máquina
+virtual (VPS) em um provedor de nuvem, por volta de **US$ 12 a US$ 25 por mês**.
 
-## O que ele faz
+Peça uma máquina assim:
 
-21 ferramentas em quatro grupos — ler, enviar, agir, operar:
-
-- **Ler o índice**: listar conversas, ler um período, busca em texto completo,
-  pedir histórico mais antigo do que o já ingerido.
-- **Enviar**: texto, mídia a partir de uma URL, localização, cartão de contato,
-  enquete — cada um informando se o WhatsApp realmente entregou, e não apenas se
-  a API aceitou.
-- **Agir sobre uma mensagem**: apagar (em duas etapas, porque revogar alcança o
-  celular de outras pessoas), editar, reagir, arquivar/fixar/silenciar uma
-  conversa.
-- **Perguntar sobre a conta**: contatos, grupos, fotos de perfil, quais números
-  estão no WhatsApp, e a saúde do próprio gateway e a cobertura do índice.
-
-A lista completa com os argumentos fica em `/documentacao` no painel, gerada a
-partir das próprias definições do servidor MCP — e em
-[docs/mcp-tools.md](docs/mcp-tools.md), com o raciocínio por trás das mais
-delicadas.
-
-E o painel não para na lista: **`/receitas`** traz seis receitas prontas —
-agendar uma mensagem, vigiar palavras-chave, cobrar o que ficou sem resposta,
-apurar uma enquete, resumir o dia de um grupo, arquivar o que foi combinado.
-Cada uma é um prompt para colar, com as ferramentas que ela usa e a ressalva
-que importa. Nenhuma precisa de código novo: quem espera, vigia e monta o
-relatório é o assistente — o gateway só responde pelo WhatsApp quando
-perguntado.
-
-## Instalação
-
-Quatro coisas, e a parte mais demorada é esperar o Docker baixar as imagens:
-
-1. Alugue um servidor Linux pequeno.
-2. Rode o instalador nele — um comando.
-3. Vincule o seu WhatsApp escaneando um QR code no painel.
-4. Cole o bloco gerado no seu cliente MCP.
-
-Não existe versão hospedada e não vai existir: o ponto do projeto é que as suas
-mensagens fiquem em uma máquina que é sua.
-
-### 1. O servidor
-
-A stack são seis contêineres — o gateway, o Evolution Go, o RabbitMQ, o MinIO e
-dois bancos PostgreSQL, mais o Traefik que o instalador coloca na frente —
-então ela não roda na menor instância que um provedor vende.
-
-| | Mínimo | Recomendado |
-|---|---|---|
-| CPU | 1 vCPU | 2 vCPU |
-| RAM | 2 GB | 4 GB |
-| Disco | 20 GB SSD | 80 GB SSD — o índice de mensagens cresce junto com o seu histórico |
-| SO | Família Debian | Ubuntu 24.04 LTS (o que é testado) |
-| Arquitetura | x86-64 ou arm64 | qualquer uma |
-| Rede | portas 80 e 443 acessíveis pela internet, para o Let's Encrypt responder ao desafio | |
+| | |
+|---|---|
+| Sistema | **Ubuntu 24.04 LTS** |
+| CPU | 2 vCPU |
+| Memória | 4 GB de RAM |
+| Disco | 80 GB SSD |
+| Portas | 80 e 443 abertas |
 
 **Alugue perto de casa.** Toda mensagem que a sua conta envia ou recebe termina
-naquele disco em texto puro. Se você e as pessoas com quem você fala estão no
-Brasil, coloque a máquina no Brasil: as conversas ficam sob a jurisdição à qual
-você já responde pela LGPD, e o caminho até o WhatsApp é mais curto.
+naquele disco. Se você e as pessoas com quem você fala estão no Brasil, escolha
+uma região brasileira.
 
-| Provedor | Região brasileira | Observações |
+| Provedor | Região | Observação |
 |---|---|---|
-| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | Preço mensal fixo, o caminho mais simples dentro da AWS |
-| [Vultr](https://www.vultr.com/) | São Paulo | Cobrança por hora, rápido de destruir e tentar de novo |
-| [Magalu Cloud](https://magalu.cloud/) | Brasil | Empresa brasileira, dados e faturamento no Brasil |
-| [Hostinger VPS](https://www.hostinger.com.br/servidor-vps) | São Paulo | O mais barato dos quatro, planos de longo prazo |
-| [Hetzner](https://www.hetzner.com/cloud) | — (Alemanha, Finlândia, EUA) | Melhor preço por GB de RAM, se a localização não importa para você |
+| [Hostinger VPS](https://www.hostinger.com.br/servidor-vps) | São Paulo | O mais barato, painel em português |
+| [Magalu Cloud](https://magalu.cloud/) | Brasil | Empresa brasileira, nota fiscal no Brasil |
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | Preço mensal fixo, o caminho simples da AWS |
+| [Vultr](https://www.vultr.com/) | São Paulo | Cobrança por hora, fácil de apagar e refazer |
+| [Hetzner](https://www.hetzner.com/cloud) | Europa / EUA | Mais barato por GB de RAM, se a região não importa |
 
-Qualquer provedor que venda uma VM Ubuntu serve; estes são apenas alguns que
-fazem isso sem cerimônia.
+### 2. Rode um comando
 
-### 2. Rode o instalador
-
-Conecte por SSH na máquina recém-criada e rode:
+O provedor vai te dar um endereço de IP e um jeito de abrir um terminal na
+máquina (quase todos têm um botão de console no próprio site). Cole lá:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh | sudo bash
 ```
 
-Ele instala o Docker se estiver faltando, gera todos os segredos, deriva um
-hostname a partir do IPv4 público da própria VM pelo [sslip.io](https://sslip.io),
-obtém um certificado Let's Encrypt para ele, sobe a stack atrás do Traefik e
-termina imprimindo para onde ir (a saída do instalador é em inglês):
+Ele faz o resto sozinho: instala o Docker, gera todas as senhas, cria um
+endereço na internet para a sua máquina, emite um certificado de segurança e
+sobe o sistema. Leva alguns minutos, quase todos esperando o download.
+
+No fim ele imprime um link:
 
 ```
-URL:
-  https://a83f12c9.18-228-123-45.sslip.io
-
 Open this to create your administrator:
 
   https://a83f12c9.18-228-123-45.sslip.io/setup?token=7f3ac921d4e8
 ```
 
-Essa URL é o seu painel e o seu endpoint MCP — sem domínio para comprar, sem
-registro de DNS para criar. O painel se recusa a fazer qualquer outra coisa
-enquanto a senha temporária não for trocada. Rodar o instalador de novo é
-seguro: os segredos, o hostname e os seus dados não são tocados.
+### 3. Abra o link e siga o assistente
 
-Depois, `whatsapp-mcp status`, `logs`, `restart`, `start`, `stop`, `url` e
-`update` administram a instalação, que fica em `/opt/whatsapp-mcp`.
+O painel abre um assistente que termina a configuração e não deixa você avançar
+com algo pela metade:
 
-### 3. Siga o assistente de instalação
+1. **Crie o seu acesso** — um email e uma senha que você escolhe.
+2. **A licença se ativa sozinha.** Não há nada para digitar nem para clicar.
+3. **Conecte o WhatsApp** — dê um nome à conta e escaneie o QR code pelo
+   celular, em *Aparelhos conectados → Conectar um aparelho*.
+4. **Conecte a sua IA** — o painel pergunta qual ferramenta você usa e entrega
+   o bloco de configuração **já preenchido com o seu endereço e a sua chave**,
+   pronto para colar.
 
-Entre no painel e ele abre o assistente, em vez de um dashboard vazio. São duas
-coisas a fazer, e ele pede uma de cada vez.
+Pronto. A partir daí é só pedir as coisas no chat da sua IA.
 
-O formulário pede um email e uma senha. O email é o administrador, e é com ele
-que você entra.
+## 🤖 Não quer fazer sozinho? Peça para uma IA
 
-**Licença.** O Evolution Go exige uma licença para operar e responde 503
-enquanto ela não é ativada. Não há nada para digitar, nada para abrir e nada
-para clicar: com `EVOLUTION_LICENSE_AUTO` ligado (o padrão), o painel registra a
-licença com um endereço próprio no domínio deste projeto
-(`whatsappmcp+…@brorlandi.xyz`), o email chega no
-[worker de licenças](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
-e o clique acontece sozinho — o assistente fica verificando e segue em frente no
-momento em que a licença chega. Reconstruções que perdem os dados do Evolution
-são relicenciadas automaticamente a partir da cópia que o painel guarda, e o
-mesmo vale para uma reinstalação: o assistente refaz isso sem perguntar.
+Se qualquer passo acima pareceu difícil, copie o prompt abaixo e cole no
+**Claude**, no ChatGPT ou na ferramenta de IA que você usar. Ele conduz a
+instalação inteira com você, do zero: ajuda a escolher o provedor, diz
+exatamente o que clicar para criar a máquina, explica como abrir o terminal, e
+acompanha cada passo até o WhatsApp estar conectado.
 
-Prefere a sua própria caixa de entrada? Defina `EVOLUTION_LICENSE_AUTO=false` e
-o assistente envia o link de ativação para o seu email — mesma automação, exceto
-que o clique no link enviado é seu. Esse clique é uma prova de identidade, e o
-modo automático o troca pelo controle do domínio onde o email cai. De um jeito
-ou de outro, ninguém abre as páginas do próprio Evolution.
+<details>
+<summary><strong>📋 Clique para abrir o prompt — copie tudo</strong></summary>
 
-**WhatsApp.** Dê um nome à conta. O painel registra a conta no Evolution,
-assina as filas de eventos, inicia o cliente e mostra o QR code na mesma tela.
-Escaneie do seu celular em **Aparelhos conectados → Conectar um aparelho**. A
-página se atualiza sozinha, então um código escaneado avança por conta própria,
-e ela gera um código novo quando o anterior expira. A partir daí o gateway
-indexa tudo que chega.
+```
+Quero instalar o WhatsApp MCP no meu próprio servidor e preciso que você me
+guie do começo ao fim. Eu não sou uma pessoa técnica: não sei Docker, não sei
+linha de comando e nunca aluguei um servidor.
 
-### 4. Aponte o seu agente para ele
+O projeto é este: https://github.com/BrOrlandi/whatsapp-mcp
+Leia o README dele e o docs/instalacao.md antes de começar, e siga as
+recomendações de lá (tamanho de máquina, sistema operacional, portas) em vez
+de inventar as suas.
 
-Um cliente precisa de exatamente uma coisa: uma chave de API. A chave identifica
-a conta e a instância de WhatsApp para a qual ela está autorizada, então não há
-usuário, senha nem nome de instância para configurar.
+COMO EU QUERO QUE VOCÊ ME TRATE
+- Uma pergunta de cada vez. Espere a minha resposta antes de seguir.
+- Explique em português simples. Se precisar usar um termo técnico, explique o
+  que ele significa na mesma frase.
+- Nunca me mande um comando sem dizer o que ele faz.
+- Se eu errar ou algo der errado, me peça a mensagem de erro exata e me diga o
+  que fazer. Não invente uma solução: se você não souber, diga que não sabe.
+- Nunca me peça para colar aqui uma senha, uma chave de API ou o QR code.
 
-Gere uma em **Conectar**. A página mostra o segredo uma única vez, ao lado de um
-comando `claude mcp add` e deste bloco, ambos já preenchidos com o seu endereço:
+O QUE PRECISAMOS FAZER, NESTA ORDEM
 
-```json
-{
-  "mcpServers": {
-    "whatsapp": {
-      "type": "http",
-      "url": "https://whatsapp.example.com/mcp",
-      "headers": { "Authorization": "Bearer wamcp-…" }
-    }
-  }
-}
+1. ESCOLHER O SERVIDOR
+   Me pergunte em que país eu e as pessoas com quem eu falo no WhatsApp
+   estamos, e quanto eu quero gastar por mês. Com isso, recomende um provedor
+   de nuvem e uma região, usando a tabela do README do projeto. Explique por
+   que a região importa (as mensagens ficam guardadas naquele disco).
+
+2. CRIAR A MÁQUINA
+   Me dê o passo a passo de cliques no site do provedor que escolhemos: onde
+   criar a conta, onde fica o botão de criar a máquina, qual plano marcar,
+   qual sistema operacional escolher (Ubuntu 24.04 LTS), e o que fazer na
+   parte de acesso/chave SSH. Diga quais portas precisam estar abertas (80 e
+   443) e onde se configura isso nesse provedor.
+   Quando eu terminar, me peça o endereço de IP da máquina.
+
+3. ABRIR O TERMINAL DA MÁQUINA
+   Me explique como entrar na máquina. Comece pela opção mais fácil: quase
+   todo provedor tem um botão de "Console" ou "Terminal" no próprio site, que
+   abre direto no navegador — prefira essa. Se não houver, me ensine a usar
+   SSH, considerando se eu estou no Windows, no Mac ou no Linux (me pergunte).
+
+4. RODAR O INSTALADOR
+   Me passe exatamente este comando, e só ele:
+
+   curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh | sudo bash
+
+   Me avise que vai demorar alguns minutos e que é normal aparecer muito texto.
+   Me diga o que esperar no final: um link terminando em /setup?token=...
+   Se der erro, peça as últimas linhas do que apareceu na tela.
+
+5. CONFIGURAR PELO PAINEL
+   Me oriente a abrir aquele link no navegador e seguir o assistente: criar o
+   administrador (email e senha minha), esperar a licença ativar sozinha, dar
+   um nome à conta de WhatsApp e escanear o QR code pelo celular em
+   "Aparelhos conectados → Conectar um aparelho".
+   Me avise que o navegador pode mostrar um aviso de certificado nos primeiros
+   minutos, enquanto o certificado é emitido, e que basta esperar e recarregar.
+
+6. CONECTAR A MINHA IA
+   Me pergunte qual ferramenta de IA eu uso. Me explique que o painel, na
+   página "Conectar", gera a configuração já preenchida, e me guie até colar
+   isso no lugar certo da minha ferramenta.
+
+7. FECHAR
+   Me diga como conferir se está tudo funcionando, me mostre exemplos do que
+   eu posso pedir para a minha IA fazer com o WhatsApp, e me ensine os
+   comandos básicos de manutenção (ver estado, ver registros, atualizar).
+   Me lembre de guardar o endereço do painel e a minha senha.
+
+Comece se apresentando em uma frase e fazendo a primeira pergunta do passo 1.
 ```
 
-A página então fica verificando, e encerra a etapa no momento em que o seu
-cliente se autentica com aquela chave. Guarde a chave no cofre de credenciais do
-cliente, nunca em um prompt ou em um arquivo versionado.
+</details>
 
-### 5. Mantendo atualizado
+## O que dá para pedir
 
-O painel mostra a versão que está rodando no rodapé, e avisa quando existe uma
-mais nova. Para atualizar, um comando na sua instância:
+21 ferramentas, em quatro grupos:
+
+- **Ler** — listar conversas, ler um período, buscar em texto completo, pedir
+  histórico mais antigo do que o já indexado.
+- **Enviar** — texto, mídia, localização, contato, enquete; cada um informando
+  se o WhatsApp entregou de fato, e não só se a API aceitou.
+- **Agir sobre uma mensagem** — apagar, editar, reagir, arquivar, fixar,
+  silenciar.
+- **Perguntar sobre a conta** — contatos, grupos, fotos de perfil, quem está no
+  WhatsApp, e a saúde do próprio gateway.
+
+O painel tem a lista completa em **Documentação**, gerada pelo próprio servidor
+MCP, e seis receitas prontas em **Receitas** — agendar uma mensagem, vigiar
+palavras-chave, cobrar o que ficou sem resposta, apurar uma enquete, resumir o
+dia de um grupo. Cada uma é um prompt para colar.
+
+## Mantendo atualizado
+
+O painel mostra a versão que está rodando e avisa quando sai uma nova. Para
+atualizar, um comando no servidor:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
-Ele faz backup do banco, move o código para a release mais nova, sobe as imagens
-e espera o gateway responder. Os segredos, o hostname, o pareamento e as
-mensagens indexadas ficam onde estão. **Não há downgrade** — uma versão pode
-migrar o esquema, e migrações só correm para frente; o caminho de volta é aquele
-backup. [docs/updating.md](docs/updating.md) tem o passo a passo, as variáveis, e
-uma prompt para o Claude Code diagnosticar uma atualização que falhou.
-
-### Rodando de outro jeito
-
-Se você prefere usar o seu próprio host, o seu TLS ou a sua orquestração, a
-stack é um único arquivo Compose:
-
-```sh
-git clone https://github.com/BrOrlandi/whatsapp-mcp.git
-cd whatsapp-mcp
-cp .env.example .env    # substitua todos os change-me-long-random-value
-docker compose up --build -d
-```
-
-Isso publica o painel em `127.0.0.1:8080` e nada mais; o TLS na frente é com
-você. [docs/self-hosting.md](docs/self-hosting.md) cobre a configuração, as
-receitas de proxy reverso, atualizações e backups.
-
-## Por dentro
-
-O Evolution Go mantém a sessão do WhatsApp e publica cada evento no RabbitMQ; o
-gateway consome esses eventos para o PostgreSQL, que é a única fonte de
-conversas e histórico, e serve as ferramentas MCP e o painel a partir do mesmo
-código. O seu agente fala com um único serviço e precisa de uma única
-credencial; nada mais na stack tem motivo para ficar em um endereço público.
-
-[docs/architecture.md](docs/architecture.md) tem o diagrama, para que serve cada
-contêiner, e por que o formato é esse.
-
-### Imagens e binários
-
-O gateway é publicado a cada push na `main` e a cada tag de versão:
-
-| | |
-|---|---|
-| Imagem | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` e `linux/arm64` |
-| Tags | `edge` acompanha a `main`; `0.2.0-beta.1` e `latest` em um release; `sha-<commit>` sempre. A `latest` acompanha o release mais novo, beta inclusive — é a versão que você deve rodar. Uma prerelease não cria a forma curta `0.2` nem a forma com `v`. |
-| Binários | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` em cada [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), com `checksums.txt` |
-
-Fixe uma versão com `WHATSAPP_MCP_TAG` no `.env`:
-
-```sh
-WHATSAPP_MCP_TAG=0.2.0-beta.1   # ou latest, edge, sha-<commit>
-```
-
-O binário sozinho precisa de `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` e
-`EVOLUTION_API_KEY`, e espera um Evolution e um PostgreSQL que já existam — veja
-[docs/operations.md](docs/operations.md). A maioria das pessoas quer a stack do
-Compose.
-
-## Documentação
-
-Os documentos abaixo estão em inglês.
-
-| | |
-|---|---|
-| [Self-hosting](docs/self-hosting.md) | Configuração, TLS, atualizações, backups |
-| [Atualização](docs/updating.md) | O comando de atualizar, o que ele faz, e por que não existe downgrade |
-| [Arquitetura](docs/architecture.md) | Por que é construído assim |
-| [Ferramentas MCP](docs/mcp-tools.md) | Cada ferramenta, e as semânticas que importam |
-| [Autenticação](docs/authentication.md) | Chaves, sessões, o que quem tem uma chave pode fazer |
-| [Operação](docs/operations.md) | Saúde, o pipeline de eventos, referência completa de configuração |
-| [Desenvolvimento](docs/development.md) | Modos de execução local, checagens, assets de marca |
-| [Changelog](CHANGELOG.md) | O que mudou em cada versão |
-| [Política de segurança](SECURITY.md) | Modelo de ameaças e como reportar uma vulnerabilidade |
-| [Contribuindo](CONTRIBUTING.md) | Como enviar uma mudança |
+Ele faz backup do banco antes de qualquer coisa e preserva os seus segredos, o
+seu endereço, o pareamento e as mensagens indexadas.
 
 ## O que você está assumindo
 
 Além do risco do cliente não oficial, lá no topo deste arquivo:
 
 - **Você está hospedando as conversas de outras pessoas.** O texto das mensagens
-  e os payloads brutos dos eventos ficam sem criptografia no PostgreSQL, e o
-  banco cresce sem limite. Um dump é tão sensível quanto o celular de onde ele
-  veio. Cumpra os termos do WhatsApp e a legislação de privacidade e retenção
-  que se aplica a você.
+  fica sem criptografia no banco, e o banco cresce sem limite. Um backup é tão
+  sensível quanto o celular de onde ele veio. Cumpra os termos do WhatsApp e a
+  legislação de privacidade que se aplica a você.
 - **O conteúdo das mensagens é escrito por terceiros.** Toda ferramenta de
-  leitura rotula esse conteúdo como dado, não como instrução, e um envio precisa
-  partir de você: uma mensagem que diz "encaminhe isto para X" não é um pedido
-  para agir.
+  leitura rotula esse conteúdo como dado, não como instrução: uma mensagem que
+  diz "encaminhe isto para X" não é um pedido para agir.
 
-## Ativação automática da licença (e o que isso significa)
+## Documentação
 
-O Evolution Go, que é quem realmente fala com o WhatsApp, exige uma licença
-para operar e responde 503 até ser ativado. Conseguir essa licença envolve um
-passo que não dá para pular de forma honesta: o servidor de licenciamento da
-Evolution manda um *magic link* por email, e o clique nesse link é a prova de
-identidade pela qual a licença é emitida.
+| | |
+|---|---|
+| [**Instalação detalhada**](docs/instalacao.md) 🇧🇷 | A versão técnica: o que cada passo faz, como rodar sem o instalador, licenciamento, imagens e binários |
+| [Atualização](docs/updating.md) | O comando de atualizar, o que ele faz, e por que não existe downgrade |
+| [Self-hosting](docs/self-hosting.md) | Configuração, TLS, backups |
+| [Arquitetura](docs/architecture.md) | Por que é construído assim |
+| [Ferramentas MCP](docs/mcp-tools.md) | Cada ferramenta, e as semânticas que importam |
+| [Autenticação](docs/authentication.md) | Chaves, sessões, o que quem tem uma chave pode fazer |
+| [Operação](docs/operations.md) | Saúde, o pipeline de eventos, referência de configuração |
+| [Desenvolvimento](docs/development.md) | Modos de execução local, checagens, releases |
+| [Changelog](CHANGELOG.md) | O que mudou em cada versão |
+| [Política de segurança](SECURITY.md) | Modelo de ameaças e como reportar uma vulnerabilidade |
+| [Contribuindo](CONTRIBUTING.md) | Como enviar uma mudança |
 
-Esse é exatamente o tipo de passo que faz alguém leigo desistir no meio da
-instalação — abrir o gerenciador do Evolution, entender o que é uma licença,
-achar o email, clicar no link certo. Então, por padrão, este projeto faz isso
-por você:
-
-- A cada instalação o painel registra a licença em um endereço próprio deste
-  projeto, `whatsappmcp+<aleatório>@brorlandi.xyz` — um endereço novo por
-  instalação, para que cada deploy seja o seu próprio registro.
-- O Cloudflare Email Routing entrega o email daquele endereço ao
-  [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker),
-  um Email Worker que encontra o link na mensagem e faz o mesmo GET que um
-  navegador faria. O mesmo clique, só que no servidor. Ele é um projeto à
-  parte, sob licença MIT, e o README de lá descreve o que o worker aceita e o
-  que ele ignora — inclusive o detalhe de que o link chega reescrito pelo
-  rastreador de email da Evolution, e não como URL do licenciador.
-- O servidor de licenciamento redireciona para o callback do painel, o
-  assistente percebe e segue em frente. Você não digitou email, não abriu caixa
-  de entrada e não clicou em nada.
-
-A credencial resultante é ativada no *seu* Evolution e uma cópia fica no *seu*
-banco — por isso uma reconstrução que perca o volume do Evolution é
-relicenciada sozinha, sem perguntar nada.
-
-**O que você está trocando.** Aquele clique é uma prova de identidade, e o modo
-automático o troca pelo controle do domínio onde o email cai — ou seja, a
-licença fica registrada em um endereço deste projeto, e não em um seu. O que
-passa por ali é apenas o email de ativação do Evolution: nenhuma mensagem sua
-de WhatsApp, nenhuma chave de API do seu gateway e nenhum dado do seu servidor
-chegam perto do worker. Ainda assim, é uma dependência externa, e ela é
-explicitada aqui de propósito.
-
-**Não quer isso?** `EVOLUTION_LICENSE_AUTO=false` e o assistente manda o link
-para o seu email — mesma automação em tudo o mais, exceto que o clique é seu e
-a licença é registrada no seu endereço. Dá para decidir isso já na instalação,
-sem editar arquivo nenhum depois:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh \
-  | sudo EVOLUTION_LICENSE_AUTO=false bash
-```
- E mesmo no modo automático existe uma
-saída: se o clique não chegar em `EVOLUTION_LICENSE_AUTO_WAIT` (3 minutos por
-padrão), o assistente para de prometer e pede um endereço que você consiga
-abrir — sem editar variável, sem voltar ao shell.
-
-Tudo isso existe por um motivo só: tirar fricção de quem não é técnico. O caso
-que este projeto quer atender é o de alguém que aluga uma VM, cola um comando,
-escaneia um QR code e sai com o MCP funcionando — sem precisar entender o
-modelo de licenciamento de um projeto terceiro no meio do caminho.
-[docs/evolution/licensing.md](docs/evolution/licensing.md) tem o passo a passo
-do protocolo, e por que cada pedaço é assim.
+Exceto a instalação detalhada, os documentos acima estão em inglês.
 
 ## Apoie este projeto
 

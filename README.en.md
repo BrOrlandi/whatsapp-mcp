@@ -35,8 +35,7 @@
 > number. Start with an account you can afford to lose.
 
 Ask Claude to read a conversation, search a year of messages, send a file, run a
-poll — against your own WhatsApp, on your own server. You run one stack, link
-your number by QR code, and hand your agent a single API key.
+poll — against your own WhatsApp, on your own server.
 
 > The control panel is in Portuguese. This page is the English translation of
 > the [Portuguese README](README.md); panel page names are kept as they appear
@@ -46,361 +45,246 @@ your number by QR code, and hand your agent a single API key.
   <img src="docs/assets/panel-conectar.png" alt="The Conectar page of the control panel" width="820">
 </p>
 
-### Built to be easy to install — including for non-technical people
+## How to install
 
-This project does not assume you know Docker, TLS or the command line. There
-are two moments: one command you copy and paste into the server's terminal, and
-then a step-by-step wizard inside the panel itself, which does the rest and will
-not let you move on with something half-done.
+Three steps, and you need to know neither Docker, nor TLS, nor the command line.
 
-The gateway ships with its own control panel. The first sign-in opens the
-installation wizard — licence, WhatsApp, client — and hands over only once the
-gateway can actually do something. Each step explains what is happening, checks
-by itself whether it worked, and moves on by itself when it did. At the end the
-panel shows the MCP configuration block **already filled in with your address
-and your key**, ready to paste into Claude — no config file to edit by hand, no
-URL to figure out.
+### 1. Rent a server
 
-After that the panel is split by task: **Conectar** issues client keys and
-prints the configuration block already filled in, **Instâncias** owns the
-WhatsApp connection, **Estado** is the diagnostic view, **Documentação** lists
-the tools and **Receitas** shows what you can ask the assistant for.
+This runs on a machine of yours; there is no hosted version — the whole point is
+that your messages sit on a computer you own. You rent a virtual machine (a VPS)
+from a cloud provider, for roughly **US$ 12–25 a month**.
 
-## What it can do
+Ask for a machine like this:
 
-21 tools across four groups — read, send, act, operate:
-
-- **Read the index**: list conversations, read a period, full-text search,
-  request history older than what has been ingested.
-- **Send**: text, media from a URL, a location, a contact card, a poll — each
-  reporting whether WhatsApp actually delivered it, not just whether the API
-  accepted it.
-- **Act on a message**: delete (two-step, because revoking reaches other
-  people's phones), edit, react, archive/pin/mute a conversation.
-- **Ask about the account**: contacts, groups, profile pictures, which numbers
-  are on WhatsApp, and the gateway's own health and index coverage.
-
-The full list with arguments lives at `/documentacao` in the panel, generated
-from the MCP server's own definitions — and in
-[docs/mcp-tools.md](docs/mcp-tools.md) with the reasoning behind the tricky
-ones.
-
-The panel does not stop at the list: **`/receitas`** carries six ready-made
-recipes — schedule a message, watch for keywords, chase what went unanswered,
-run a poll and count it, summarise a group's day, archive what was agreed.
-Each is a prompt to paste, with the tools it leans on and the caveat that
-matters. None of them needs new code: the assistant is what waits, watches and
-writes the report — the gateway only answers for WhatsApp when asked.
-
-## Install
-
-Four things, and the longest part is waiting for Docker to pull images:
-
-1. Rent a small Linux server.
-2. Run the installer on it — one command.
-3. Link your WhatsApp by scanning a QR code in the panel.
-4. Paste the generated block into your MCP client.
-
-There is no hosted version and there will not be one: the whole point is that
-your messages stay on a machine you control.
-
-### 1. The server
-
-The stack is six containers — the gateway, Evolution Go, RabbitMQ, MinIO and
-two PostgreSQL databases, plus the Traefik the installer puts in front — so
-this does not run on the smallest instance a provider sells.
-
-| | Minimum | Recommended |
-|---|---|---|
-| CPU | 1 vCPU | 2 vCPU |
-| RAM | 2 GB | 4 GB |
-| Disk | 20 GB SSD | 80 GB SSD — the message index grows with your history |
-| OS | Debian family | Ubuntu 24.04 LTS (what is tested) |
-| Architecture | x86-64 or arm64 | either |
-| Network | ports 80 and 443 reachable from the internet, so Let's Encrypt can answer its challenge | |
+| | |
+|---|---|
+| System | **Ubuntu 24.04 LTS** |
+| CPU | 2 vCPU |
+| Memory | 4 GB RAM |
+| Disk | 80 GB SSD |
+| Ports | 80 and 443 open |
 
 **Rent it close to home.** Every message your account sends or receives ends up
-on that disk in plain text. If you and the people you talk to are in Brazil,
-put the machine in Brazil: the conversations stay under the jurisdiction you
-already answer to under the LGPD, and the round trip to WhatsApp is shorter.
+on that disk in plain text. Put the machine in the jurisdiction you already
+answer to, and close to the people you talk to.
 
-| Provider | Brazilian region | Notes |
-|---|---|---|
-| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | Flat monthly price, simplest AWS path |
-| [Vultr](https://www.vultr.com/) | São Paulo | Hourly billing, fast to destroy and retry |
-| [Magalu Cloud](https://magalu.cloud/) | Brazil | Brazilian company, data and billing in Brazil |
-| [Hostinger VPS](https://www.hostinger.com.br/servidor-vps) | São Paulo | Cheapest of the four, long-term plans |
-| [Hetzner](https://www.hetzner.com/cloud) | — (Germany, Finland, US) | Best price per GB of RAM if the location does not matter to you |
+| Provider | Notes |
+|---|---|
+| [Hetzner](https://www.hetzner.com/cloud) | Best price per GB of RAM; Germany, Finland, US |
+| [DigitalOcean](https://www.digitalocean.com/) | Simple panel, many regions |
+| [Vultr](https://www.vultr.com/) | Hourly billing, quick to destroy and retry |
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | Flat monthly price, the simple path inside AWS |
+| [Hostinger VPS](https://www.hostinger.com/vps-hosting) | The cheapest of these |
 
-Any provider that sells an Ubuntu VM works; these are just ones that do it
-without ceremony.
+### 2. Run one command
 
-### 2. Run the installer
-
-SSH into the fresh machine and run:
+The provider gives you an IP address and a way to open a terminal on the machine
+— nearly all of them have a console button on their own website. Paste this
+there:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh | sudo bash
 ```
 
-It installs Docker if it is missing, generates every secret, derives a hostname
-from the VM's own public IPv4 through [sslip.io](https://sslip.io), gets a
-Let's Encrypt certificate for it, starts the stack behind Traefik, and finishes
-by printing where to go:
+It does the rest by itself: installs Docker, generates every secret, derives an
+internet address for your machine, gets a Let's Encrypt certificate for it, and
+brings the stack up. It takes a few minutes, most of them waiting on downloads.
+
+At the end it prints a link:
 
 ```
-URL:
-  https://a83f12c9.18-228-123-45.sslip.io
-
 Open this to create your administrator:
 
   https://a83f12c9.18-228-123-45.sslip.io/setup?token=7f3ac921d4e8
 ```
 
-That URL is your panel and your MCP endpoint — no domain to buy, no DNS record
-to create. The panel refuses to do anything else until the temporary password
-is replaced. Re-running the installer is safe: secrets, the hostname and your
-data are left alone.
+### 3. Open the link and follow the wizard
 
-Afterwards `whatsapp-mcp status`, `logs`, `restart`, `start`, `stop`, `url` and
-`update` manage the installation, which lives in `/opt/whatsapp-mcp`.
+The panel opens a wizard that finishes the setup and refuses to let you move on
+with anything half-done:
 
-### 3. Run the installation wizard
+1. **Create your login** — an email and a password you choose.
+2. **The licence activates itself.** Nothing to type, nothing to click.
+3. **Connect WhatsApp** — name the account and scan the QR code from your
+   phone, under *Linked devices → Link a device*.
+4. **Connect your AI** — the panel asks which tool you use and hands you the
+   configuration block **already filled in with your address and your key**,
+   ready to paste.
 
-Sign in and the panel opens the wizard rather than a dashboard with nothing in
-it. There are two things to do and it asks for one at a time.
+That is it. From there you just ask for things in your AI's chat.
 
-That form asks for an email and a password. The email is the administrator and
-you sign in with it.
+## 🤖 Rather not do it alone? Ask an AI
 
-**Licence.** Evolution Go requires a licence to operate and answers 503 until
-it is activated. There is nothing to type, nothing to open and nothing to
-click: with `EVOLUTION_LICENSE_AUTO` on (the default), the panel registers the
-licence with its own address on this project's domain
-(`whatsappmcp+…@brorlandi.xyz`), the email lands in
-[the licence worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker)
-and the click happens by itself — the wizard just keeps checking and moves on
-the moment the licence lands. Rebuilds that lose Evolution's data are
-re-licensed automatically from the copy the panel keeps, and the same is true
-of a reinstall: the wizard does it again without asking.
+If any step above looked hard, copy the prompt below and paste it into
+**Claude**, ChatGPT, or whichever AI tool you use. It walks the whole
+installation with you from zero: helps pick a provider, says exactly what to
+click to create the machine, explains how to open a terminal, and follows every
+step until WhatsApp is connected.
 
-Prefer your own inbox? Set `EVOLUTION_LICENSE_AUTO=false` and the wizard
-sends the activation link to your email instead — same automation, except the
-one click on the emailed link is yours. That click is a proof of identity,
-and the automatic mode trades it for control of the domain where the mail
-lands. Either way, nobody opens Evolution's own pages.
+<details>
+<summary><strong>📋 Click to open the prompt — copy all of it</strong></summary>
 
-**WhatsApp.** Name the account. The panel registers it with Evolution,
-subscribes it to the event queues, starts the client and shows the QR code on
-the same screen. Scan it from your phone under **Linked devices → Link a
-device**. The page refreshes itself, so a scanned code moves forward on its
-own, and it mints a new code when one expires. From then on the gateway
-indexes everything that arrives.
+```
+I want to install WhatsApp MCP on my own server and I need you to guide me from
+beginning to end. I am not a technical person: I don't know Docker, I don't know
+the command line, and I have never rented a server.
 
-### 4. Point your agent at it
+The project is this one: https://github.com/BrOrlandi/whatsapp-mcp
+Read its README and docs/installation.md before you start, and follow the
+recommendations there (machine size, operating system, ports) rather than
+inventing your own.
 
-A client needs exactly one thing: an API key. The key identifies the account
-and the WhatsApp instance it is authorised for, so there is no user, no
-password and no instance name to configure.
+HOW I WANT YOU TO TREAT ME
+- One question at a time. Wait for my answer before moving on.
+- Explain in plain language. If you must use a technical term, explain what it
+  means in the same sentence.
+- Never give me a command without saying what it does.
+- If I get something wrong, ask me for the exact error message and tell me what
+  to do. Do not invent a fix: if you don't know, say you don't know.
+- Never ask me to paste a password, an API key or the QR code into this chat.
 
-Generate one under **Conectar**. The page shows the secret once, next to a
-`claude mcp add` command and this block, both already filled in with your own
-address:
+WHAT WE NEED TO DO, IN THIS ORDER
 
-```json
-{
-  "mcpServers": {
-    "whatsapp": {
-      "type": "http",
-      "url": "https://whatsapp.example.com/mcp",
-      "headers": { "Authorization": "Bearer wamcp-…" }
-    }
-  }
-}
+1. CHOOSE THE SERVER
+   Ask me which country I and the people I talk to on WhatsApp are in, and how
+   much I want to spend per month. With that, recommend a cloud provider and a
+   region, using the table in the project's README. Explain why the region
+   matters (the messages are stored on that disk).
+
+2. CREATE THE MACHINE
+   Give me the click-by-click steps on the chosen provider's website: where to
+   create the account, where the button to create a machine is, which plan to
+   pick, which operating system to choose (Ubuntu 24.04 LTS), and what to do
+   about access and SSH keys. Tell me which ports need to be open (80 and 443)
+   and where that is configured on that provider.
+   When I'm done, ask me for the machine's IP address.
+
+3. OPEN THE MACHINE'S TERMINAL
+   Explain how to get into the machine. Start with the easiest option: almost
+   every provider has a "Console" or "Terminal" button on its own website that
+   opens straight in the browser — prefer that. If there isn't one, teach me to
+   use SSH, taking into account whether I'm on Windows, Mac or Linux (ask me).
+
+4. RUN THE INSTALLER
+   Give me exactly this command, and only this one:
+
+   curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh | sudo bash
+
+   Warn me it takes a few minutes and that a lot of text scrolling by is normal.
+   Tell me what to expect at the end: a link ending in /setup?token=...
+   If it fails, ask me for the last lines that appeared on screen.
+
+5. SET IT UP IN THE PANEL
+   Walk me through opening that link in the browser and following the wizard:
+   create the administrator (my own email and password), wait for the licence to
+   activate by itself, name the WhatsApp account and scan the QR code from my
+   phone under "Linked devices → Link a device".
+   Warn me the panel is in Portuguese, and translate the screens for me as we go.
+   Warn me the browser may show a certificate warning for the first few minutes,
+   while the certificate is being issued, and that waiting and reloading fixes it.
+
+6. CONNECT MY AI
+   Ask which AI tool I use. Explain that the panel's "Conectar" page generates
+   the configuration already filled in, and guide me to paste it in the right
+   place in my tool.
+
+7. WRAP UP
+   Tell me how to check everything is working, show me examples of what I can
+   ask my AI to do with WhatsApp, and teach me the basic maintenance commands
+   (status, logs, update). Remind me to save the panel address and my password.
+
+Start by introducing yourself in one sentence and asking the first question of
+step 1.
 ```
 
-It then polls, and closes the step the moment your client authenticates with
-that key. Keep the key in the client's credential store, never in a prompt or a
-versioned file.
+</details>
 
-### 5. Keeping it current
+## What you can ask for
 
-The panel prints the running version in its footer, and says when a newer one
-exists. To update, one command on your instance:
+21 tools, in four groups:
+
+- **Read** — list conversations, read a window, full-text search, request
+  history older than what is already indexed.
+- **Send** — text, media from a URL, location, contact card, poll; each one
+  reporting whether WhatsApp actually delivered it, not just whether the API
+  accepted it.
+- **Act on a message** — delete, edit, react, archive, pin, mute.
+- **Ask about the account** — contacts, groups, profile pictures, who is on
+  WhatsApp, and the gateway's own health and index coverage.
+
+The panel carries the full list under **Documentação**, generated from the MCP
+server's own definitions, plus six ready recipes under **Receitas** — schedule a
+message, watch for keywords, chase what went unanswered, tally a poll,
+summarise a group's day. Each is a prompt to paste, with the tools it uses and
+the caveat that matters.
+
+## Keeping it current
+
+The panel shows the running version and says when a newer one exists. To update,
+one command on the server:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
-It dumps the database, moves the code to the newest release, pulls the images
-and waits for the gateway to answer. Secrets, the hostname, the pairing and the
-indexed messages stay where they are. **There is no downgrade** — a release may
-migrate the schema, and migrations only run forward; the way back is that dump.
-[docs/updating.md](docs/updating.md) has the steps, the variables, and a prompt
-for Claude Code to diagnose an update that failed.
-
-### Running it some other way
-
-If you would rather bring your own host, TLS or orchestration, the stack is one
-Compose file:
-
-```sh
-git clone https://github.com/BrOrlandi/whatsapp-mcp.git
-cd whatsapp-mcp
-cp .env.example .env    # replace every change-me-long-random-value
-docker compose up --build -d
-```
-
-That publishes the panel on `127.0.0.1:8080` and nothing else; you put TLS in
-front of it. [docs/self-hosting.md](docs/self-hosting.md) covers the
-configuration, the reverse-proxy recipes, upgrades and backups.
-
-## Under the hood
-
-Evolution Go holds the WhatsApp session and publishes every event to RabbitMQ;
-the gateway consumes them into PostgreSQL, which is the only source of
-conversations and history, and serves the MCP tools and the panel from the same
-code. Your agent talks to one service and needs one credential; nothing else in
-the stack belongs on a public address.
-
-[docs/architecture.md](docs/architecture.md) has the diagram, what each
-container is for, and why the shape is forced.
-
-### Images and binaries
-
-The gateway is published on every push to `main` and on every version tag:
-
-| | |
-|---|---|
-| Image | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` and `linux/arm64` |
-| Tags | `edge` follows `main`; `0.2.0-beta.1` and `latest` on a release; `sha-<commit>` always. `latest` follows the newest release, beta included — it is the version to run. A prerelease creates neither the short `0.2` form nor the `v`-prefixed one. |
-| Binaries | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` on each [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), with `checksums.txt` |
-
-Pin a version with `WHATSAPP_MCP_TAG` in `.env`:
-
-```sh
-WHATSAPP_MCP_TAG=0.2.0-beta.1   # or latest, edge, sha-<commit>
-```
-
-The binary on its own needs `DATABASE_URL`, `RABBITMQ_URL`, `EVOLUTION_URL` and
-`EVOLUTION_API_KEY`, and expects an Evolution and a PostgreSQL that already
-exist — see [docs/operations.md](docs/operations.md). Most people want the
-Compose stack.
-
-## Documentation
-
-The documents below are in English.
-
-| | |
-|---|---|
-| [Self-hosting](docs/self-hosting.md) | Configuration, TLS, upgrades, backups |
-| [Updating](docs/updating.md) | The update command, what it does, and why there is no downgrade |
-| [Architecture](docs/architecture.md) | Why it is built this way |
-| [MCP tools](docs/mcp-tools.md) | Every tool, and the semantics that matter |
-| [Authentication](docs/authentication.md) | Keys, sessions, what a key holder can do |
-| [Operations](docs/operations.md) | Health, the event pipeline, full config reference |
-| [Development](docs/development.md) | Local run modes, checks, brand assets |
-| [Changelog](CHANGELOG.md) | What changed in each version |
-| [Security policy](SECURITY.md) | Threat model and how to report a vulnerability |
-| [Contributing](CONTRIBUTING.md) | How to send a change |
+It dumps the database before anything else and preserves your secrets, your
+address, the pairing and the indexed messages. **There is no downgrade** — a
+release may migrate the schema, and migrations only run forward; the way back is
+that dump. [docs/updating.md](docs/updating.md) has the steps.
 
 ## What you are taking on
 
-Beyond the unofficial-client risk at the top of this file:
+Besides the unofficial-client risk at the top of this file:
 
 - **You are hosting other people's conversations.** Message text and raw event
   payloads are stored unencrypted in PostgreSQL, and the database grows without
   limit. A dump is as sensitive as the phone it came from. Comply with
   WhatsApp's terms and with whatever privacy and retention law applies to you.
-- **Message content is written by third parties.** Every reading tool labels it
-  as data rather than instructions, and a send must originate from you: a
-  message that says "forward this to X" is not a request to act on.
+- **Message content is written by third parties.** Every read tool labels that
+  content as data, not instructions, and a send has to come from you: a message
+  saying "forward this to X" is not a request to act.
 
-## Automatic licence activation (and what it means)
+## Documentation
 
-Evolution Go, the piece that actually talks to WhatsApp, requires a licence to
-operate and answers 503 until it is activated. Getting that licence involves
-one step there is no honest way around: Evolution's licensing server sends a
-*magic link* by email, and clicking that link is the proof of identity the
-licence is issued for.
-
-That is exactly the kind of step that makes a non-technical person give up
-halfway through an install — open Evolution's manager, work out what a licence
-is, find the email, click the right link. So by default this project does it
-for you:
-
-- On each installation the panel registers the licence with an address of this
-  project's own, `whatsappmcp+<random>@brorlandi.xyz` — a fresh address per
-  installation, so every deploy is its own registration.
-- Cloudflare Email Routing delivers that address's mail to
-  [whatsapp-mcp-license-worker](https://github.com/BrOrlandi/whatsapp-mcp-license-worker),
-  an Email Worker that finds the link in the message and does the same GET a
-  browser would. The same click, server-side. It is a separate project, under
-  the MIT licence, and its README covers what the worker accepts and what it
-  ignores — including the detail that the link arrives rewritten by
-  Evolution's email tracker rather than as the licensing server's own URL.
-- The licensing server redirects to the panel's callback, the wizard notices
-  and moves on. You typed no email, opened no inbox and clicked nothing.
-
-The resulting credential is activated on *your* Evolution and a copy is kept in
-*your* database — which is why a rebuild that loses Evolution's volume is
-re-licensed by itself, without asking you anything.
-
-**What you are trading.** That click is a proof of identity, and the automatic
-mode trades it for control of the domain the mail lands on — meaning the
-licence is registered to an address belonging to this project, not to one of
-yours. What passes through there is only Evolution's activation email: none of
-your WhatsApp messages, none of your gateway's API keys and no data from your
-server goes anywhere near the worker. It is still an external dependency, and
-it is spelled out here on purpose.
-
-**Don't want that?** `EVOLUTION_LICENSE_AUTO=false` and the wizard sends the
-link to your email instead — same automation in every other respect, except
-the click is yours and the licence is registered to your address. You can
-decide that at install time, with no file to edit afterwards:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/install.sh \
-  | sudo EVOLUTION_LICENSE_AUTO=false bash
-```
- And even in
-automatic mode there is a way out: if the click does not arrive within
-`EVOLUTION_LICENSE_AUTO_WAIT` (3 minutes by default), the wizard stops
-promising and asks for an address you can open — no variable to edit, no
-return to the shell.
-
-All of this exists for one reason: to take friction away from people who are
-not technical. The case this project is built for is someone who rents a VM,
-pastes one command, scans a QR code and walks away with a working MCP — without
-having to understand a third-party project's licensing model along the way.
-[docs/evolution/licensing.md](docs/evolution/licensing.md) has the protocol
-step by step, and why each piece is shaped this way.
+| | |
+|---|---|
+| [**Detailed installation**](docs/installation.md) | The technical version: what each step does, running without the installer, licensing, images and binaries |
+| [Updating](docs/updating.md) | The update command, what it does, and why there is no downgrade |
+| [Self-hosting](docs/self-hosting.md) | Configuration, TLS, backups |
+| [Architecture](docs/architecture.md) | Why it is built this way |
+| [MCP tools](docs/mcp-tools.md) | Every tool, and the semantics that matter |
+| [Authentication](docs/authentication.md) | Keys, sessions, what a key holder can do |
+| [Operations](docs/operations.md) | Health, the event pipeline, the configuration reference |
+| [Development](docs/development.md) | Local run modes, checks, releases |
+| [Changelog](CHANGELOG.md) | What changed in each version |
+| [Security policy](SECURITY.md) | Threat model and how to report a vulnerability |
+| [Contributing](CONTRIBUTING.md) | How to send a change |
 
 ## Support this project
 
-WhatsApp MCP is built and maintained by one person, in the open, and it is
-free to self-host — commercially too. If it saves you time, you can support
-the work:
+WhatsApp MCP is built and maintained by one person, in the open, and it is free
+to self-host — commercially included. If it saves you time, you can support the
+work:
 
 <p align="center">
-  <a href="https://donate.stripe.com/8x200jdhA6c1d375jF9Ve06"><img alt="Support the project" src="https://img.shields.io/badge/%E2%98%95%20support%20this%20project-pay%20what%20you%20want-0b6b5d?style=for-the-badge"></a>
+  <a href="https://donate.stripe.com/8x200jdhA6c1d375jF9Ve06"><img alt="Support this project" src="https://img.shields.io/badge/%E2%98%95%20support%20this%20project-pay%20what%20you%20want-0b6b5d?style=for-the-badge"></a>
 </p>
 
-Pay what you want — the suggested amount is 10 dollars, and Stripe charges in
+Pay what you want — the suggested amount is ten dollars, and Stripe charges in
 your own currency. It goes to the person writing the code.
 
-## License
+## Licence
 
-[MIT](LICENSE). Use it, modify it, self-host it, fork it and distribute it
-freely, for any purpose — commercial included. The only requirement is to keep
-the copyright notice and the licence with the code.
+[MIT](LICENSE). Use it, modify it, host it, fork it and distribute it freely,
+for any purpose — commercial included. The only requirement is keeping the
+copyright notice and the licence with the code.
 
-The software is provided **as is**, with no warranty of any kind. And two
-things are worth keeping apart: the licence covers this code, and it is not
-permission from Meta. Running a WhatsApp account through an unofficial client
-is the decision of whoever installs it; complying with WhatsApp's terms and
-with the privacy law that applies is on whoever operates the instance and
-hosts the messages.
+The software is provided **as is**, without warranty of any kind. And two things
+are worth keeping apart: the licence covers this code, and it is not permission
+from Meta. Running a WhatsApp account through an unofficial client is the
+installer's decision; compliance with WhatsApp's terms and with privacy law is
+on whoever operates the instance and hosts the messages.
 
 ---
 

@@ -4,6 +4,8 @@ Start with the [README](../README.md); this directory is the detail behind it.
 
 | Document | What it covers |
 |---|---|
+| [installation.md](installation.md) | Installing in detail: the server, what the installer does, the wizard, running without it, licensing, images and binaries. |
+| [instalacao.md](instalacao.md) 🇧🇷 | The same document in Portuguese, which is what the main README links to. |
 | [self-hosting.md](self-hosting.md) | Running your own instance: configuration, secrets, first access, pairing, TLS, upgrades, backups. |
 | [architecture.md](architecture.md) | Why the gateway has the shape it has, what each container is for, how ingestion works. |
 | [mcp-tools.md](mcp-tools.md) | Every tool, what is deliberately *not* a tool, and the semantics of history, gaps, sending and destructive actions. |
