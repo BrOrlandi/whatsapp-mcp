@@ -20,6 +20,30 @@ curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.
 The first numbered version of the beta series. An instance can now say what it
 is running, and there is one command to move it forward.
 
+### Licence
+
+- The project is now under the **MIT licence**, replacing PolyForm
+  Noncommercial. Use it, modify it, fork it, distribute it and sell it, keeping
+  the copyright notice. The previous licence was a barrier for exactly the
+  people this gateway is for — a small business running support or sales on the
+  WhatsApp number it connects.
+
+### The panel
+
+- The Conectar page was rebuilt around connections rather than keys. It answers
+  "is everything working" with the WhatsApp number and how many AI tools are
+  attached to it, and one button adds another: it asks where the connection
+  will be used, mints the key without being asked, and opens the instructions
+  for that client.
+- Each connection is listed by the name its own tool gave in the MCP handshake
+  — "Claude Desktop", not a key prefix. Every MCP client names and versions
+  itself once, at `initialize`; that is read, stored against the key, and
+  refreshed on each later handshake, so a credential moved to another tool
+  corrects itself. The name is a claim and never a proof: it is never consulted
+  for authorisation.
+- Instâncias and Estado stay as technical as they were — they are for a
+  different moment.
+
 ### Versioning
 
 - The version comes from `git describe` and is stamped into the binary:
