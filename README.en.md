@@ -273,7 +273,7 @@ The gateway is published on every push to `main` and on every version tag:
 | | |
 |---|---|
 | Image | `ghcr.io/brorlandi/whatsapp-mcp` — `linux/amd64` and `linux/arm64` |
-| Tags | `edge` follows `main`; `0.2.0-beta.1` on a release; `sha-<commit>` always. A prerelease publishes the exact version only: it moves no `latest`, and creates neither the short `0.2` form nor the `v`-prefixed one. While the series is beta, `latest` stays on the last stable version. |
+| Tags | `edge` follows `main`; `0.2.0-beta.1` and `latest` on a release; `sha-<commit>` always. `latest` follows the newest release, beta included — it is the version to run. A prerelease creates neither the short `0.2` form nor the `v`-prefixed one. |
 | Binaries | `whatsapp-mcp_<version>_linux_{amd64,arm64}.tar.gz` on each [release](https://github.com/BrOrlandi/whatsapp-mcp/releases), with `checksums.txt` |
 
 Pin a version with `WHATSAPP_MCP_TAG` in `.env`:

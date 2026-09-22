@@ -58,13 +58,14 @@ jobs:
             type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
-          # `latest` is what someone gets when they pin nothing, so a
-          # prerelease must not move it — publishing v0.1.0-beta would
-          # otherwise make the beta the default for everybody. A tag with a
-          # hyphen in it is a prerelease by the semver definition, which is
-          # every tag in the 0.1.0-beta series. ({{major}}.{{minor}} is skipped
-          # for prereleases by metadata-action itself, for the same reason.)
-          flavor: latest=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
+          # `latest` follows the newest release, prerelease or not. Holding it
+          # back for a `-beta` tag sounds careful and is not: it pins whoever
+          # pins nothing to the last stable release, which during this series
+          # means a version dozens of commits old, under the old licence, with
+          # the old panel. The beta is what people should run, so it is what
+          # `latest` points at, and the word beta does the warning in the
+          # version number and the README.
+          flavor: latest=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -113,9 +114,7 @@ jobs:
             dist/*.tar.gz
             dist/checksums.txt
           generate_release_notes: true
-          # A tag with a hyphen is a prerelease by the semver definition, and
-          # the whole beta series has one. Without this the release is marked
-          # Latest on the repository page, which is the same mistake `latest`
-          # on the image would have been: it makes a beta look like the version
-          # to install.
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Published as a normal release, not a prerelease: the beta is the
+          # version to install while the series runs, and the GitHub page
+          # should say so as plainly as the `latest` image tag does.
+          prerelease: false

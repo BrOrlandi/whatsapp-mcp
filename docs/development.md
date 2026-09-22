@@ -70,14 +70,15 @@ git push origin v0.2.0-beta.2  # this is what triggers release.yml
 
 Two rules the workflow encodes, both worth knowing before tagging:
 
-- **A prerelease must not move `latest`.** `latest` is what someone gets when
-  they pin nothing, so a `-beta` tag would otherwise make the beta the default
-  for everybody. The `flavor: latest=` expression excludes any tag with a
-  hyphen in it, which is the semver definition of a prerelease, and the
-  `prerelease:` input on the GitHub release does the same for the repository
-  page — otherwise the beta shows up there as Latest, which is the same mistake
-  in a different place. A prerelease publishes one image tag, the exact version:
-  `metadata-action` skips the short `0.2` and `v`-prefixed forms for it.
+- **`latest` follows the newest release, beta or not.** Holding it back for a
+  `-beta` tag sounds careful and is not: it pins whoever pins nothing to the
+  last stable release, which during this series means a version dozens of
+  commits old. The beta is what people should run, so `latest` points at it and
+  the GitHub release is published as a normal release rather than a prerelease.
+  The warning lives in the version number and the README, where someone reads
+  it, instead of in a tag they never see. A prerelease still publishes only the
+  exact version as an image tag — `metadata-action` skips the short `0.2` and
+  `v`-prefixed forms for it, which is its own rule and not ours.
 - **The checkout must be deep.** `actions/checkout` is shallow by default and
   `git describe` then sees no tags at all, silently stamping a bare sha.
 
