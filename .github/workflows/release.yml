@@ -113,3 +113,9 @@ jobs:
             dist/*.tar.gz
             dist/checksums.txt
           generate_release_notes: true
+          # A tag with a hyphen is a prerelease by the semver definition, and
+          # the whole beta series has one. Without this the release is marked
+          # Latest on the repository page, which is the same mistake `latest`
+          # on the image would have been: it makes a beta look like the version
+          # to install.
+          prerelease: ${{ contains(github.ref_name, '-') }}

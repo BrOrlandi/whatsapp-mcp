@@ -73,7 +73,11 @@ Two rules the workflow encodes, both worth knowing before tagging:
 - **A prerelease must not move `latest`.** `latest` is what someone gets when
   they pin nothing, so a `-beta` tag would otherwise make the beta the default
   for everybody. The `flavor: latest=` expression excludes any tag with a
-  hyphen in it, which is the semver definition of a prerelease.
+  hyphen in it, which is the semver definition of a prerelease, and the
+  `prerelease:` input on the GitHub release does the same for the repository
+  page — otherwise the beta shows up there as Latest, which is the same mistake
+  in a different place. A prerelease publishes one image tag, the exact version:
+  `metadata-action` skips the short `0.2` and `v`-prefixed forms for it.
 - **The checkout must be deep.** `actions/checkout` is shallow by default and
   `git describe` then sees no tags at all, silently stamping a bare sha.
 
