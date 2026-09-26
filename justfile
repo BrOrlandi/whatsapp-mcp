@@ -48,10 +48,6 @@ env:
     RABBITMQ_PASSWORD=$(secret)
     RABBITMQ_VHOST=whatsapp
 
-    MINIO_ROOT_USER=whatsapp-media
-    MINIO_ROOT_PASSWORD=$(secret)
-    MINIO_BUCKET=evolution-media
-
     MCP_DB_USER=whatsapp_mcp
     MCP_DB_PASSWORD=$(secret)
     MCP_DB_NAME=whatsapp_mcp
@@ -65,9 +61,9 @@ env:
 
 # ------------------------------------------------------------------- serviços
 
-# Sobe as dependências em Docker (Postgres, RabbitMQ, Evolution, MinIO).
+# Sobe as dependências em Docker (Postgres, RabbitMQ, Evolution).
 up: env
-    {{compose}} up -d postgres-mcp rabbitmq postgres-evolution minio evolution-go
+    {{compose}} up -d postgres-mcp rabbitmq postgres-evolution evolution-go
     @echo
     @just _wait
 

@@ -26,7 +26,6 @@ flowchart TD
     GW["whatsapp-mcp<br/>ingestion · index · MCP tools · panel"]
     DB[("PostgreSQL<br/>the message index")]
     EVODB[("PostgreSQL<br/>Evolution's auth and users")]
-    MINIO[("MinIO<br/>media objects")]
     PROXY["Traefik<br/>TLS · public deployments only"]
     CLIENT(["MCP client<br/>Claude, Cursor, …"])
 
@@ -35,7 +34,6 @@ flowchart TD
     MQ -->|"consume, then commit"| GW
     EVO <-->|"REST: live reads, sending, lifecycle"| GW
     EVO <--> EVODB
-    EVO <-->|"stores and serves media"| MINIO
     GW <--> DB
     CLIENT -->|"POST /mcp · Bearer API key"| PROXY
     PROXY -->|"terminates TLS, routes by host"| GW
@@ -50,7 +48,7 @@ flowchart TD
 
     class GW repo
     class EVO,MQ,PROXY service
-    class DB,EVODB,MINIO store
+    class DB,EVODB store
     class WA,CLIENT outside
 ```
 
@@ -66,7 +64,6 @@ stack entirely.
 | RabbitMQ | `rabbitmq:4.1-management` | Carries events from Evolution to the gateway. Durable quorum queues, manual acknowledgements. |
 | PostgreSQL (gateway) | `postgres:17.6` | The message index, the API keys, the panel account, the instance registry. Migrations run automatically on start. |
 | PostgreSQL (Evolution) | `postgres:17.6` | Evolution's own auth and user databases. The gateway never reads it. |
-| MinIO | `minio` | Where Evolution stores media. The gateway asks Evolution for media rather than reaching into the bucket. |
 | Traefik | `traefik:v3.3.4` | Terminates TLS and obtains the Let's Encrypt certificate. The only container that binds a public port, and the only one added by [`deploy/docker-compose.public.yml`](../deploy/docker-compose.public.yml) — which `install.sh` always uses, and which the base file deliberately knows nothing about. Nothing is routed without an explicit label; the dashboard and the API are off. |
 
 An MCP client talks to exactly one of these — `whatsapp-mcp` — and needs exactly

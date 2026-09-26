@@ -1,5 +1,5 @@
-# Self-contained stack: Evolution Go, its PostgreSQL, RabbitMQ, MinIO, the
-# gateway's own PostgreSQL, and the gateway. Host-agnostic on purpose: it
+# Self-contained stack: Evolution Go, its PostgreSQL, RabbitMQ, the gateway's
+# own PostgreSQL, and the gateway. Host-agnostic on purpose: it
 # publishes the panel on loopback and knows nothing about a reverse proxy.
 #
 # The project name is pinned so the named volumes keep their identity no matter
@@ -40,25 +40,6 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    # quay.io, not Docker Hub: MinIO took minio/minio down from Hub, so the
-    # Hub reference stopped resolving and the installer died pulling it.
-    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
-    ports:
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   # Evolution has no public surface: it stays on the project's internal network,
   # reachable only by whatsapp-mcp. The control panel drives it from the inside,
   # so neither its API nor its manager needs to be exposed.
@@ -93,19 +74,19 @@ services:
       AMQP_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-whatsapp}
       AMQP_GLOBAL_ENABLED: "true"
       AMQP_GLOBAL_EVENTS: "MESSAGE,SEND_MESSAGE,HISTORY_SYNC,CONNECTION"
-      MINIO_ENABLED: "true"
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET: ${MINIO_BUCKET:-evolution-media}
-      MINIO_USE_SSL: "false"
+      # No object store. Evolution only writes media to one when WEBHOOK_FILES
+      # is on, which this stack leaves off: the gateway fetches media from
+      # WhatsApp on demand through /message/downloadmedia, from the raw message
+      # it indexed. The MinIO that used to sit here never received a file — no
+      # bucket was ever created for it — and MinIO has since archived its
+      # community edition, so the image it ran stopped being pullable too.
+      MINIO_ENABLED: "false"
     volumes:
       - evolution_data:/app/dbdata
       - evolution_logs:/app/logs
     depends_on:
       postgres-evolution: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
-      minio: {condition: service_healthy}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/swagger/index.html >/dev/null || exit 1"]
       interval: 15s
@@ -191,5 +172,4 @@ volumes:
   evolution_logs:
   postgres_evolution_data:
   rabbitmq_data:
-  minio_data:
   postgres_mcp_data:

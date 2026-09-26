@@ -203,10 +203,6 @@ RABBITMQ_USER=whatsapp
 RABBITMQ_PASSWORD=$(secret)
 RABBITMQ_VHOST=whatsapp
 
-MINIO_ROOT_USER=whatsapp-media
-MINIO_ROOT_PASSWORD=$(secret)
-MINIO_BUCKET=evolution-media
-
 MCP_DB_USER=whatsapp_mcp
 MCP_DB_PASSWORD=$(secret)
 MCP_DB_NAME=whatsapp_mcp
@@ -390,7 +386,7 @@ printf '  curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/ma
 printf 'Ports: this stack needs 80 and 443 open, and nothing else. Keep your\n'
 printf 'provider firewall (DigitalOcean Cloud Firewall, AWS security group, and\n'
 printf 'so on) to 80, 443 and whichever port you reach SSH on. Never publish the\n'
-printf 'databases, RabbitMQ, MinIO or Evolution.\n\n'
+printf 'databases, RabbitMQ or Evolution.\n\n'
 printf 'Next: open the link above. The panel walks the rest itself.\n\n'
 printf '  1. Create your administrator with an email and a password.\n'
 printf '  2. The licence activates itself - no email to open, no link to\n'

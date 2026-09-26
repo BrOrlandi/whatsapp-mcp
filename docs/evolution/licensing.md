@@ -219,5 +219,5 @@ The alternative that removes the dependency entirely is talking to
 [whatsmeow](https://github.com/tulir/whatsmeow) directly — the MIT-licensed
 library Evolution Go itself uses, as its own CHANGELOG notes ("Dropped the
 whatsmeow fork — now uses official `go.mau.fi/whatsmeow`"). That would also
-remove RabbitMQ and MinIO from the stack, at the cost of rewriting the session
+remove RabbitMQ from the stack, at the cost of rewriting the session
 layer.

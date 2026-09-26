@@ -70,7 +70,7 @@ Read by the `whatsapp-mcp` binary:
 | `UPDATE_CHECK` | `true` | Asks GitHub every six hours whether a newer release exists, so the panel can say so and hand over the update command. An unauthenticated GET of a public list, carrying nothing about the instance; it fails silently with no outbound network. `false` stops it. See [updating.md](updating.md). |
 
 The Compose stack adds the credentials for the services it runs
-(`EVOLUTION_DB_*`, `RABBITMQ_*`, `MINIO_*`, `MCP_DB_*`) plus `PANEL_BIND` and
+(`EVOLUTION_DB_*`, `RABBITMQ_*`, `MCP_DB_*`) plus `PANEL_BIND` and
 `PANEL_PORT`. See `.env.example`.
 
 None of these ever reach an MCP client. They are backend configuration.

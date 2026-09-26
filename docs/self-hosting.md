@@ -51,7 +51,7 @@ machine is enough and a deploy is a pull. `WHATSAPP_MCP_TAG` in `.env` pins it
 compiles the checkout instead, which is what you want when working on the code.
 
 Images are pinned and every database uses a persistent named volume. The
-RabbitMQ and MinIO management ports bind to loopback only. The gateway's own
+RabbitMQ management port binds to loopback only. The gateway's own
 PostgreSQL migrations run automatically when it starts.
 
 ## 3. Activate Evolution Go
@@ -163,7 +163,7 @@ account. If you expose it, expose it behind TLS.
   need something other than `127.0.0.1:8080`. `PANEL_BIND=0.0.0.0` puts the
   panel on every interface, which only makes sense on a host nobody else
   reaches.
-Never publish Evolution Go, RabbitMQ, MinIO or either PostgreSQL. The gateway is
+Never publish Evolution Go, RabbitMQ or either PostgreSQL. The gateway is
 the only service that belongs on a public address.
 
 ## Ports and the firewall
@@ -177,10 +177,9 @@ should be closed, including everything this stack runs internally.
 | `80/tcp` | Let's Encrypt answers its HTTP challenge here, so the certificate cannot be issued or renewed without it. It also redirects to 443; nothing is served in the clear. |
 | your SSH port | Not the application's — yours. Keep it reachable only from where you administer the machine. |
 
-Nothing else belongs on a public address. Evolution Go, RabbitMQ, MinIO and both
-PostgreSQL instances stay on the Compose network; the RabbitMQ and MinIO
-management ports bind to `127.0.0.1` and are reachable only through an SSH
-tunnel.
+Nothing else belongs on a public address. Evolution Go, RabbitMQ and both
+PostgreSQL instances stay on the Compose network; the RabbitMQ management
+port binds to `127.0.0.1` and is reachable only through an SSH tunnel.
 
 ### Filter at your provider, not with ufw
 

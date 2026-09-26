@@ -10,7 +10,7 @@ import (
 // checkMediaURL refuses a media URL that points back inside the deployment.
 //
 // The URL is not fetched here — it is handed to Evolution, which fetches it from
-// inside the Docker network, where RabbitMQ's management API, MinIO, both
+// inside the Docker network, where RabbitMQ's management API, both
 // PostgreSQL instances and Evolution itself are reachable without credentials in
 // a request. Left unchecked, "send this image" is a server-side request forgery
 // with the result delivered to a WhatsApp number: an attacker who gets a
