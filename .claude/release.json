@@ -1,0 +1,29 @@
+{
+  "manifestVersion": 1,
+  "commitConvention": "conventional",
+  "bump": { "policy": "conventional-commits", "cadence": "per-release", "confirm": true },
+  "apps": [
+    {
+      "id": "gateway",
+      "label": "WhatsApp MCP gateway (image, binaries, panel)",
+      "kind": "backend",
+      "version": {
+        "anchor": "tag",
+        "tagPrefix": "v",
+        "annotatedTag": true,
+        "files": []
+      },
+      "changelogs": [
+        { "path": "CHANGELOG.md", "format": "md-version-sections", "audience": "public", "language": "en", "detail": "full" }
+      ],
+      "build": [
+        { "cmd": "just check" }
+      ],
+      "publish": [
+        { "channel": "git-tag" },
+        { "channel": "github-release", "notesFrom": "CHANGELOG.md", "assets": ["whatsapp-mcp_v{version}_linux_amd64.tar.gz", "whatsapp-mcp_v{version}_linux_arm64.tar.gz", "checksums.txt"], "latest": true }
+      ],
+      "docs": ["docs/development.md#releasing", "docs/updating.md"]
+    }
+  ]
+}

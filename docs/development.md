@@ -56,6 +56,8 @@ to the gateway itself through Compose.
 
 ## Releasing
 
+The convention is also recorded as data in
+[`.claude/release.json`](../.claude/release.json), which agent tooling reads.
 The version is the git tag, and nothing else. There is no `VERSION` file to
 forget to bump: the binary carries `git describe --tags --always --dirty`,
 stamped through `-ldflags` by the Dockerfile, by `release.yml` and by
