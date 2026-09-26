@@ -81,6 +81,54 @@ silently on a server with no outbound network.
 pages behind the session cookie: telling an anonymous visitor that this
 instance is running an outdated version is an invitation.
 
+## The button in the panel
+
+On an installation made by `install.sh`, the notice carries an **Atualizar**
+button instead of the command. Clicking it runs the same `update.sh`, with the
+same backup first, and the panel shows its progress until the new version
+answers — then asks you to sign in again, because the restart ends every
+session.
+
+The gateway does not update itself, and never holds the Docker socket: a
+process that reads text written by strangers all day should not be one bug
+away from root on the host. The button writes a request into
+`/var/lib/whatsapp-mcp/update/`, a directory the host shares with the
+container, and a systemd unit on the host (`whatsapp-mcp-updater.path`) runs
+the update when a request appears. The agent reads one field from the request,
+the version, accepts it only if it is a semantic version that GitHub has
+published as a release, and writes `status.json` back as it goes. The button
+can only ask for the version the notice is offering.
+
+`install.sh` installs the agent, and so does the first `update.sh` run on an
+older installation. Without it, the panel keeps showing the command.
+
+```sh
+systemctl status whatsapp-mcp-updater.path       # is it watching
+cat /var/lib/whatsapp-mcp/update/status.json      # the last update
+cat /var/lib/whatsapp-mcp/update/update.log       # its full output
+```
+
+### Deployments that are not install.sh
+
+For a stack run by Dokploy, the same agent can move the image instead: it
+takes a database dump, sets `WHATSAPP_MCP_TAG` in the compose service's
+environment through Dokploy's API, redeploys, and waits for `/healthz` to report
+the new version. Mount the shared directory into the `whatsapp-mcp` service
+(`UPDATE_DIR_HOST=/var/lib/whatsapp-mcp/update`), write
+`/etc/whatsapp-mcp/updater.env` (root-only) with `DOKPLOY_API_URL`,
+`DOKPLOY_API_KEY`, `DOKPLOY_COMPOSE_ID`, `DOKPLOY_PROJECT` and `PUBLIC_URL`,
+and run `sudo bash deploy/install-updater.sh dokploy` from a checkout on the
+host. An image tag pinned in the compose file is then overridden by the
+environment, so the file stops being the source of truth for the version.
+
+## Going back, and being told
+
+The gateway records the newest release that has ever run against its
+database. When an older one starts — a stale pin redeployed, an update undone
+by hand — every panel page says so: the database has already been migrated by
+a newer version, and the older code may not understand it. With the agent
+installed, the notice offers a button back to that version.
+
 ## Which version is running
 
 ```sh

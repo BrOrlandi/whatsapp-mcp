@@ -208,6 +208,13 @@ else
 fi
 info "image pinned to ghcr.io/brorlandi/whatsapp-mcp:${IMAGE_TAG}"
 
+# The directory the panel and the update agent share. Installations from
+# before it existed get it here, before the restart mounts it.
+if ! grep -q '^UPDATE_DIR_HOST=' .env; then
+    printf 'UPDATE_DIR_HOST=/var/lib/whatsapp-mcp/update\n' >> .env
+fi
+install -d -m 0755 -o 10001 -g 10001 /var/lib/whatsapp-mcp/update
+
 # ---------------------------------------------------------------- start
 
 CURRENT_STEP="pulling images and restarting"
@@ -220,6 +227,17 @@ CURRENT_STEP="installing the whatsapp-mcp command"
 # rather than left at whichever version happened to install it.
 install -m 0755 deploy/whatsapp-mcp-cli.sh "${CLI_PATH}"
 info "refreshed ${CLI_PATH}"
+
+# An installation from before the panel could update itself gets the agent on
+# its first update by command, and every later one refreshes it.
+if [ -f deploy/install-updater.sh ]; then
+    CURRENT_STEP="installing the update agent"
+    if bash deploy/install-updater.sh install >/dev/null; then
+        info "update agent ready"
+    else
+        warn "could not install the update agent; the panel will keep showing this command"
+    fi
+fi
 
 CURRENT_STEP="waiting for the gateway"
 step "Waiting for the gateway to answer"

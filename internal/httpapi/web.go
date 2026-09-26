@@ -159,6 +159,9 @@ type webApp struct {
 	// transcription is the OpenAI key behind voice-note transcription. Nil
 	// leaves the page up with an explanation instead of a form.
 	transcription TranscriptionSettings
+	// updater hands update requests to the host's agent. Nil, or no agent
+	// installed, and the panel shows the SSH command instead of a button.
+	updater SelfUpdater
 }
 
 const (
@@ -176,11 +179,14 @@ const (
 	maxPassword = 72
 )
 
-func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string, licenseAutoWait time.Duration, transcription TranscriptionSettings) http.Handler {
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string, licenseAutoWait time.Duration, transcription TranscriptionSettings, options ...Option) http.Handler {
 	if licenseAutoWait <= 0 {
 		licenseAutoWait = 3 * time.Minute
 	}
 	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout), transcription: transcription}
+	for _, option := range options {
+		option(a)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -206,6 +212,9 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("GET /transcricao", a.transcriptionPage)
 	mux.HandleFunc("POST /transcricao", a.saveTranscriptionKey)
 	mux.HandleFunc("POST /transcricao/remover", a.removeTranscriptionKey)
+	mux.HandleFunc("POST /atualizar", a.requestUpdate)
+	mux.HandleFunc("GET /atualizacao", a.updatePage)
+	mux.HandleFunc("GET /api/atualizacao", a.updateJSON)
 	mux.HandleFunc("GET /documentacao", a.docs)
 	mux.HandleFunc("GET /receitas", a.recipes)
 	mux.HandleFunc("GET /pair", a.pairPage)
@@ -507,6 +516,11 @@ type layout struct {
 	Refresh      bool
 	SessionLabel string
 	SessionTone  string
+	// CanSelfUpdate offers the update button rather than the SSH command,
+	// because an agent on the host is there to act on it. UpdateBusy says one
+	// is already under way.
+	CanSelfUpdate bool
+	UpdateBusy    bool
 }
 
 // setupPageData tells the first-run form whether to ask for the token.
@@ -547,6 +561,10 @@ type passwordPageData struct {
 // newLayout builds the chrome shared by every signed-in page.
 func (a *webApp) newLayout(r *http.Request, title, active string) layout {
 	page := layout{Title: title, Active: active, Error: r.URL.Query().Get("erro"), SessionTone: "off"}
+	if a.updater != nil && a.updater.Available() {
+		page.CanSelfUpdate = true
+		page.UpdateBusy = a.updater.Busy()
+	}
 	if a.status != nil {
 		state := a.status.Snapshot().WhatsApp.State
 		page.SessionLabel, page.SessionTone = sessionLabel(state), sessionTone(state)
@@ -1581,27 +1599,28 @@ func releaseURL(tag string) string {
 // templates. The logo is trusted markup embedded in the binary, so it is
 // inlined as template.HTML; every other value stays contextually escaped.
 var templateFuncs = template.FuncMap{
-	"logo":          brand.LogoSVG,
-	"author":        func() string { return brand.Author },
-	"product":       func() string { return brand.Name },
-	"authorURL":     func() string { return brand.AuthorURL },
-	"repositoryURL": func() string { return brand.RepositoryURL },
-	"supportURL":    func() string { return brand.SupportURL },
-	"version":       version.String,
-	"newRelease":    newRelease,
-	"releaseURL":    releaseURL,
-	"updateCommand": func() string { return updateCommand },
-	"statusLabel":   statusLabel,
-	"statusTone":    statusTone,
-	"sessionLabel":  sessionLabel,
-	"sessionTone":   sessionTone,
-	"moment":        moment,
-	"relativeSince": relativeSince,
-	"plural":        plural,
-	"count":         count,
-	"len64":         len64,
-	"phone":         phone,
-	"initial":       initial,
+	"logo":           brand.LogoSVG,
+	"author":         func() string { return brand.Author },
+	"product":        func() string { return brand.Name },
+	"authorURL":      func() string { return brand.AuthorURL },
+	"repositoryURL":  func() string { return brand.RepositoryURL },
+	"supportURL":     func() string { return brand.SupportURL },
+	"version":        version.String,
+	"newRelease":     newRelease,
+	"rolledBackFrom": version.RolledBackFrom,
+	"releaseURL":     releaseURL,
+	"updateCommand":  func() string { return updateCommand },
+	"statusLabel":    statusLabel,
+	"statusTone":     statusTone,
+	"sessionLabel":   sessionLabel,
+	"sessionTone":    sessionTone,
+	"moment":         moment,
+	"relativeSince":  relativeSince,
+	"plural":         plural,
+	"count":          count,
+	"len64":          len64,
+	"phone":          phone,
+	"initial":        initial,
 }
 
 // len64 gives templates a length the counters can consume, since plural counts

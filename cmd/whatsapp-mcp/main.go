@@ -18,6 +18,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/mcphttp"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/rabbit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/repair"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/selfupdate"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
@@ -42,6 +43,9 @@ func main() {
 	defer db.Close()
 	state := health.NewState()
 	state.SetDatabase(true)
+	// Migrations only run forward, so an older build starting on a database a
+	// newer one has touched is worth saying out loud.
+	version.CheckRollback(ctx, db, logger)
 
 	// The message index is a projection of the stored events, so a decoder fix
 	// repairs the past instead of leaving it unreadable. This checks on every
@@ -77,7 +81,7 @@ func main() {
 	// The licence automation is on by default: registrations go to an address
 	// the email worker answers, and the wizard waits on the licence coming in
 	// rather than on a person's inbox.
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber)
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber, httpapi.WithSelfUpdate(selfupdate.New(cfg.UpdateDir)))
 	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db}, logger)
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

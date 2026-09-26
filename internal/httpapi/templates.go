@@ -356,6 +356,10 @@ pre.plain,pre.plain code{font-family:inherit}
 .update__notes:hover{color:var(--brand-strong);text-decoration:underline}
 .update .snippet{margin:0}
 .update__note{margin:8px 0 0;font-size:.84rem;color:var(--muted)}
+.update--rollback{border-color:var(--danger-border);background:var(--danger-bg)}
+.update--rollback .update__version{color:var(--danger)}
+.update form{margin:0}
+.progress{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;color:var(--text-soft);max-height:260px;overflow:auto;background:var(--surface-soft);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px}
 .colophon__version{font-variant-numeric:tabular-nums}
 /* ---- password reveal ---- */
 .reveal{position:relative;display:block}
@@ -403,7 +407,7 @@ pre.plain,pre.plain code{font-family:inherit}
 <a href="/documentacao"{{if eq .Active "documentacao"}} aria-current="page"{{end}}>Documentação</a>
 <a href="/receitas"{{if eq .Active "receitas"}} aria-current="page"{{end}}>Receitas</a>
 </nav>
-{{template "updatebanner"}}
+{{template "updatebanner" .}}
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 {{end}}
 
@@ -411,14 +415,22 @@ pre.plain,pre.plain code{font-family:inherit}
 rendered only on the pages behind the session cookie, and "this instance is
 running an outdated version" is not something to tell whoever loads the sign-in
 page. */}}
-{{define "updatebanner"}}{{with newRelease}}
+{{define "updatebanner"}}{{$page := .}}{{with rolledBackFrom}}
+<div class="update update--rollback" role="alert">
+<p class="update__line">Esta instância voltou para a versão {{version}}, mas o banco de dados já rodou a <span class="update__version">{{.}}</span>.</p>
+<p class="update__note">As migrações só andam para frente: uma versão mais antiga pode não entender o que a {{.}} gravou, e falhar em algum canto. Volte para a {{.}} ou uma mais nova.</p>
+{{if $page.CanSelfUpdate}}{{if $page.UpdateBusy}}<p class="update__note"><a href="/atualizacao">Atualização em andamento →</a></p>{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.}}"><div class="actions" style="margin-top:10px"><button class="btn btn--small" type="submit">Voltar para a {{.}}</button></div></form>{{end}}{{end}}
+</div>
+{{else}}{{with newRelease}}
 <div class="update">
 <p class="update__line">Versão <span class="update__version">{{.}}</span> disponível — esta instância roda a {{version}}.
 <a class="update__notes" href="{{releaseURL .}}" rel="noopener noreferrer" target="_blank">Ver o que mudou</a></p>
-<div class="snippet"><pre data-copy><code>{{updateCommand}}</code></pre></div>
-<p class="update__note">Rode na sua instância, por SSH. Os segredos, o pareamento e as mensagens indexadas são preservados; o banco é copiado antes de qualquer migração.</p>
+{{if $page.CanSelfUpdate}}{{if $page.UpdateBusy}}<p class="update__note"><a href="/atualizacao">Atualização em andamento →</a></p>{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.}}"><div class="actions"><button class="btn btn--small" type="submit">Atualizar para a {{.}}</button></div></form>
+<p class="update__note">O servidor faz backup do banco antes de tudo e reinicia o painel no fim — você vai precisar entrar de novo. Os segredos, o pareamento e as mensagens indexadas são preservados.</p>{{end}}
+{{else}}<div class="snippet"><pre data-copy><code>{{updateCommand}}</code></pre></div>
+<p class="update__note">Rode na sua instância, por SSH. Os segredos, o pareamento e as mensagens indexadas são preservados; o banco é copiado antes de qualquer migração.</p>{{end}}
 </div>
-{{end}}{{end}}
+{{end}}{{end}}{{end}}
 
 {{/* The three routes a person can take out of this panel, in the order they
 should try them: the app that needs no terminal, the terminal, and then the
@@ -1103,6 +1115,22 @@ and acts on. */}}
 <pre class="plain" data-copy><code>Transcreva os áudios que recebi hoje no WhatsApp.</code></pre></div>
 <p class="muted">O áudio é enviado para a OpenAI e cobrado na conta desta chave (<a href="{{.Links.Pricing}}" rel="noopener noreferrer" target="_blank">US$ {{.PricePerMinute}} por minuto</a>). Cada áudio é transcrito uma vez: pedir de novo devolve o texto guardado, sem nova cobrança. A chave também pode ser salva pela própria ferramenta de IA com <code>set_transcription_key</code>, mas por aqui ela não passa pela conversa.</p>
 </div></section>{{end}}
+
+{{define "atualizacao"}}{{template "head" .}}{{template "nav" .}}
+<h1>Atualização</h1>
+<section class="card card--accent" data-update-status data-target="{{.Target}}" data-running="{{.Running}}">
+<div class="card__head"><h2>{{if .Target}}Para a versão {{.Target}}{{else}}Nenhuma atualização pedida{{end}}</h2>
+{{if .Has}}<span class="pill pill--{{if eq .Status.State "succeeded"}}ok{{else if eq .Status.State "failed"}}off{{else}}warn{{end}}" data-update-state>{{if eq .Status.State "queued"}}Na fila{{else if eq .Status.State "running"}}Em andamento{{else if eq .Status.State "succeeded"}}Concluída{{else}}Falhou{{end}}</span>{{end}}</div>
+<div class="card__body stack">
+{{if .Has}}
+<p class="lead" data-update-message>{{if .Status.Message}}{{.Status.Message}}{{else if eq .Status.State "queued"}}Pedido enviado. O agente do servidor pega em alguns segundos.{{else if eq .Status.State "running"}}{{if .Status.Phase}}{{.Status.Phase}}{{else}}Atualizando…{{end}}{{else if eq .Status.State "succeeded"}}A versão {{.Target}} está rodando.{{end}}</p>
+{{if .Status.Log}}<ul class="progress" data-update-log>{{range .Status.Log}}<li>{{.}}</li>{{end}}</ul>{{else}}<ul class="progress" data-update-log hidden></ul>{{end}}
+{{if not .Finished}}<p class="muted">No meio da atualização o painel reinicia e fica alguns segundos fora do ar. Esta página continua conferindo sozinha e avisa quando a nova versão subir; aí é só entrar de novo.</p>{{end}}
+{{else}}<p class="muted">Quando houver uma versão nova, o aviso aparece no topo de todas as páginas do painel, com o botão para atualizar.</p>{{end}}
+<p class="muted">Rodando agora: <strong data-update-running>{{.Running}}</strong>{{if eq .Method "dokploy"}} · atualizado pelo Dokploy{{end}}</p>
+<div class="actions"><a class="btn btn--ghost" href="/">Voltar ao painel</a></div>
+</div></section>
+{{template "foot"}}{{end}}
 
 {{define "documentacao"}}{{template "head" .}}{{template "nav" .}}
 <h1>O que o MCP sabe fazer</h1>

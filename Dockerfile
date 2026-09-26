@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     -o /out/whatsapp-mcp ./cmd/whatsapp-mcp
 
 FROM alpine:3.22.1
-RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -G app app
+RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -u 10001 -G app app
 COPY --from=build /out/whatsapp-mcp /usr/local/bin/whatsapp-mcp
 USER app
 EXPOSE 8080

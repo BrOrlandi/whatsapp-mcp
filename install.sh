@@ -294,6 +294,13 @@ if [ -n "${EVOLUTION_LICENSE_EMAIL_DOMAIN:-}" ]; then
     info "licence addresses will use @${EVOLUTION_LICENSE_EMAIL_DOMAIN}"
 fi
 
+# The update agent and the gateway share this directory; the path is the same
+# on both sides so a status file means the same thing wherever it is read.
+if ! grep -q '^UPDATE_DIR_HOST=' .env; then
+    printf 'UPDATE_DIR_HOST=/var/lib/whatsapp-mcp/update\n' >> .env
+fi
+install -d -m 0755 -o 10001 -g 10001 /var/lib/whatsapp-mcp/update
+
 # ---------------------------------------------------------------- firewall
 
 CURRENT_STEP="configuring the firewall"
@@ -381,6 +388,15 @@ fi
 CURRENT_STEP="installing the whatsapp-mcp command"
 install -m 0755 deploy/whatsapp-mcp-cli.sh "${CLI_PATH}"
 info "installed ${CLI_PATH}"
+
+CURRENT_STEP="installing the update agent"
+# What makes "Atualizar" in the panel work: a systemd unit that runs
+# update.sh when the panel asks, so the gateway never needs the Docker socket.
+if bash deploy/install-updater.sh install >/dev/null; then
+    info "installed the update agent (the panel can update this server)"
+else
+    warn "could not install the update agent; updates stay a command: sudo whatsapp-mcp update"
+fi
 
 # ---------------------------------------------------------------- done
 

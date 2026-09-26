@@ -44,6 +44,11 @@ type Config struct {
 	// server, carrying nothing about the instance, and this is the one variable
 	// that stops it.
 	UpdateCheck bool
+	// UpdateDir is the directory the host's update agent shares with the
+	// gateway. The panel writes update requests into it and reads the agent's
+	// progress back; with no agent there, the panel offers the SSH command
+	// instead of a button.
+	UpdateDir string
 }
 
 func Load() Config {
@@ -72,6 +77,7 @@ func Load() Config {
 		LicenseEmailDomain: env("EVOLUTION_LICENSE_EMAIL_DOMAIN", "brorlandi.xyz"),
 		LicenseAutoWait:    duration("EVOLUTION_LICENSE_AUTO_WAIT", 3*time.Minute),
 		UpdateCheck:        boolEnv("UPDATE_CHECK", true),
+		UpdateDir:          env("UPDATE_DIR", "/var/lib/whatsapp-mcp/update"),
 	}
 }
 

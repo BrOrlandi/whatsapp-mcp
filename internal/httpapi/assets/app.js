@@ -163,3 +163,71 @@
     block.parentNode.insertBefore(button, block);
   });
 })();
+
+// The update page keeps asking how the update is going. The gateway restarts
+// in the middle of it, so failed requests are expected and simply retried, and
+// the new version is recognised by the version the server reports — the old
+// session cookie no longer opens anything once the process is new.
+(function () {
+  var card = document.querySelector("[data-update-status]");
+  if (!card) return;
+  var target = card.getAttribute("data-target");
+  if (!target) return;
+  var state = card.querySelector("[data-update-state]");
+  var message = card.querySelector("[data-update-message]");
+  var log = card.querySelector("[data-update-log]");
+  var running = card.querySelector("[data-update-running]");
+  var labels = { queued: "Na fila", running: "Em andamento", succeeded: "Concluída", failed: "Falhou" };
+  var tones = { queued: "warn", running: "warn", succeeded: "ok", failed: "off" };
+  var done = false;
+
+  function show(status) {
+    if (state && status.state) {
+      state.textContent = labels[status.state] || status.state;
+      state.className = "pill pill--" + (tones[status.state] || "warn");
+    }
+    if (message && (status.message || status.phase)) message.textContent = status.message || status.phase;
+    if (log && status.log && status.log.length) {
+      log.hidden = false;
+      log.textContent = "";
+      status.log.forEach(function (line) {
+        var item = document.createElement("li");
+        item.textContent = line;
+        log.appendChild(item);
+      });
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  function finish(text, tone) {
+    done = true;
+    if (state) {
+      state.textContent = tone === "ok" ? labels.succeeded : labels.failed;
+      state.className = "pill pill--" + tone;
+    }
+    if (message) message.textContent = text;
+  }
+
+  function poll() {
+    if (done) return;
+    fetch("/api/atualizacao", { cache: "no-store", credentials: "same-origin" })
+      .then(function (response) { return response.json(); })
+      .then(function (body) {
+        if (running && body.version) running.textContent = body.version;
+        if (body.version === target) {
+          finish("A versão " + target + " está rodando." + (body.signed_in ? "" : " Entre de novo para continuar."), "ok");
+          if (!body.signed_in) setTimeout(function () { window.location.href = "/login"; }, 2500);
+          return;
+        }
+        if (body.status) {
+          show(body.status);
+          if (body.status.state === "failed") { done = true; return; }
+        }
+      })
+      .catch(function () {
+        if (message) message.textContent = "O painel está reiniciando com a nova versão…";
+      })
+      .then(function () { if (!done) setTimeout(poll, 3000); });
+  }
+  setTimeout(poll, 2000);
+})();

@@ -17,6 +17,23 @@ curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.
 
 ## Unreleased
 
+### Updating from the panel
+
+- The update notice now has an **Atualizar** button. It runs the same
+  `update.sh` an operator would run by SSH — database dump first — and the
+  panel follows its progress until the new version answers. The gateway never
+  touches Docker: the button leaves a request in a directory shared with the
+  host, and a systemd unit installed by `install.sh` (and by the next
+  `update.sh`) carries it out. It accepts only a version GitHub has published.
+- A Dokploy deployment can use the same agent in `dokploy` mode, which moves
+  `WHATSAPP_MCP_TAG` through Dokploy's API and redeploys.
+- The gateway remembers the newest version that ever ran against its
+  database. Starting an older one — a redeployed stale pin, an update undone —
+  raises a warning on every panel page, since migrations do not run backwards,
+  with a button back to that version when the agent is there.
+- The gateway container now runs as uid 10001, so the host can give it the
+  shared directory. Migration `013_deployed_version.sql` adds one table.
+
 ### Local transcription
 
 - The tool descriptions now tell a client that can run commands on the

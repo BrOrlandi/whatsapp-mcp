@@ -151,6 +151,14 @@ services:
       # list every six hours, carrying nothing about this installation, and
       # false stops it.
       UPDATE_CHECK: ${UPDATE_CHECK:-true}
+      UPDATE_DIR: /var/lib/whatsapp-mcp/update
+    # The directory the host's update agent watches. The panel writes update
+    # requests into it and reads the progress back; the agent, not this
+    # container, is what drives Docker. install.sh points UPDATE_DIR_HOST at
+    # /var/lib/whatsapp-mcp/update and installs the agent there. Without an
+    # agent the directory stays empty and the panel shows the SSH command.
+    volumes:
+      - ${UPDATE_DIR_HOST:-./state/update}:/var/lib/whatsapp-mcp/update
     # Bound to loopback by default: the panel has no business facing the
     # internet directly. Put a TLS-terminating reverse proxy in front of it and
     # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens

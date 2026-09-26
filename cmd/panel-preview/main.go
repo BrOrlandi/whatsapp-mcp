@@ -18,6 +18,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/httpapi"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/selfupdate"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
@@ -290,7 +291,7 @@ func main() {
 	}
 	// The preview defaults to the automatic licence path, which is what a real
 	// install shows; PREVIEW_LICENSE_AUTO=false previews the manual one.
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait, &fakeTranscription{})
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait, &fakeTranscription{}, httpapi.WithSelfUpdate(selfupdate.New(os.Getenv("PREVIEW_UPDATE_DIR"))))
 	// A second preview on the same machine would otherwise fail to bind and
 	// die silently, which reads as the panel being broken.
 	address := os.Getenv("PREVIEW_ADDR")
