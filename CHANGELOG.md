@@ -15,6 +15,16 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
+## 0.3.0-beta.2
+
+### Fixes
+
+- `transcribe_audio` failed on every voice note with "Evolution returned no
+  audio". Evolution Go returns the media as a data URI
+  (`data:audio/ogg; codecs=opus;base64,…`) with an empty `mimetype`, and the
+  tool was decoding it as bare base64. It now reads the format from the URI and
+  falls back to Ogg/Opus, which is what WhatsApp voice notes are.
+
 ## 0.3.0-beta.1
 
 Voice notes can now be read. An instance that saves an OpenAI key gets its

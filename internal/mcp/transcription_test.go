@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 )
@@ -193,4 +194,46 @@ func stringify(value map[string]any) string {
 		}
 	}
 	return b.String()
+}
+
+// Evolution Go puts a data URI in the base64 field and leaves mimetype empty,
+// which is what production returned for every voice note. The format comes
+// from the URI's header, and a body with no format at all is a voice note.
+func TestDecodeAudioReadsEvolutionsDataURI(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		media evolution.Media
+		mime  string
+	}{
+		{"data URI, empty mimetype", evolution.Media{Base64: "data:audio/ogg; codecs=opus;base64,T2dnUw=="}, "audio/ogg; codecs=opus"},
+		{"data URI, mimetype given", evolution.Media{MimeType: "audio/mpeg", Base64: "data:application/octet-stream;base64,T2dnUw=="}, "audio/mpeg"},
+		{"bare base64", evolution.Media{MimeType: "audio/ogg", Base64: "T2dnUw=="}, "audio/ogg"},
+		{"no format anywhere", evolution.Media{Base64: "T2dnUw"}, "audio/ogg"},
+	} {
+		audio, err := decodeAudio(tc.media)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if audio.MimeType != tc.mime || string(audio.Data) != "OggS" {
+			t.Fatalf("%s: got %q %q", tc.name, audio.MimeType, audio.Data)
+		}
+	}
+	for _, bad := range []string{"", "data:audio/ogg;base64", "data:audio/ogg;base64,", "not base64!"} {
+		if _, err := decodeAudio(evolution.Media{Base64: bad}); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestTranscribeAudioAcceptsTheDataURIEvolutionReturns(t *testing.T) {
+	transcriber := &fakeTranscriber{key: "sk-test-0000000000000000abcd"}
+	live := &fakeLive{media: &evolution.Media{Base64: "data:audio/ogg; codecs=opus;base64,T2dnUw=="}}
+	server := testServer(audioIndex(), live, nil).WithTranscriber(transcriber, "https://mcp.example")
+	payload, isError := call(t, server, "transcribe_audio", map[string]any{"message_id": "A1"})
+	if isError {
+		t.Fatalf("transcription failed: %#v", payload)
+	}
+	if transcriber.sent[0].MimeType != "audio/ogg; codecs=opus" || string(transcriber.sent[0].Data) != "OggS" {
+		t.Fatalf("sent %#v", transcriber.sent[0])
+	}
 }

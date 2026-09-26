@@ -715,11 +715,11 @@ func (s *Server) transcribeAudio(ctx context.Context, session Session, args argu
 	if failure != nil {
 		return failure
 	}
-	audio, err := base64.StdEncoding.DecodeString(media.Base64)
-	if err != nil || len(audio) == 0 {
-		return toolError("Evolution returned no audio for message %q", args.MessageID)
+	audio, err := decodeAudio(media)
+	if err != nil {
+		return toolError("Evolution returned no usable audio for message %q: %v", args.MessageID, err)
 	}
-	transcript, err := s.transcriber.Transcribe(ctx, session.InstanceID, message.MessageID, transcribe.Audio{MimeType: media.MimeType, Data: audio}, args.Language)
+	transcript, err := s.transcriber.Transcribe(ctx, session.InstanceID, message.MessageID, audio, args.Language)
 	if err != nil {
 		return s.transcriptionError(err)
 	}
@@ -772,6 +772,41 @@ func (s *Server) transcriptionError(err error) map[string]any {
 		}
 	}
 	return textResult(payload, true)
+}
+
+// decodeAudio turns what Evolution's download route returns into bytes and a
+// format. Evolution Go answers with a data URI in the base64 field —
+// "data:audio/ogg; codecs=opus;base64,T2dnUw…" — and leaves mimetype empty, so
+// the format has to be read from the URI's own header. A bare base64 body is
+// accepted too. When neither names a format, the audio is a WhatsApp voice
+// note, and those are Ogg/Opus.
+func decodeAudio(media evolution.Media) (transcribe.Audio, error) {
+	body := strings.TrimSpace(media.Base64)
+	mimeType := strings.TrimSpace(media.MimeType)
+	if rest, ok := strings.CutPrefix(body, "data:"); ok {
+		header, data, found := strings.Cut(rest, ",")
+		if !found {
+			return transcribe.Audio{}, errors.New("the data URI has no payload")
+		}
+		body = data
+		if mimeType == "" {
+			mimeType = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(header), ";base64"))
+		}
+	}
+	if mimeType == "" {
+		mimeType = "audio/ogg"
+	}
+	audio, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		audio, err = base64.RawStdEncoding.DecodeString(body)
+	}
+	if err != nil {
+		return transcribe.Audio{}, errors.New("the media is not valid base64")
+	}
+	if len(audio) == 0 {
+		return transcribe.Audio{}, errors.New("the media is empty")
+	}
+	return transcribe.Audio{MimeType: mimeType, Data: audio}, nil
 }
 
 // setTranscriptionKey saves or removes the OpenAI key. It does not need a
