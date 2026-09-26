@@ -57,13 +57,19 @@ func (s *Store) ListChats(ctx context.Context, instanceID string, search string,
 		limit = 100
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-                WITH ranked AS (
+                WITH canonical AS (
+                    -- A LID chat is listed under its phone number when the
+                    -- pairing is known, so one conversation is one row.
+                    SELECT coalesce(a.pn, m.chat_jid) AS chat_jid, m.is_group, m.text, m.from_me, m.sender_name, m.sent_at
+                    FROM messages m
+                    LEFT JOIN jid_aliases a ON a.instance_id = m.instance_id AND a.lid = m.chat_jid
+                    WHERE m.instance_id = $1
+                ), ranked AS (
                     SELECT chat_jid, is_group, text, from_me, sender_name, sent_at,
                            row_number() OVER (PARTITION BY chat_jid ORDER BY sent_at DESC NULLS LAST) AS position,
                            count(*) OVER (PARTITION BY chat_jid) AS total,
                            max(sent_at) OVER (PARTITION BY chat_jid) AS last_at
-                    FROM messages
-                    WHERE instance_id = $1
+                    FROM canonical
                 )
                 SELECT chat_jid, is_group, total, last_at, text, from_me,
                        coalesce(max(sender_name) FILTER (WHERE sender_name <> '' AND NOT from_me) OVER (PARTITION BY chat_jid), '') AS display_name
@@ -108,7 +114,9 @@ func (s *Store) Messages(ctx context.Context, instanceID string, query MessageQu
 		conditions = append(conditions, strings.ReplaceAll(condition, "?", "$"+itoa(len(args))))
 	}
 	if query.ChatJID != "" {
-		add("m.chat_jid = ?", query.ChatJID)
+		// A conversation WhatsApp moved to a LID lives under two JIDs; asking
+		// for either one reads both.
+		add("(m.chat_jid = ? OR m.chat_jid IN (SELECT lid FROM jid_aliases WHERE instance_id = m.instance_id AND pn = ?) OR m.chat_jid IN (SELECT pn FROM jid_aliases WHERE instance_id = m.instance_id AND lid = ?))", query.ChatJID)
 	}
 	if query.Query != "" {
 		add("(m.search_vector @@ websearch_to_tsquery('simple', ?) OR to_tsvector('simple', coalesce(t.text, '')) @@ websearch_to_tsquery('simple', ?))", query.Query)

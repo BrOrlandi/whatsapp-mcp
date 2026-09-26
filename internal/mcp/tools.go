@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BrOrlandi/whatsapp-mcp/internal/events"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
@@ -713,15 +714,11 @@ func (s *Server) media(ctx context.Context, session Session, messageID string) (
 	}
 	// Evolution needs the protobuf message back in order to decrypt the media,
 	// and that lives inside the stored event payload.
-	var event struct {
-		Data struct {
-			Message json.RawMessage `json:"Message"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(payload, &event); err != nil || len(event.Data.Message) == 0 {
+	content := events.MessageContent(payload, messageID)
+	if len(content) == 0 {
 		return evolution.Media{}, toolError("the stored payload of message %q carries no media", messageID)
 	}
-	media, err := s.live.DownloadMedia(ctx, session.Token, event.Data.Message)
+	media, err := s.live.DownloadMedia(ctx, session.Token, content)
 	if err != nil {
 		return evolution.Media{}, liveError(err)
 	}

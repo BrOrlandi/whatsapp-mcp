@@ -23,6 +23,17 @@ type Event struct {
 	Payload              []byte
 	ReceivedAt           time.Time
 	Messages             []Message
+	// Aliases pair a chat's LID with its phone-number JID, as the event
+	// revealed them.
+	Aliases []Alias
+}
+
+// Alias says that a LID chat and a phone-number chat are the same
+// conversation.
+type Alias struct {
+	InstanceID string
+	LID        string
+	PN         string
 }
 type Message struct {
 	InstanceID string `json:"instance_id"`
@@ -165,6 +176,14 @@ func (s *Store) PersistEvent(ctx context.Context, event Event) error {
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO messages (instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at,event_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (instance_id,message_id) DO NOTHING`,
 			m.InstanceID, m.MessageID, m.ChatJID, m.SenderJID, m.SenderName, m.FromMe, m.IsGroup, m.MediaType, m.Text, nullableTime(m.SentAt), event.ID); err != nil {
+			return err
+		}
+	}
+	for _, a := range event.Aliases {
+		if a.InstanceID == "" || a.LID == "" || a.PN == "" {
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO jid_aliases (instance_id,lid,pn) VALUES ($1,$2,$3) ON CONFLICT (instance_id,lid) DO UPDATE SET pn=EXCLUDED.pn, updated_at=now() WHERE jid_aliases.pn <> EXCLUDED.pn`, a.InstanceID, a.LID, a.PN); err != nil {
 			return err
 		}
 	}

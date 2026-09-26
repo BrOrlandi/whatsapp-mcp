@@ -97,13 +97,15 @@ func Decode(raw []byte) (Event, error) {
 	switch {
 	case name == "Message" || name == "SendMessage":
 		decoded.Kind = KindMessage
-		if message, id := decodeLiveMessage(env.Data, instance); message != nil {
+		if message, id, aliases := decodeLive(env.Data, instance); message != nil {
 			decoded.Record.Messages = []store.Message{*message}
+			decoded.Record.Aliases = aliases
 			decoded.Record.ID = eventID(instance, name, id, raw)
 		}
 	case name == "HistorySync":
 		decoded.Kind = KindHistory
 		decoded.Record.Messages = decodeHistory(env.Data, instance)
+		decoded.Record.Aliases = historyAliases(env.Data, instance)
 	case connectionStates[name] != "":
 		decoded.Kind = KindConnection
 		decoded.Connection = decodeConnection(name, env.Data)
@@ -135,21 +137,63 @@ type messageInfo struct {
 	IsGroup   bool   `json:"IsGroup"`
 	PushName  string `json:"PushName"`
 	Timestamp string `json:"Timestamp"`
+	// SenderAlt and RecipientAlt carry the phone-number JID of a chat that
+	// WhatsApp addresses by LID: the sender's for a message received, the
+	// recipient's for one the account sent.
+	SenderAlt    string `json:"SenderAlt"`
+	RecipientAlt string `json:"RecipientAlt"`
+}
+
+// liveAlias pairs a one-to-one LID chat with its phone number, when the
+// message reveals it.
+func liveAlias(info messageInfo, instance string) (store.Alias, bool) {
+	if info.IsGroup || !strings.HasSuffix(info.Chat, "@lid") {
+		return store.Alias{}, false
+	}
+	pn := info.SenderAlt
+	if info.IsFromMe {
+		pn = info.RecipientAlt
+	}
+	pn = bareJID(pn)
+	if !strings.HasSuffix(pn, "@s.whatsapp.net") {
+		return store.Alias{}, false
+	}
+	return store.Alias{InstanceID: instance, LID: info.Chat, PN: pn}, true
+}
+
+// bareJID drops the device part of a JID, "5511…:12@s.whatsapp.net", which
+// names one of a person's devices rather than the person.
+func bareJID(jid string) string {
+	user, server, found := strings.Cut(jid, "@")
+	if !found {
+		return jid
+	}
+	user, _, _ = strings.Cut(user, ":")
+	return user + "@" + server
 }
 
 func decodeLiveMessage(data json.RawMessage, instance string) (*store.Message, string) {
+	message, id, _ := decodeLive(data, instance)
+	return message, id
+}
+
+func decodeLive(data json.RawMessage, instance string) (*store.Message, string, []store.Alias) {
 	if len(data) == 0 {
-		return nil, ""
+		return nil, "", nil
 	}
 	var payload struct {
 		Info    messageInfo     `json:"Info"`
 		Message json.RawMessage `json:"Message"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, ""
+		return nil, "", nil
 	}
 	if payload.Info.ID == "" {
-		return nil, ""
+		return nil, "", nil
+	}
+	var aliases []store.Alias
+	if alias, ok := liveAlias(payload.Info, instance); ok {
+		aliases = append(aliases, alias)
 	}
 	return &store.Message{
 		InstanceID: instance,
@@ -162,7 +206,7 @@ func decodeLiveMessage(data json.RawMessage, instance string) (*store.Message, s
 		Text:       messageText(payload.Message),
 		MediaType:  mediaType(payload.Message),
 		SentAt:     parseTimestamp(payload.Info.Timestamp),
-	}, payload.Info.ID
+	}, payload.Info.ID, aliases
 }
 
 // decodeHistory walks the conversations WhatsApp delivers in a history sync.
@@ -218,6 +262,30 @@ func decodeHistory(data json.RawMessage, instance string) []store.Message {
 		}
 	}
 	return messages
+}
+
+// historyAliases pairs every LID conversation of a history sync with the
+// phone number WhatsApp names for it.
+func historyAliases(data json.RawMessage, instance string) []store.Alias {
+	var payload struct {
+		Data struct {
+			Conversations []struct {
+				ID    string `json:"id"`
+				PnJID string `json:"pnJID"`
+			} `json:"conversations"`
+		} `json:"Data"`
+	}
+	if len(data) == 0 || json.Unmarshal(data, &payload) != nil {
+		return nil
+	}
+	var aliases []store.Alias
+	for _, conversation := range payload.Data.Conversations {
+		pn := bareJID(conversation.PnJID)
+		if strings.HasSuffix(conversation.ID, "@lid") && strings.HasSuffix(pn, "@s.whatsapp.net") {
+			aliases = append(aliases, store.Alias{InstanceID: instance, LID: conversation.ID, PN: pn})
+		}
+	}
+	return aliases
 }
 
 // content mirrors the parts of WhatsApp's message protobuf this gateway reads.
@@ -394,4 +462,45 @@ func parseNumericTimestamp(raw json.RawMessage) time.Time {
 		return parseTimestamp(value)
 	}
 	return time.Time{}
+}
+
+// MessageContent finds the WhatsApp message protobuf of one message inside a
+// stored event payload, which is what Evolution needs back to decode media.
+//
+// A live event carries one message at data.Message. A history sync carries
+// whole conversations, and the message is one entry among them, found by its
+// id. Reading only the live shape made every voice note that arrived through
+// a history sync look as if it carried no media.
+func MessageContent(payload []byte, messageID string) json.RawMessage {
+	var event struct {
+		Data struct {
+			Message json.RawMessage `json:"Message"`
+			Data    struct {
+				Conversations []struct {
+					Messages []struct {
+						Message struct {
+							Key struct {
+								ID string `json:"id"`
+							} `json:"key"`
+							Message json.RawMessage `json:"message"`
+						} `json:"message"`
+					} `json:"messages"`
+				} `json:"conversations"`
+			} `json:"Data"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil
+	}
+	if len(event.Data.Message) > 0 && string(event.Data.Message) != "null" {
+		return event.Data.Message
+	}
+	for _, conversation := range event.Data.Data.Conversations {
+		for _, entry := range conversation.Messages {
+			if entry.Message.Key.ID == messageID && len(entry.Message.Message) > 0 && string(entry.Message.Message) != "null" {
+				return entry.Message.Message
+			}
+		}
+	}
+	return nil
 }

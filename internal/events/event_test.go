@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
 // Evolution Go wraps whatsmeow's own structs, so a live message arrives with Go
@@ -213,5 +215,55 @@ func TestDecodeKeepsUnknownEvents(t *testing.T) {
 func TestDecodeRejectsMalformedPayload(t *testing.T) {
 	if _, err := Decode([]byte(`{`)); err == nil {
 		t.Fatal("malformed payload decoded without error")
+	}
+}
+
+// Media is decoded from the stored payload, and a voice note that arrived in a
+// history sync sits among the other messages of its conversation.
+func TestMessageContentFindsLiveAndHistoryMessages(t *testing.T) {
+	live := []byte(`{"event":"Message","data":{"Info":{"ID":"AC1"},"Message":{"audioMessage":{"seconds":3}}}}`)
+	if got := string(MessageContent(live, "AC1")); got != `{"audioMessage":{"seconds":3}}` {
+		t.Fatalf("live: %s", got)
+	}
+	history := []byte(`{"event":"HistorySync","data":{"Data":{"conversations":[{"id":"5516@s.whatsapp.net","messages":[
+		{"message":{"key":{"id":"2A00"},"message":{"conversation":"oi"}}},
+		{"message":{"key":{"id":"2A78"},"message":{"audioMessage":{"seconds":9}}}}]}]}}}`)
+	if got := string(MessageContent(history, "2A78")); got != `{"audioMessage":{"seconds":9}}` {
+		t.Fatalf("history: %s", got)
+	}
+	if MessageContent(history, "missing") != nil || MessageContent([]byte(`not json`), "x") != nil {
+		t.Fatal("found content that is not there")
+	}
+}
+
+// A LID chat reveals its phone number in SenderAlt when the message was
+// received and in RecipientAlt when the account sent it; a history sync names
+// it per conversation. Groups are never paired.
+func TestLIDChatsArePairedWithTheirPhoneNumber(t *testing.T) {
+	sent := []byte(`{"event":"SendMessage","instanceId":"i","data":{"Info":{"ID":"3EB0","Chat":"1528@lid","Sender":"5511999@s.whatsapp.net","IsFromMe":true,"RecipientAlt":"5516997066292@s.whatsapp.net","Timestamp":"2026-09-26T15:09:00Z"},"Message":{"conversation":"oi"}}}`)
+	decoded, err := Decode(sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Record.Aliases) != 1 || decoded.Record.Aliases[0] != (store.Alias{InstanceID: "i", LID: "1528@lid", PN: "5516997066292@s.whatsapp.net"}) {
+		t.Fatalf("sent: %+v", decoded.Record.Aliases)
+	}
+	received := []byte(`{"event":"Message","instanceId":"i","data":{"Info":{"ID":"AC1","Chat":"1528@lid","Sender":"1528@lid","SenderAlt":"5516997066292:3@s.whatsapp.net","Timestamp":"2026-09-26T15:10:00Z"},"Message":{"conversation":"oi"}}}`)
+	decoded, _ = Decode(received)
+	if len(decoded.Record.Aliases) != 1 || decoded.Record.Aliases[0].PN != "5516997066292@s.whatsapp.net" {
+		t.Fatalf("received: %+v", decoded.Record.Aliases)
+	}
+	group := []byte(`{"event":"Message","instanceId":"i","data":{"Info":{"ID":"AC2","Chat":"1203@g.us","IsGroup":true,"Sender":"1528@lid","SenderAlt":"5516997066292@s.whatsapp.net","Timestamp":"2026-09-26T15:10:00Z"},"Message":{"conversation":"oi"}}}`)
+	decoded, _ = Decode(group)
+	if len(decoded.Record.Aliases) != 0 {
+		t.Fatalf("group: %+v", decoded.Record.Aliases)
+	}
+	history := []byte(`{"event":"HistorySync","instanceId":"i","data":{"Data":{"conversations":[
+		{"ID":"1528@lid","pnJID":"5516997066292@s.whatsapp.net","messages":[]},
+		{"ID":"5511@s.whatsapp.net","messages":[]},
+		{"ID":"9999@lid","messages":[]}]}}}`)
+	decoded, _ = Decode(history)
+	if len(decoded.Record.Aliases) != 1 || decoded.Record.Aliases[0].LID != "1528@lid" {
+		t.Fatalf("history: %+v", decoded.Record.Aliases)
 	}
 }

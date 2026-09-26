@@ -32,6 +32,22 @@ curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.
   and `search_messages` now return every kept transcript in the message's
   `transcript` field, and search matches words spoken in voice notes.
 
+### Fixes
+
+- Voice notes that arrived through a history sync could not be downloaded or
+  transcribed ("the stored payload carries no media"). The media lookup only
+  understood live events; a history sync stores whole conversations, and the
+  message is now found among them by its id.
+- A conversation WhatsApp moved to a LID (`…@lid`) was split in two: the
+  history under the phone number, the newest messages under the LID. The
+  gateway now records which LID belongs to which number — from the
+  `RecipientAlt`/`SenderAlt` of live messages and the `pnJID` of history syncs
+  — and `list_chats` shows one conversation, `get_chat_messages` reads both
+  JIDs whichever one is asked for. Messages keep the JID WhatsApp used, so
+  deleting, editing and reacting still address them correctly. Migration
+  `012_jid_aliases.sql` pairs what is already indexed; LID chats whose number
+  WhatsApp never revealed stay on their own.
+
 ## 0.3.0-beta.2
 
 ### Fixes
