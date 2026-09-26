@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 )
 
 // Index is the message history, which lives in PostgreSQL because Evolution Go
@@ -67,15 +69,38 @@ type Session struct {
 	Token        string
 }
 
+// Transcriber turns voice notes into text and keeps the OpenAI key it does
+// that with.
+type Transcriber interface {
+	Status(context.Context) (transcribe.Status, error)
+	SaveKey(context.Context, string) (transcribe.Status, error)
+	RemoveKey(context.Context) error
+	Stored(context.Context, string, string) (store.Transcript, error)
+	Transcribe(context.Context, string, string, transcribe.Audio, string) (store.Transcript, error)
+}
+
 type Server struct {
-	index     Index
-	live      Live
-	state     *health.State
-	freshness time.Duration
+	index       Index
+	live        Live
+	state       *health.State
+	freshness   time.Duration
+	transcriber Transcriber
+	// panelURL is where the operator is sent to configure what the tools
+	// cannot, such as the transcription key.
+	panelURL string
 }
 
 func New(index Index, live Live, state *health.State, freshness time.Duration) *Server {
 	return &Server{index: index, live: live, state: state, freshness: freshness}
+}
+
+// WithTranscriber enables the transcription tools. Without it they answer that
+// transcription is unavailable rather than disappearing from the list. The
+// panel URL is what the tools point the user at to save the OpenAI key.
+func (s *Server) WithTranscriber(t Transcriber, panelURL string) *Server {
+	s.transcriber = t
+	s.panelURL = strings.TrimRight(panelURL, "/")
+	return s
 }
 
 // sessionKey carries the authorised instance through the context, which keeps

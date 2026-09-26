@@ -156,6 +156,9 @@ type webApp struct {
 	// per-address lockout the MCP endpoint already has. bcrypt slows one guess
 	// down; only a lockout stops a campaign of them.
 	logins *ratelimit.Attempts
+	// transcription is the OpenAI key behind voice-note transcription. Nil
+	// leaves the page up with an explanation instead of a form.
+	transcription TranscriptionSettings
 }
 
 const (
@@ -173,11 +176,11 @@ const (
 	maxPassword = 72
 )
 
-func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string, licenseAutoWait time.Duration) http.Handler {
+func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader, sessionKey []byte, publicURL, setupToken string, licenseAuto bool, licenseEmailDomain string, licenseAutoWait time.Duration, transcription TranscriptionSettings) http.Handler {
 	if licenseAutoWait <= 0 {
 		licenseAutoWait = 3 * time.Minute
 	}
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout)}
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout), transcription: transcription}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
@@ -200,6 +203,9 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /instancias/remover", a.deleteInstance)
 	mux.HandleFunc("POST /instancias/historico", a.syncHistory)
 	mux.HandleFunc("GET /estado", a.statusPage)
+	mux.HandleFunc("GET /transcricao", a.transcriptionPage)
+	mux.HandleFunc("POST /transcricao", a.saveTranscriptionKey)
+	mux.HandleFunc("POST /transcricao/remover", a.removeTranscriptionKey)
 	mux.HandleFunc("GET /documentacao", a.docs)
 	mux.HandleFunc("GET /receitas", a.recipes)
 	mux.HandleFunc("GET /pair", a.pairPage)

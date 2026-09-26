@@ -339,7 +339,7 @@ func signedIn(t *testing.T, repo *fakeRepo, evo *fakeEvolution, licenseAuto ...b
 	for _, want := range licenseAuto {
 		auto = want
 	}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", auto, "brorlandi.xyz", signedInAutoWait))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", auto, "brorlandi.xyz", signedInAutoWait, nil))
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -388,7 +388,7 @@ func mustNotContain(t *testing.T, page, name string, unwanted ...string) {
 
 func TestSetupCreatesOnlyOneAdminAndLoginWorks(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -449,7 +449,7 @@ func TestEveryPageInlinesTheBrandLogo(t *testing.T) {
 	if !strings.HasPrefix(logo, "<svg") {
 		t.Fatalf("brand.LogoSVG is not inline SVG: %q", logo)
 	}
-	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	fresh := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer fresh.Close()
 	mustContain(t, fetch(t, nil, fresh.URL+"/setup"), "setup", logo, "Configuração inicial", `name="email"`, `name="password"`)
 
@@ -676,7 +676,7 @@ func TestSelectionAllowsOnlyListedSingleInstance(t *testing.T) {
 // The pairing QR arrives as a data: URI, so the policy must allow it for images
 // and for nothing else.
 func TestContentSecurityPolicyAllowsInlineQRImages(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/login")
 	if err != nil {
@@ -731,7 +731,7 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.user, repo.hash = "admin", hash
-	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -967,7 +967,7 @@ func TestAConnectionNamesItselfAfterTheChosenTool(t *testing.T) {
 // The copy helper is served from the panel itself, which is what lets the
 // content security policy stay at 'self'.
 func TestPanelServesItsOwnScript(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	r, err := http.Get(ts.URL + "/assets/app.js")
 	if err != nil {
@@ -1164,7 +1164,7 @@ func TestProgressEndpointReportsTheChecklistAndNothingElse(t *testing.T) {
 // logged in: a browser asks for it on the login page, and an icon behind the
 // session cookie would just 302 into the login form forever.
 func TestPanelServesItsOwnIcons(t *testing.T) {
-	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	for path, wantType := range map[string]string{
 		"/favicon.svg":          "image/svg+xml",
@@ -1302,7 +1302,7 @@ func newJar(t *testing.T) *cookiejar.Jar {
 func TestSetupNeedsTheInstallerToken(t *testing.T) {
 	const token = "9f2c1ab4d0e7"
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token, false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", token, false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	client := &http.Client{Jar: newJar(t)}
 
@@ -1688,7 +1688,7 @@ func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
 		err:     evolution.ErrNotActivated,
 		license: evolution.License{Status: "inactive", RegisterURL: "https://license.example/register?token=abc"},
 	}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1732,7 +1732,7 @@ func TestTheFirstSignInAlreadyHasTheActivationLinkOnItsWay(t *testing.T) {
 func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
 	repo := newRepo()
 	evo := &fakeEvolution{err: errors.New("connection refused"), registerErr: errors.New("connection refused")}
-	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, evo, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1762,7 +1762,7 @@ func TestTheLinkGoesOutOnceEvolutionIsAwake(t *testing.T) {
 // panel accepts, five is not, and the server decides either way — the form's
 // own minlength is a convenience the browser can be talked out of.
 func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
-	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	short := httptest.NewServer(NewWebHandler(newRepo(), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer short.Close()
 	r, err := http.PostForm(short.URL+"/setup", url.Values{"email": {"bruno@example.com"}, "password": {"cinco"}})
 	if err != nil {
@@ -1773,7 +1773,7 @@ func TestPasswordLengthIsEnforcedByTheServer(t *testing.T) {
 	mustContain(t, string(body), "setup", "pelo menos 6 caracteres")
 
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
@@ -1823,7 +1823,7 @@ func TestAFailedActivationSaysWhyWhereverItWasClicked(t *testing.T) {
 // their own panel signed in and is shown the login form.
 func TestTheSessionCookieSurvivesAnExternalReturn(t *testing.T) {
 	repo := newRepo()
-	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+	ts := httptest.NewServer(NewWebHandler(repo, &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 	defer ts.Close()
 	// The redirect is not followed, because the cookie is set on the response
 	// that issues it and the jar would swallow it.
@@ -2115,7 +2115,7 @@ func TestTheStatusTabIsMarkedOnlyWhenSomethingIsWrong(t *testing.T) {
 		state.MarkEvent(time.Now())
 		state.SetWhatsApp(session.state, "", "", "Bruno")
 
-		ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+		ts := httptest.NewServer(NewWebHandler(repo, evo, state, testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 		jar, _ := cookiejar.New(nil)
 		client := &http.Client{Jar: jar}
 		r, err := client.PostForm(ts.URL+"/login", url.Values{"username": {"admin"}, "password": {"senha segura 123"}})

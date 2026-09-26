@@ -299,6 +299,7 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 		"delete_message", "edit_message", "react_to_message",
 		"check_numbers", "get_profile_picture", "send_location", "send_contact",
 		"send_poll", "get_poll_results", "organise_chat",
+		"transcribe_audio", "set_transcription_key",
 	} {
 		if !strings.Contains(response, `"`+tool+`"`) {
 			t.Errorf("tools/list is missing %s", tool)

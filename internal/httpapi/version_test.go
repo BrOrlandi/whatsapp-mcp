@@ -39,7 +39,7 @@ func TestUpdateBanner(t *testing.T) {
 	t.Run("never on the sign-in page", func(t *testing.T) {
 		defer stampVersion(t, "v0.1.0-beta")()
 		defer publishRelease(t, "0.2.0")()
-		ts := httptest.NewServer(NewWebHandler(signedUpRepo(t), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute))
+		ts := httptest.NewServer(NewWebHandler(signedUpRepo(t), &fakeEvolution{}, health.NewState(), testSessionKey(), "https://mcp.example", "", false, "brorlandi.xyz", 3*time.Minute, nil))
 		defer ts.Close()
 		mustNotContain(t, fetch(t, nil, ts.URL+"/login"), "login", "0.2.0", updateCommand)
 	})

@@ -19,6 +19,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/rabbit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/repair"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
 )
 
@@ -63,7 +64,8 @@ func main() {
 			logger.Error("RabbitMQ consumer stopped", "error", err)
 		}
 	}()
-	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow)
+	transcriber := transcribe.New(db)
+	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow).WithTranscriber(transcriber, cfg.PublicURL)
 	if cfg.StdioEnabled {
 		go func() {
 			if err := mcpServer.Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
@@ -75,7 +77,7 @@ func main() {
 	// The licence automation is on by default: registrations go to an address
 	// the email worker answers, and the wizard waits on the licence coming in
 	// rather than on a person's inbox.
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait)
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber)
 	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db}, logger)
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

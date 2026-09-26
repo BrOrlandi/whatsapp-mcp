@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,8 +19,42 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/httpapi"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
 )
+
+// fakeTranscription accepts any key shaped like an OpenAI one, since the
+// preview talks to nothing; a key ending in "bad" is refused, so the failure
+// message can be seen too.
+type fakeTranscription struct {
+	mu     sync.Mutex
+	status transcribe.Status
+}
+
+func (f *fakeTranscription) Status(context.Context) (transcribe.Status, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status, nil
+}
+func (f *fakeTranscription) SaveKey(_ context.Context, key string) (transcribe.Status, error) {
+	key = strings.TrimSpace(key)
+	if !strings.HasPrefix(key, "sk-") || len(key) < 20 {
+		return transcribe.Status{}, transcribe.ErrMalformedKey
+	}
+	if strings.HasSuffix(key, "bad") {
+		return transcribe.Status{}, transcribe.ErrInvalidKey
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status = transcribe.Status{Configured: true, Hint: transcribe.Hint(key), UpdatedAt: time.Now()}
+	return f.status, nil
+}
+func (f *fakeTranscription) RemoveKey(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status = transcribe.Status{}
+	return nil
+}
 
 type fakeStore struct {
 	mu   sync.Mutex
@@ -255,7 +290,7 @@ func main() {
 	}
 	// The preview defaults to the automatic licence path, which is what a real
 	// install shows; PREVIEW_LICENSE_AUTO=false previews the manual one.
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait)
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait, &fakeTranscription{})
 	// A second preview on the same machine would otherwise fail to bind and
 	// die silently, which reads as the panel being broken.
 	address := os.Getenv("PREVIEW_ADDR")

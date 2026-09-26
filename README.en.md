@@ -202,10 +202,11 @@ step 1.
 
 ## What you can ask for
 
-21 tools, in four groups:
+23 tools, in four groups:
 
 - **Read** — list conversations, read a window, full-text search, request
-  history older than what is already indexed.
+  history older than what is already indexed, transcribe voice notes with
+  OpenAI's Whisper (with your own key, saved in the panel under **Transcrição**).
 - **Send** — text, media from a URL, location, contact card, poll; each one
   reporting whether WhatsApp actually delivered it, not just whether the API
   accepted it.

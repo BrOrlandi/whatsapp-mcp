@@ -196,10 +196,11 @@ Comece se apresentando em uma frase e fazendo a primeira pergunta do passo 1.
 
 ## O que dá para pedir
 
-21 ferramentas, em quatro grupos:
+23 ferramentas, em quatro grupos:
 
 - **Ler** — listar conversas, ler um período, buscar em texto completo, pedir
-  histórico mais antigo do que o já indexado.
+  histórico mais antigo do que o já indexado, transcrever áudios com o Whisper
+  da OpenAI (com a sua chave, salva no painel em **Transcrição**).
 - **Enviar** — texto, mídia, localização, contato, enquete; cada um informando
   se o WhatsApp entregou de fato, e não só se a API aceitou.
 - **Agir sobre uma mensagem** — apagar, editar, reagir, arquivar, fixar,

@@ -15,6 +15,40 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
+## 0.3.0-beta.1
+
+Voice notes can now be read. An instance that saves an OpenAI key gets its
+WhatsApp audio transcribed on request.
+
+### Voice-note transcription
+
+- `transcribe_audio` turns a WhatsApp voice note into text with OpenAI's
+  Whisper. An AI client cannot hear the audio `download_media` returns, so the
+  gateway does this one piece of model work itself — only with an OpenAI key the
+  operator saves, and billed to that key.
+- The key is saved from the panel's new **Transcrição** page or with the
+  `set_transcription_key` tool. Both check it with OpenAI before saving, and
+  neither shows it again: only its last four characters.
+- The **Transcrição** page walks someone who has never used the OpenAI
+  platform through getting a key — account, credit, key — with a button to
+  each OpenAI page and what it will cost. Once a key is saved, it links to
+  OpenAI's usage, credit, spending-limit and key pages instead.
+- When there is no key, or OpenAI refuses it, `transcribe_audio` answers with
+  the same steps and links, so the AI client can guide the user through setup
+  instead of reporting an error.
+- Every transcript is kept, so asking again for the same voice note costs
+  nothing. `whatsapp_status` reports whether transcription is configured.
+- The update adds two tables (migration `011_transcription.sql`); nothing
+  existing changes. The gateway needs outbound HTTPS to `api.openai.com` for
+  transcription to work.
+
+### Publishing
+
+- The `latest` image tag and the GitHub release marked Latest now follow the
+  newest version, beta included. Pinning nothing used to leave an instance on
+  0.1.0 — dozens of commits old, under the previous licence — while the beta
+  was the version to run.
+
 ## 0.2.0-beta.1
 
 The first numbered version of the beta series. An instance can now say what it

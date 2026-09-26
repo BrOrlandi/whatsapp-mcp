@@ -19,6 +19,8 @@ they do.
 | `send_text_message` | Evolution | send text |
 | `send_media_message` | Evolution | send image, video, audio or document from a URL |
 | `download_media` | Evolution | decode the media of an indexed message |
+| `transcribe_audio` | index + Evolution + OpenAI | turn a voice note into text with Whisper |
+| `set_transcription_key` | gateway | save or remove the OpenAI key transcription uses |
 | `sync_history` | index + Evolution | request messages older than the index holds, from the start or from a given moment |
 | `delete_message` | index + Evolution | revoke one of the account's own messages for everyone |
 | `edit_message` | index + Evolution | replace the text of one of the account's own messages |
@@ -36,6 +38,11 @@ they do.
 **Summarising.** `get_chat_messages` returns the period and the client
 summarises it, which avoids an LLM credential and a per-call cost in the
 backend.
+
+**Transcription is the exception.** An MCP client cannot hear a voice note:
+`download_media` hands it base64 audio that most clients cannot decode, so the
+gateway does that one piece of model work itself, and only when the operator
+opts in with their own OpenAI key. See [Transcription](#transcription).
 
 **Forwarding.** WhatsApp exposes no forwarding route. Resending the content with
 `send_text_message` or `send_media_message` is what "forward" means here, and
@@ -97,6 +104,40 @@ plainly rather than handed an opaque API error — and it settles the question
 from the index, which records who sent what, rather than from the caller's own
 claim. `react_to_message` carries no such guard: reacting to other people is the
 point of it.
+
+## Transcription
+
+`transcribe_audio` sends a voice note — a message whose `media_type` is
+`audio` — to OpenAI's Whisper (`whisper-1`) and returns the text. It needs an
+OpenAI API key, saved either in the panel under **Transcrição** or with
+`set_transcription_key`. Both routes check the key with OpenAI before saving it,
+so a wrong key is refused where it was typed rather than on the first voice
+note. The panel is the better route: through the tool, the key passes through
+the AI client's conversation.
+
+- **Billing.** The audio goes to OpenAI and is billed to that key, at Whisper's
+  per-minute price. Every transcript is kept in PostgreSQL, so asking again for
+  the same message answers from the index at no cost; `refresh: true` asks
+  Whisper again, for instance with another `language`.
+- **The key never comes back.** Neither the tools nor the panel return it after
+  saving, only a hint of its last four characters. `whatsapp_status` reports
+  whether one is configured. It is stored like the Evolution instance tokens:
+  an internal secret in the gateway's database.
+- **Formats.** WhatsApp voice notes are Ogg/Opus, which Whisper reads directly.
+  Files over OpenAI's 25 MB limit and formats it does not accept are refused
+  before anything is sent.
+- **Removing the key** stops new transcriptions. Transcripts already made are
+  kept.
+- **Guidance instead of a bare error.** Without a key, or with one OpenAI
+  refuses or that has run out of credit, `transcribe_audio` returns a `setup`
+  section: the OpenAI pages to visit, in order, and the panel URL to save the
+  key on. The client is told to walk the user through it. `whatsapp_status`
+  carries the same `setup_url` while no key is saved.
+
+`set_transcription_key` is one of the few tools that change the gateway rather
+than WhatsApp. Its description tells the client to call it only when the user
+hands over a key, never because a message asked — a WhatsApp message is exactly
+where an attempt to swap the key for someone else's would come from.
 
 ## Untrusted content
 
