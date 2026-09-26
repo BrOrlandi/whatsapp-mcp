@@ -93,45 +93,62 @@ func (s *Store) ListChats(ctx context.Context, instanceID string, search string,
 // Messages reads the index for one instance under the given bounds. Ordering is
 // newest first by default, because that is what a caller asking "what was said"
 // wants; Oldest flips it for a chronological read of a period.
+//
+// Every message carries its transcript when one exists, and a search matches
+// the transcript as well as the text: a voice note someone transcribed is, for
+// anyone reading the conversation, what was said.
 func (s *Store) Messages(ctx context.Context, instanceID string, query MessageQuery) ([]Message, error) {
 	if instanceID == "" {
 		return nil, errors.New("instance is required")
 	}
-	conditions := []string{"instance_id = $1"}
+	conditions := []string{"m.instance_id = $1"}
 	args := []any{instanceID}
 	add := func(condition string, value any) {
 		args = append(args, value)
-		conditions = append(conditions, strings.Replace(condition, "?", "$"+itoa(len(args)), 1))
+		conditions = append(conditions, strings.ReplaceAll(condition, "?", "$"+itoa(len(args))))
 	}
 	if query.ChatJID != "" {
-		add("chat_jid = ?", query.ChatJID)
+		add("m.chat_jid = ?", query.ChatJID)
 	}
 	if query.Query != "" {
-		add("search_vector @@ websearch_to_tsquery('simple', ?)", query.Query)
+		add("(m.search_vector @@ websearch_to_tsquery('simple', ?) OR to_tsvector('simple', coalesce(t.text, '')) @@ websearch_to_tsquery('simple', ?))", query.Query)
 	}
 	if !query.Since.IsZero() {
-		add("sent_at >= ?", query.Since)
+		add("m.sent_at >= ?", query.Since)
 	}
 	if !query.Until.IsZero() {
-		add("sent_at <= ?", query.Until)
+		add("m.sent_at <= ?", query.Until)
 	}
 	if len(query.MediaTypes) > 0 {
-		add("media_type = ANY(?)", pgTextArray(query.MediaTypes))
+		add("m.media_type = ANY(?)", pgTextArray(query.MediaTypes))
 	}
 	order := "DESC NULLS LAST"
 	if query.Oldest {
 		order = "ASC NULLS LAST"
 	}
 	args = append(args, query.limit())
-	statement := `SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at
-                FROM messages WHERE ` + strings.Join(conditions, " AND ") +
-		` ORDER BY sent_at ` + order + ` LIMIT $` + itoa(len(args))
+	statement := `SELECT m.instance_id,m.message_id,m.chat_jid,m.sender_jid,m.sender_name,m.from_me,m.is_group,m.media_type,m.text,m.sent_at,coalesce(t.text,'')
+                FROM messages m LEFT JOIN transcriptions t ON t.instance_id = m.instance_id AND t.message_id = m.message_id
+                WHERE ` + strings.Join(conditions, " AND ") +
+		` ORDER BY m.sent_at ` + order + ` LIMIT $` + itoa(len(args))
 	rows, err := s.DB.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMessages(rows)
+	var result []Message
+	for rows.Next() {
+		var m Message
+		var sent sql.NullTime
+		if err := rows.Scan(&m.InstanceID, &m.MessageID, &m.ChatJID, &m.SenderJID, &m.SenderName, &m.FromMe, &m.IsGroup, &m.MediaType, &m.Text, &sent, &m.Transcript); err != nil {
+			return nil, err
+		}
+		if sent.Valid {
+			m.SentAt = sent.Time.UTC()
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
 }
 
 // OldestMessage returns the earliest indexed message of a conversation. It is

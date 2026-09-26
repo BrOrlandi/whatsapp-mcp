@@ -25,15 +25,18 @@ type Event struct {
 	Messages             []Message
 }
 type Message struct {
-	InstanceID string    `json:"instance_id"`
-	MessageID  string    `json:"message_id"`
-	ChatJID    string    `json:"chat_jid"`
-	SenderJID  string    `json:"sender_jid,omitempty"`
-	SenderName string    `json:"sender_name,omitempty"`
-	FromMe     bool      `json:"from_me"`
-	IsGroup    bool      `json:"is_group"`
-	MediaType  string    `json:"media_type,omitempty"`
-	Text       string    `json:"text"`
+	InstanceID string `json:"instance_id"`
+	MessageID  string `json:"message_id"`
+	ChatJID    string `json:"chat_jid"`
+	SenderJID  string `json:"sender_jid,omitempty"`
+	SenderName string `json:"sender_name,omitempty"`
+	FromMe     bool   `json:"from_me"`
+	IsGroup    bool   `json:"is_group"`
+	MediaType  string `json:"media_type,omitempty"`
+	Text       string `json:"text"`
+	// Transcript is what was said in a voice note, when it has been
+	// transcribed. Only the reading queries fill it in.
+	Transcript string    `json:"transcript,omitempty"`
 	SentAt     time.Time `json:"sent_at"`
 }
 

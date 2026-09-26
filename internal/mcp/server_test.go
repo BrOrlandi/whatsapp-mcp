@@ -302,7 +302,7 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 		"send_text_message", "send_media_message", "download_media", "sync_history",
 		"delete_message", "edit_message", "react_to_message",
 		"check_numbers", "get_profile_picture", "send_location", "send_contact",
-		"send_poll", "get_poll_results", "organise_chat",
+		"send_poll", "get_poll_results", "organise_chat", "save_transcript",
 		"transcribe_audio", "set_transcription_key",
 	} {
 		if !strings.Contains(response, `"`+tool+`"`) {

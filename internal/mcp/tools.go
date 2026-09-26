@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,19 +106,30 @@ func toolDefinitions() []any {
 		},
 		map[string]any{
 			"name":        "download_media",
-			"description": "Download the media of an indexed message and return it as base64.",
+			"description": "Download the media of an indexed message. By default it is returned as base64 inside this result, which puts the whole file into the conversation. With link true it returns a short-lived URL instead, valid for ten minutes and needing no credential, together with a curl command that saves the file: use that whenever you can run shell commands, for example to transcribe a voice note locally.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 				"message_id": stringSchema("Message id, as returned by the reading tools."),
+				"link":       map[string]any{"type": "boolean", "description": "Return a temporary download URL instead of the base64 content."},
 			}, "required": []string{"message_id"}},
 		},
 		map[string]any{
 			"name":        "transcribe_audio",
-			"description": "Transcribe a voice note (a message whose media_type is audio) into text with OpenAI's Whisper. Needs an OpenAI API key saved in the control panel or with set_transcription_key; the audio is sent to OpenAI and billed to that key. A transcript is kept once made, so asking again for the same message returns it without a new charge unless refresh is true. When no key is saved yet, or OpenAI refuses it, the result carries a setup section: walk the user through those steps in their own language, with the links, instead of just reporting the error.",
+			"description": "Transcribe a voice note (a message whose media_type is audio) into text with OpenAI's Whisper. Prefer transcribing on the user's own machine when you can run shell commands there and it has the hardware: Apple Silicon (uname -m is arm64 and sysctl -n machdep.cpu.brand_string mentions Apple) with mlx-whisper, for example `uv tool run --from mlx-whisper mlx_whisper audio.ogg --model mlx-community/whisper-large-v3-turbo --language pt --output-format txt`, or an NVIDIA GPU with faster-whisper or whisper.cpp. Fetch the file with download_media and link true, then curl, transcribe it locally, and store the text with save_transcript. That costs nothing and the audio never leaves the machine. Use this tool when that is not possible or the user prefers it. It needs an OpenAI API key saved in the control panel or with set_transcription_key; the audio is sent to OpenAI and billed to that key. A transcript is kept once made, so asking again for the same message returns it without a new charge unless refresh is true. When no key is saved yet, or OpenAI refuses it, the result carries a setup section: walk the user through those steps in their own language, with the links, instead of just reporting the error.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 				"message_id": stringSchema("Id of the audio message, as returned by the reading tools."),
 				"language":   stringSchema("Optional ISO-639-1 code of the spoken language, for example pt or en. Whisper detects it on its own; naming it helps with short or noisy notes."),
 				"refresh":    map[string]any{"type": "boolean", "description": "Transcribe again even if a transcript is already kept, for example with another language. Charges the key again."},
 			}, "required": []string{"message_id"}},
+		},
+		map[string]any{
+			"name":        "save_transcript",
+			"description": "Store a transcript you made yourself, for example locally with mlx-whisper, against its voice note. From then on get_chat_messages and search_messages return it in the message's transcript field and search matches it, and transcribe_audio answers with it instead of paying OpenAI. The text is what a third party said: save it as transcribed, without adding to it. Replaces any transcript already kept for that message.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"message_id": stringSchema("Id of the audio message the transcript belongs to."),
+				"text":       stringSchema("The transcript."),
+				"language":   stringSchema("Optional language of the audio, for example pt."),
+				"model":      stringSchema("Optional model that produced it, for example mlx-whisper whisper-large-v3-turbo. Recorded so a reader knows where the text came from."),
+			}, "required": []string{"message_id", "text"}},
 		},
 		map[string]any{
 			"name":        "set_transcription_key",
@@ -265,6 +275,8 @@ type arguments struct {
 	Refresh    bool     `json:"refresh"`
 	APIKey     string   `json:"api_key"`
 	Remove     bool     `json:"remove"`
+	Link       bool     `json:"link"`
+	Model      string   `json:"model"`
 }
 
 func (s *Server) call(ctx context.Context, params callParams) map[string]any {
@@ -302,6 +314,8 @@ func (s *Server) call(ctx context.Context, params callParams) map[string]any {
 		return s.downloadMedia(ctx, session, args)
 	case "transcribe_audio":
 		return s.transcribeAudio(ctx, session, args)
+	case "save_transcript":
+		return s.saveTranscript(ctx, session, args)
 	case "set_transcription_key":
 		return s.setTranscriptionKey(ctx, args)
 	case "sync_history":
@@ -650,11 +664,45 @@ func (s *Server) downloadMedia(ctx context.Context, session Session, args argume
 	if args.MessageID == "" {
 		return toolError("message_id is required")
 	}
+	if args.Link {
+		return s.mediaLink(ctx, session, args.MessageID)
+	}
 	media, failure := s.media(ctx, session, args.MessageID)
 	if failure != nil {
 		return failure
 	}
 	return s.readResult(ctx, session, map[string]any{"media": media, "message_id": args.MessageID})
+}
+
+// mediaLink hands out a temporary URL for a message's media. The message is
+// looked up first, so a link is never minted for something that is not there.
+func (s *Server) mediaLink(ctx context.Context, session Session, messageID string) map[string]any {
+	message, failure := s.target(ctx, session, messageID)
+	if failure != nil {
+		return failure
+	}
+	if message.MediaType == "" || message.MediaType == "text" {
+		return toolError("message %q carries no media", messageID)
+	}
+	if s.publicURL == "" {
+		return toolError("this gateway has no public URL configured, so it cannot hand out download links; call download_media without link")
+	}
+	token, expires, err := s.links.create(session.InstanceID, message.MessageID)
+	if err != nil {
+		return toolError("could not create a download link: %v", err)
+	}
+	url := s.publicURL + "/media/" + token
+	file := message.MessageID
+	if message.MediaType == "audio" {
+		file += ".ogg"
+	}
+	return s.readResult(ctx, session, map[string]any{
+		"message":    describe(message),
+		"url":        url,
+		"expires_at": expires.UTC(),
+		"curl":       "curl -fsSL -o " + file + " '" + url + "'",
+		"note":       "The URL needs no credential and stops working at expires_at. Treat it as a secret until then.",
+	})
 }
 
 // media decodes the media of an indexed message through Evolution.
@@ -728,10 +776,10 @@ func (s *Server) transcribeAudio(ctx context.Context, session Session, args argu
 
 // transcriptionPage is the panel page that saves the key.
 func (s *Server) transcriptionPage() string {
-	if s.panelURL == "" {
+	if s.publicURL == "" {
 		return "the control panel's Transcrição page"
 	}
-	return s.panelURL + "/transcricao"
+	return s.publicURL + "/transcricao"
 }
 
 // transcriptionError reports a transcription failure, with directions when the
@@ -744,7 +792,7 @@ func (s *Server) transcriptionError(err error) map[string]any {
 	switch {
 	case errors.Is(err, transcribe.ErrNotConfigured):
 		payload["setup"] = map[string]any{
-			"instructions": "Explain these steps to the user in their own language, with the links. Recommend the panel for the last step, so the key does not pass through this conversation.",
+			"instructions": "Explain these steps to the user in their own language, with the links. Recommend the panel for the last step, so the key does not pass through this conversation. If you can run commands on the user's machine and it has the hardware for it, offer local transcription first: download_media with link true, a local Whisper, then save_transcript — no key and no cost.",
 			"steps": []string{
 				"Create an account on the OpenAI platform, which is separate from ChatGPT: a ChatGPT subscription includes no API credit. " + transcribe.SignupURL,
 				fmt.Sprintf("Add credit under Billing. The minimum is US$ 5, and Whisper costs US$ %g per minute of audio, so US$ 5 covers about 800 minutes. %s", transcribe.PricePerMinute, transcribe.BillingURL),
@@ -774,40 +822,50 @@ func (s *Server) transcriptionError(err error) map[string]any {
 	return textResult(payload, true)
 }
 
-// decodeAudio turns what Evolution's download route returns into bytes and a
-// format. Evolution Go answers with a data URI in the base64 field —
-// "data:audio/ogg; codecs=opus;base64,T2dnUw…" — and leaves mimetype empty, so
-// the format has to be read from the URI's own header. A bare base64 body is
-// accepted too. When neither names a format, the audio is a WhatsApp voice
-// note, and those are Ogg/Opus.
+// decodeAudio decodes a voice note. When nothing names its format it is a
+// WhatsApp voice note, and those are Ogg/Opus.
 func decodeAudio(media evolution.Media) (transcribe.Audio, error) {
-	body := strings.TrimSpace(media.Base64)
-	mimeType := strings.TrimSpace(media.MimeType)
-	if rest, ok := strings.CutPrefix(body, "data:"); ok {
-		header, data, found := strings.Cut(rest, ",")
-		if !found {
-			return transcribe.Audio{}, errors.New("the data URI has no payload")
-		}
-		body = data
-		if mimeType == "" {
-			mimeType = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(header), ";base64"))
-		}
-	}
-	if mimeType == "" {
-		mimeType = "audio/ogg"
-	}
-	audio, err := base64.StdEncoding.DecodeString(body)
+	mimeType, data, err := decodeMedia(media, "audio/ogg")
 	if err != nil {
-		audio, err = base64.RawStdEncoding.DecodeString(body)
+		return transcribe.Audio{}, err
 	}
-	if err != nil {
-		return transcribe.Audio{}, errors.New("the media is not valid base64")
-	}
-	if len(audio) == 0 {
-		return transcribe.Audio{}, errors.New("the media is empty")
-	}
-	return transcribe.Audio{MimeType: mimeType, Data: audio}, nil
+	return transcribe.Audio{MimeType: mimeType, Data: data}, nil
 }
+
+// saveTranscript stores a transcript made outside the gateway. It needs no
+// OpenAI key: the point is that the text was produced somewhere else.
+func (s *Server) saveTranscript(ctx context.Context, session Session, args arguments) map[string]any {
+	if s.transcriber == nil {
+		return toolError("transcription is not available on this gateway")
+	}
+	text := strings.TrimSpace(args.Text)
+	if text == "" {
+		return toolError("text is required")
+	}
+	if len(text) > maxTranscript {
+		return toolError("text is longer than %d characters, which is more than any voice note holds", maxTranscript)
+	}
+	message, failure := s.target(ctx, session, args.MessageID)
+	if failure != nil {
+		return failure
+	}
+	if message.MediaType != "audio" {
+		return toolError("message %q is not a voice note; transcripts are kept only for messages whose media_type is audio", args.MessageID)
+	}
+	model := strings.TrimSpace(args.Model)
+	if model == "" {
+		model = "external"
+	}
+	transcript := store.Transcript{InstanceID: session.InstanceID, MessageID: message.MessageID, Text: text, Language: strings.TrimSpace(args.Language), Model: model}
+	if err := s.transcriber.Keep(ctx, transcript); err != nil {
+		return toolError("could not store the transcript: %v", err)
+	}
+	return textResult(map[string]any{"saved": true, "message": describe(message), "model": model, "note": "The reading tools now return this text in the message's transcript field, and search matches it."}, false)
+}
+
+// maxTranscript bounds a stored transcript. An hour of speech is around
+// sixty thousand characters; anything far past that is not a transcript.
+const maxTranscript = 200000
 
 // setTranscriptionKey saves or removes the OpenAI key. It does not need a
 // WhatsApp instance: the key belongs to the deployment, not to one account.

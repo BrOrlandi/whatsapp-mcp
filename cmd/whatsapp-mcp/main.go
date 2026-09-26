@@ -65,7 +65,7 @@ func main() {
 		}
 	}()
 	transcriber := transcribe.New(db)
-	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow).WithTranscriber(transcriber, cfg.PublicURL)
+	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow).WithTranscriber(transcriber).WithPublicURL(cfg.PublicURL)
 	if cfg.StdioEnabled {
 		go func() {
 			if err := mcpServer.Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
@@ -81,7 +81,7 @@ func main() {
 	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db}, logger)
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler, remoteMCP),
+		Handler:           httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler, remoteMCP, mcpServer.MediaHandler()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      90 * time.Second,

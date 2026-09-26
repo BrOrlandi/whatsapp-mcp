@@ -2,8 +2,11 @@ package mcp
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
@@ -30,6 +33,13 @@ func (f *fakeTranscriber) SaveKey(_ context.Context, key string) (transcribe.Sta
 	}
 	f.key = key
 	return f.Status(context.Background())
+}
+func (f *fakeTranscriber) Keep(_ context.Context, t store.Transcript) error {
+	if f.kept == nil {
+		f.kept = map[string]store.Transcript{}
+	}
+	f.kept[t.MessageID] = t
+	return nil
 }
 func (f *fakeTranscriber) RemoveKey(context.Context) error {
 	f.key = ""
@@ -70,7 +80,7 @@ func audioIndex() *fakeIndex {
 func TestTranscribeAudioSendsOnceAndAnswersFromTheKeptTranscript(t *testing.T) {
 	transcriber := &fakeTranscriber{key: "sk-test-0000000000000000abcd"}
 	live := &fakeLive{}
-	server := testServer(audioIndex(), live, nil).WithTranscriber(transcriber, "https://mcp.example")
+	server := testServer(audioIndex(), live, nil).WithTranscriber(transcriber).WithPublicURL("https://mcp.example")
 
 	payload, isError := call(t, server, "transcribe_audio", map[string]any{"message_id": "A1", "language": "pt"})
 	if isError {
@@ -100,7 +110,7 @@ func TestTranscribeAudioSendsOnceAndAnswersFromTheKeptTranscript(t *testing.T) {
 }
 
 func TestTranscribeAudioRefusesWhatIsNotAVoiceNote(t *testing.T) {
-	server := testServer(audioIndex(), &fakeLive{}, nil).WithTranscriber(&fakeTranscriber{key: "sk-x"}, "https://mcp.example")
+	server := testServer(audioIndex(), &fakeLive{}, nil).WithTranscriber(&fakeTranscriber{key: "sk-x"}).WithPublicURL("https://mcp.example")
 	payload, isError := call(t, server, "transcribe_audio", map[string]any{"message_id": "T1"})
 	if !isError || !strings.Contains(payload["error"].(string), "not a voice note") {
 		t.Fatalf("payload = %#v", payload)
@@ -113,7 +123,7 @@ func TestTranscribeAudioRefusesWhatIsNotAVoiceNote(t *testing.T) {
 
 func TestTranscribeAudioWithoutAKeySaysHowToSaveOne(t *testing.T) {
 	live := &fakeLive{}
-	server := testServer(audioIndex(), live, nil).WithTranscriber(&fakeTranscriber{}, "https://mcp.example/")
+	server := testServer(audioIndex(), live, nil).WithTranscriber(&fakeTranscriber{}).WithPublicURL("https://mcp.example/")
 	payload, isError := call(t, server, "transcribe_audio", map[string]any{"message_id": "A1"})
 	if !isError || !strings.Contains(payload["error"].(string), "set_transcription_key") {
 		t.Fatalf("payload = %#v", payload)
@@ -151,7 +161,7 @@ func TestTranscribeAudioWithoutAKeySaysHowToSaveOne(t *testing.T) {
 func TestSetTranscriptionKeyNeverEchoesTheKey(t *testing.T) {
 	const key = "sk-proj-supersecretvalue-9876"
 	transcriber := &fakeTranscriber{}
-	server := testServer(audioIndex(), &fakeLive{}, nil).WithTranscriber(transcriber, "https://mcp.example")
+	server := testServer(audioIndex(), &fakeLive{}, nil).WithTranscriber(transcriber).WithPublicURL("https://mcp.example")
 
 	payload, isError := call(t, server, "set_transcription_key", map[string]any{"api_key": key})
 	if isError || transcriber.key != key {
@@ -228,12 +238,91 @@ func TestDecodeAudioReadsEvolutionsDataURI(t *testing.T) {
 func TestTranscribeAudioAcceptsTheDataURIEvolutionReturns(t *testing.T) {
 	transcriber := &fakeTranscriber{key: "sk-test-0000000000000000abcd"}
 	live := &fakeLive{media: &evolution.Media{Base64: "data:audio/ogg; codecs=opus;base64,T2dnUw=="}}
-	server := testServer(audioIndex(), live, nil).WithTranscriber(transcriber, "https://mcp.example")
+	server := testServer(audioIndex(), live, nil).WithTranscriber(transcriber).WithPublicURL("https://mcp.example")
 	payload, isError := call(t, server, "transcribe_audio", map[string]any{"message_id": "A1"})
 	if isError {
 		t.Fatalf("transcription failed: %#v", payload)
 	}
 	if transcriber.sent[0].MimeType != "audio/ogg; codecs=opus" || string(transcriber.sent[0].Data) != "OggS" {
 		t.Fatalf("sent %#v", transcriber.sent[0])
+	}
+}
+
+// A transcript made on the user's machine is stored without an OpenAI key,
+// and transcribe_audio answers with it afterwards instead of paying again.
+func TestSaveTranscriptKeepsALocalTranscript(t *testing.T) {
+	transcriber := &fakeTranscriber{}
+	server := testServer(audioIndex(), &fakeLive{}, nil).WithTranscriber(transcriber)
+
+	payload, isError := call(t, server, "save_transcript", map[string]any{"message_id": "A1", "text": "  oi, aqui é a Ju  ", "language": "pt", "model": "mlx-whisper large-v3-turbo"})
+	if isError {
+		t.Fatalf("save failed: %#v", payload)
+	}
+	kept := transcriber.kept["A1"]
+	if kept.Text != "oi, aqui é a Ju" || kept.Model != "mlx-whisper large-v3-turbo" || kept.InstanceID != "inst-1" {
+		t.Fatalf("kept %#v", kept)
+	}
+	transcriber.key = "sk-test-0000000000000000abcd"
+	payload, _ = call(t, server, "transcribe_audio", map[string]any{"message_id": "A1"})
+	if payload["cached"] != true || len(transcriber.sent) != 0 {
+		t.Fatalf("a local transcript was paid for again: %#v", payload)
+	}
+
+	for _, bad := range []map[string]any{
+		{"message_id": "A1", "text": "   "},
+		{"message_id": "T1", "text": "not a voice note"},
+		{"message_id": "nope", "text": "missing"},
+	} {
+		if _, isError := call(t, server, "save_transcript", bad); !isError {
+			t.Errorf("%v was accepted", bad)
+		}
+	}
+}
+
+// A link hands over the file without putting it in the conversation, needs no
+// bearer key, and stops working once it expires.
+func TestDownloadMediaLinkServesTheFileUntilItExpires(t *testing.T) {
+	live := &fakeLive{media: &evolution.Media{Base64: "data:audio/ogg; codecs=opus;base64,T2dnUw=="}}
+	server := testServer(audioIndex(), live, nil).WithPublicURL("https://mcp.example/")
+	payload, isError := call(t, server, "download_media", map[string]any{"message_id": "A1", "link": true})
+	if isError {
+		t.Fatalf("link failed: %#v", payload)
+	}
+	link := payload["url"].(string)
+	if !strings.HasPrefix(link, "https://mcp.example/media/") || payload["media"] != nil {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if !strings.Contains(payload["curl"].(string), "A1.ogg") {
+		t.Fatalf("curl = %v", payload["curl"])
+	}
+
+	handler := server.MediaHandler()
+	get := func(path string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		return recorder
+	}
+	path := strings.TrimPrefix(link, "https://mcp.example")
+	response := get(path)
+	if response.Code != http.StatusOK || response.Body.String() != "OggS" || response.Header().Get("Content-Type") != "audio/ogg; codecs=opus" {
+		t.Fatalf("status %d, type %q, body %q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Content-Disposition"), "A1.ogg") || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("headers %v", response.Header())
+	}
+	if get("/media/not-a-token").Code != http.StatusNotFound {
+		t.Fatal("an unknown token was served")
+	}
+	server.links.now = func() time.Time { return time.Now().Add(MediaLinkTTL + time.Second) }
+	if get(path).Code != http.StatusNotFound {
+		t.Fatal("an expired link was served")
+	}
+
+	if _, isError := call(t, server, "download_media", map[string]any{"message_id": "T1", "link": true}); !isError {
+		t.Fatal("a link was minted for a text message")
+	}
+	bare := testServer(audioIndex(), live, nil)
+	if _, isError := call(t, bare, "download_media", map[string]any{"message_id": "A1", "link": true}); !isError {
+		t.Fatal("a link was minted without a public URL")
 	}
 }

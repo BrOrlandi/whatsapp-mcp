@@ -196,7 +196,7 @@ Comece se apresentando em uma frase e fazendo a primeira pergunta do passo 1.
 
 ## O que dá para pedir
 
-23 ferramentas, em quatro grupos:
+24 ferramentas, em quatro grupos:
 
 - **Ler** — listar conversas, ler um período, buscar em texto completo, pedir
   histórico mais antigo do que o já indexado, transcrever áudios com o Whisper

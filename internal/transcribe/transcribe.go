@@ -142,6 +142,11 @@ func (s *Service) Stored(ctx context.Context, instanceID, messageID string) (sto
 	return s.store.Transcript(ctx, instanceID, messageID)
 }
 
+// Keep stores a transcript made elsewhere, such as on the user's own machine.
+func (s *Service) Keep(ctx context.Context, t store.Transcript) error {
+	return s.store.SaveTranscript(ctx, t)
+}
+
 // Transcribe sends one voice note to Whisper and keeps the answer.
 func (s *Service) Transcribe(ctx context.Context, instanceID, messageID string, audio Audio, language string) (store.Transcript, error) {
 	key, err := s.store.TranscriptionKey(ctx)

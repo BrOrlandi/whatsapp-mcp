@@ -18,8 +18,9 @@ they do.
 | `get_group` | Evolution | one group with its participants |
 | `send_text_message` | Evolution | send text |
 | `send_media_message` | Evolution | send image, video, audio or document from a URL |
-| `download_media` | Evolution | decode the media of an indexed message |
+| `download_media` | Evolution | decode the media of an indexed message, or hand out a temporary link to it |
 | `transcribe_audio` | index + Evolution + OpenAI | turn a voice note into text with Whisper |
+| `save_transcript` | index | store a transcript made on the user's own machine |
 | `set_transcription_key` | gateway | save or remove the OpenAI key transcription uses |
 | `sync_history` | index + Evolution | request messages older than the index holds, from the start or from a given moment |
 | `delete_message` | index + Evolution | revoke one of the account's own messages for everyone |
@@ -133,6 +134,26 @@ the AI client's conversation.
   section: the OpenAI pages to visit, in order, and the panel URL to save the
   key on. The client is told to walk the user through it. `whatsapp_status`
   carries the same `setup_url` while no key is saved.
+
+### Local first
+
+A client that can run commands on the user's machine usually should not send
+the audio to OpenAI at all. On Apple Silicon, `mlx-whisper` with
+`whisper-large-v3-turbo` transcribes a voice note in a few seconds, costs
+nothing, and keeps the audio on the machine; an NVIDIA GPU does the same with
+`faster-whisper` or `whisper.cpp`. The tool descriptions say so, and put
+`transcribe_audio` second:
+
+1. `download_media` with `link: true` returns a URL on `/media/<token>` and a
+   `curl` command. The token is the only credential: 32 random bytes, bound to
+   that one message, valid for ten minutes, kept in memory (a restart ends
+   every link). The file never passes through the conversation, and the client
+   does not need the MCP bearer key from its own configuration to fetch it.
+2. The client transcribes the file locally.
+3. `save_transcript` stores the text against the message. From then on
+   `get_chat_messages` and `search_messages` return it in the message's
+   `transcript` field, search matches words in it, and `transcribe_audio`
+   answers with it instead of calling OpenAI.
 
 `set_transcription_key` is one of the few tools that change the gateway rather
 than WhatsApp. Its description tells the client to call it only when the user

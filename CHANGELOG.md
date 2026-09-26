@@ -15,6 +15,23 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
+## Unreleased
+
+### Local transcription
+
+- The tool descriptions now tell a client that can run commands on the
+  user's machine to transcribe locally first — `mlx-whisper` on Apple
+  Silicon, `faster-whisper` or `whisper.cpp` on an NVIDIA GPU — and to use
+  `transcribe_audio` (OpenAI) only when that is not possible. Local is free and
+  the audio never leaves the machine.
+- `download_media` takes `link: true` and answers with a temporary URL and a
+  `curl` command instead of the base64 file, so a voice note does not have to
+  pass through the conversation. The link needs no credential, is bound to one
+  message and expires after ten minutes.
+- `save_transcript` stores a transcript made elsewhere. `get_chat_messages`
+  and `search_messages` now return every kept transcript in the message's
+  `transcript` field, and search matches words spoken in voice notes.
+
 ## 0.3.0-beta.2
 
 ### Fixes

@@ -202,7 +202,7 @@ step 1.
 
 ## What you can ask for
 
-23 tools, in four groups:
+24 tools, in four groups:
 
 - **Read** — list conversations, read a window, full-text search, request
   history older than what is already indexed, transcribe voice notes with

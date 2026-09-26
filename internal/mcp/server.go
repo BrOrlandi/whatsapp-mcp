@@ -77,6 +77,7 @@ type Transcriber interface {
 	RemoveKey(context.Context) error
 	Stored(context.Context, string, string) (store.Transcript, error)
 	Transcribe(context.Context, string, string, transcribe.Audio, string) (store.Transcript, error)
+	Keep(context.Context, store.Transcript) error
 }
 
 type Server struct {
@@ -85,21 +86,26 @@ type Server struct {
 	state       *health.State
 	freshness   time.Duration
 	transcriber Transcriber
-	// panelURL is where the operator is sent to configure what the tools
-	// cannot, such as the transcription key.
-	panelURL string
+	// publicURL is the gateway's own address: where the operator is sent to
+	// configure what the tools cannot, and what media links are built on.
+	publicURL string
+	links     *mediaLinks
 }
 
 func New(index Index, live Live, state *health.State, freshness time.Duration) *Server {
-	return &Server{index: index, live: live, state: state, freshness: freshness}
+	return &Server{index: index, live: live, state: state, freshness: freshness, links: newMediaLinks()}
 }
 
 // WithTranscriber enables the transcription tools. Without it they answer that
-// transcription is unavailable rather than disappearing from the list. The
-// panel URL is what the tools point the user at to save the OpenAI key.
-func (s *Server) WithTranscriber(t Transcriber, panelURL string) *Server {
+// transcription is unavailable rather than disappearing from the list.
+func (s *Server) WithTranscriber(t Transcriber) *Server {
 	s.transcriber = t
-	s.panelURL = strings.TrimRight(panelURL, "/")
+	return s
+}
+
+// WithPublicURL tells the tools the address the gateway is reached at.
+func (s *Server) WithPublicURL(url string) *Server {
+	s.publicURL = strings.TrimRight(url, "/")
 	return s
 }
 
