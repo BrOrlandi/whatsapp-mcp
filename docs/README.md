@@ -6,6 +6,7 @@ Start with the [README](../README.md); this directory is the detail behind it.
 |---|---|
 | [installation.md](installation.md) | Installing in detail: the server, what the installer does, the wizard, running without it, licensing, images and binaries. |
 | [instalacao.md](instalacao.md) 🇧🇷 | The same document in Portuguese, which is what the main README links to. |
+| [aws.md](aws.md) · [aws.pt-BR.md](aws.pt-BR.md) 🇧🇷 | Installing on AWS Lightsail: which plan, which region, the console path and the AWS CLI path an agent can drive, and what to delete afterwards. |
 | [self-hosting.md](self-hosting.md) | Running your own instance: configuration, secrets, first access, pairing, TLS, upgrades, backups. |
 | [architecture.md](architecture.md) | Why the gateway has the shape it has, what each container is for, how ingestion works. |
 | [mcp-tools.md](mcp-tools.md) | Every tool, what is deliberately *not* a tool, and the semantics of history, gaps, sending and destructive actions. |

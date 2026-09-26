@@ -32,8 +32,31 @@ curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.
   and `search_messages` now return every kept transcript in the message's
   `transcript` field, and search matches words spoken in voice notes.
 
+### Smaller machines, and AWS
+
+- The stack runs on 1 GB of RAM. On a machine with less than 2 GB and no swap,
+  the installer adds a 2 GB swap file, which is what gets a 1 GB plan through
+  the image pulls and the first history sync. A 1 GB AWS Lightsail instance ran
+  the whole stack at about 520 MB used, with nothing killed.
+- [docs/aws.md](docs/aws.md) and [docs/aws.pt-BR.md](docs/aws.pt-BR.md) walk
+  through Lightsail: the US$ 7 plan, why the price is the same in every
+  region, pinning a static IP before installing, opening 443, the
+  builder.aws.com projects whose region is fixed, and the AWS CLI commands an
+  agent such as Claude Code can run while the user only signs in. The
+  README's install prompt offers that route.
+
 ### Fixes
 
+- A fresh install failed at "starting the stack": `quay.io/minio/minio`
+  started answering 401, after MinIO archived its community edition and
+  stopped serving it anywhere. MinIO is gone from the stack instead of being
+  pulled from somewhere else — it never held anything. Evolution only writes
+  media to it with `WEBHOOK_FILES` on, which this stack leaves off, and no
+  bucket was ever created; the gateway fetches media from WhatsApp through
+  `/message/downloadmedia`. An existing instance loses the idle container on
+  its next update, and the empty `whatsapp-mcp_minio_data` volume can be
+  removed with `docker volume rm whatsapp-mcp_minio_data`. The `MINIO_*`
+  lines left in its `.env` are ignored.
 - Voice notes that arrived through a history sync could not be downloaded or
   transcribed ("the stored payload carries no media"). The media lookup only
   understood live events; a history sync stores whole conversations, and the

@@ -53,16 +53,16 @@ Three steps, and you need to know neither Docker, nor TLS, nor the command line.
 
 This runs on a machine of yours; there is no hosted version — the whole point is
 that your messages sit on a computer you own. You rent a virtual machine (a VPS)
-from a cloud provider, for roughly **US$ 12–25 a month**.
+from a cloud provider, for roughly **US$ 7–25 a month**.
 
 Ask for a machine like this:
 
 | | |
 |---|---|
 | System | **Ubuntu 24.04 LTS** |
-| CPU | 2 vCPU |
-| Memory | 4 GB RAM |
-| Disk | 80 GB SSD |
+| CPU | 1 or 2 vCPU |
+| Memory | 2 GB RAM (1 GB works too) |
+| Disk | 40 GB SSD or more |
 | Ports | 80 and 443 open |
 
 **Rent it close to home.** Every message your account sends or receives ends up
@@ -74,8 +74,12 @@ answer to, and close to the people you talk to.
 | [Hetzner](https://www.hetzner.com/cloud) | Best price per GB of RAM; Germany, Finland, US |
 | [DigitalOcean](https://www.digitalocean.com/) | Simple panel, many regions |
 | [Vultr](https://www.vultr.com/) | Hourly billing, quick to destroy and retry |
-| [AWS Lightsail](https://aws.amazon.com/lightsail/) | Flat monthly price, the simple path inside AWS |
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | US$ 7/month with the IP and disk included, 3 months free on a new account. [AWS guide](docs/aws.md) |
 | [Hostinger VPS](https://www.hostinger.com/vps-hosting) | The cheapest of these |
+
+On AWS, the [AWS guide](docs/aws.md) covers which plan to pick, pinning the IP
+and opening port 443, and letting an AI agent (such as Claude Code) create the
+machine through the AWS CLI while you only sign in.
 
 ### 2. Run one command
 
@@ -131,8 +135,8 @@ beginning to end. I am not a technical person: I don't know Docker, I don't know
 the command line, and I have never rented a server.
 
 The project is this one: https://github.com/BrOrlandi/whatsapp-mcp
-Read its README and docs/installation.md before you start, and follow the
-recommendations there (machine size, operating system, ports) rather than
+Read its README and docs/installation.md before you start (and docs/aws.md
+if we go with AWS), and follow the recommendations there (machine size, operating system, ports) rather than
 inventing your own.
 
 HOW I WANT YOU TO TREAT ME
@@ -159,6 +163,11 @@ WHAT WE NEED TO DO, IN THIS ORDER
    about access and SSH keys. Tell me which ports need to be open (80 and 443)
    and where that is configured on that provider.
    When I'm done, ask me for the machine's IP address.
+   If we pick AWS and you can run commands on my computer (as Claude Code
+   can), offer to create the machine yourself through the AWS CLI, following
+   "Path 2" in docs/aws.md: I only sign in through the browser, and you
+   create the machine, run the installer and hand me the link. In that case,
+   skip steps 3 and 4.
 
 3. OPEN THE MACHINE'S TERMINAL
    Explain how to get into the machine. Start with the easiest option: almost
@@ -251,6 +260,7 @@ Besides the unofficial-client risk at the top of this file:
 | | |
 |---|---|
 | [**Detailed installation**](docs/installation.md) | The technical version: what each step does, running without the installer, licensing, images and binaries |
+| [Installing on AWS](docs/aws.md) | Lightsail through the console or with an AI agent through the AWS CLI: plan, region, static IP and costs |
 | [Updating](docs/updating.md) | The update command, what it does, and why there is no downgrade |
 | [Self-hosting](docs/self-hosting.md) | Configuration, TLS, backups |
 | [Architecture](docs/architecture.md) | Why it is built this way |

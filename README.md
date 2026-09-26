@@ -49,16 +49,16 @@ São três passos, e você não precisa saber Docker, TLS nem linha de comando.
 
 Este projeto roda em uma máquina sua, não existe versão hospedada — o ponto é
 que as suas mensagens fiquem num computador que é seu. Você aluga uma máquina
-virtual (VPS) em um provedor de nuvem, por volta de **US$ 12 a US$ 25 por mês**.
+virtual (VPS) em um provedor de nuvem, por volta de **US$ 7 a US$ 25 por mês**.
 
 Peça uma máquina assim:
 
 | | |
 |---|---|
 | Sistema | **Ubuntu 24.04 LTS** |
-| CPU | 2 vCPU |
-| Memória | 4 GB de RAM |
-| Disco | 80 GB SSD |
+| CPU | 1 ou 2 vCPU |
+| Memória | 2 GB de RAM (1 GB também funciona) |
+| Disco | 40 GB SSD ou mais |
 | Portas | 80 e 443 abertas |
 
 **Alugue perto de casa.** Toda mensagem que a sua conta envia ou recebe termina
@@ -69,9 +69,13 @@ uma região brasileira.
 |---|---|---|
 | [Hostinger VPS](https://www.hostinger.com.br/servidor-vps) | São Paulo | O mais barato, painel em português |
 | [Magalu Cloud](https://magalu.cloud/) | Brasil | Empresa brasileira, nota fiscal no Brasil |
-| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | Preço mensal fixo, o caminho simples da AWS |
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | US$ 7/mês com IP e disco incluídos, 3 meses grátis em conta nova. [Guia da AWS](docs/aws.pt-BR.md) |
 | [Vultr](https://www.vultr.com/) | São Paulo | Cobrança por hora, fácil de apagar e refazer |
 | [Hetzner](https://www.hetzner.com/cloud) | Europa / EUA | Mais barato por GB de RAM, se a região não importa |
+
+Na AWS, o [guia da AWS](docs/aws.pt-BR.md) mostra qual plano escolher, como
+fixar o IP e abrir a porta 443, e como deixar um agente de IA (como o Claude
+Code) criar a máquina pelo AWS CLI, com você só fazendo o login.
 
 ### 2. Rode um comando
 
@@ -126,8 +130,8 @@ guie do começo ao fim. Eu não sou uma pessoa técnica: não sei Docker, não s
 linha de comando e nunca aluguei um servidor.
 
 O projeto é este: https://github.com/BrOrlandi/whatsapp-mcp
-Leia o README dele e o docs/instalacao.md antes de começar, e siga as
-recomendações de lá (tamanho de máquina, sistema operacional, portas) em vez
+Leia o README dele e o docs/instalacao.md antes de começar (e o
+docs/aws.pt-BR.md, se formos usar a AWS), e siga as recomendações de lá (tamanho de máquina, sistema operacional, portas) em vez
 de inventar as suas.
 
 COMO EU QUERO QUE VOCÊ ME TRATE
@@ -154,6 +158,11 @@ O QUE PRECISAMOS FAZER, NESTA ORDEM
    parte de acesso/chave SSH. Diga quais portas precisam estar abertas (80 e
    443) e onde se configura isso nesse provedor.
    Quando eu terminar, me peça o endereço de IP da máquina.
+   Se escolhermos a AWS e você conseguir rodar comandos no meu computador
+   (como o Claude Code faz), ofereça criar a máquina você mesmo pelo AWS CLI,
+   seguindo o "Caminho 2" do docs/aws.pt-BR.md: eu só faço o login no
+   navegador, e você cria a máquina, roda o instalador e me entrega o link.
+   Nesse caso, pule os passos 3 e 4.
 
 3. ABRIR O TERMINAL DA MÁQUINA
    Me explique como entrar na máquina. Comece pela opção mais fácil: quase
@@ -242,6 +251,7 @@ Além do risco do cliente não oficial, lá no topo deste arquivo:
 | | |
 |---|---|
 | [**Instalação detalhada**](docs/instalacao.md) 🇧🇷 | A versão técnica: o que cada passo faz, como rodar sem o instalador, licenciamento, imagens e binários |
+| [Instalando na AWS](docs/aws.pt-BR.md) 🇧🇷 | Lightsail pelo site ou com um agente de IA pelo AWS CLI: plano, região, IP fixo e custos |
 | [Atualização](docs/updating.md) | O comando de atualizar, o que ele faz, e por que não existe downgrade |
 | [Self-hosting](docs/self-hosting.md) | Configuração, TLS, backups |
 | [Arquitetura](docs/architecture.md) | Por que é construído assim |
@@ -253,7 +263,7 @@ Além do risco do cliente não oficial, lá no topo deste arquivo:
 | [Política de segurança](SECURITY.md) | Modelo de ameaças e como reportar uma vulnerabilidade |
 | [Contribuindo](CONTRIBUTING.md) | Como enviar uma mudança |
 
-Exceto a instalação detalhada, os documentos acima estão em inglês.
+Exceto a instalação detalhada e o guia da AWS, os documentos acima estão em inglês.
 
 ## Apoie este projeto
 

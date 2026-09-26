@@ -1,7 +1,7 @@
 # Self-hosting
 
 Everything runs from one Compose file. A host with Docker Engine and Compose v2,
-about 2 GB of RAM and a WhatsApp account you are willing to link is enough.
+1 GB of RAM (2 GB is comfortable) and a WhatsApp account you are willing to link is enough.
 
 ## 1. Configure
 

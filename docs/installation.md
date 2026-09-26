@@ -12,7 +12,7 @@ already has an opinion about where TLS terminates.
 
 ## What goes onto your machine
 
-Six containers, plus the Traefik the installer puts in front:
+Five containers, plus the Traefik the installer puts in front:
 
 | Container | What for |
 |---|---|
@@ -21,18 +21,20 @@ Six containers, plus the Traefik the installer puts in front:
 | `rabbitmq` | The queue the events arrive on |
 | `postgres-mcp` | The message index, the API keys, the panel account |
 | `postgres-evolution` | Evolution's own state |
-| `minio` | Where received media is kept |
 | `traefik` | TLS and the Let's Encrypt certificate |
 
-That is why the stack does not run on the smallest instance a provider sells.
+Together they sit at about 300 MB of RAM once running, which is why 1 GB is
+the floor: the installer adds swap to a machine with less than 2 GB so the
+first history sync has somewhere to spill. Media is not stored on the server;
+the gateway fetches it from WhatsApp when a tool asks for it.
 
 ## 1. The server
 
 | | Minimum | Recommended |
 |---|---|---|
 | CPU | 1 vCPU | 2 vCPU |
-| RAM | 2 GB | 4 GB |
-| Disk | 20 GB SSD | 80 GB SSD — the index grows with your history |
+| RAM | 1 GB (the installer adds swap) | 2 GB |
+| Disk | 20 GB SSD | 40 GB SSD or more — the index grows with your history |
 | System | Debian family | Ubuntu 24.04 LTS (what is tested) |
 | Architecture | x86-64 or arm64 | either |
 | Network | ports 80 and 443 reachable from the internet | |
@@ -50,7 +52,7 @@ answer to, and close to the people you talk to.
 | [Hetzner](https://www.hetzner.com/cloud) | Best price per GB of RAM; Germany, Finland, US |
 | [DigitalOcean](https://www.digitalocean.com/) | Simple panel, many regions |
 | [Vultr](https://www.vultr.com/) | Hourly billing, quick to destroy and retry |
-| [AWS Lightsail](https://aws.amazon.com/lightsail/) | Flat monthly price, the simple path inside AWS |
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | US$ 7/month with the IP and disk included, the same price in every region. Walkthrough in [aws.md](aws.md) |
 | [Hostinger VPS](https://www.hostinger.com/vps-hosting) | The cheapest of these |
 | [Magalu Cloud](https://magalu.cloud/) | Brazilian company, Brazilian regions and billing |
 

@@ -12,7 +12,7 @@ opinião sobre onde o TLS termina.
 
 ## O que vai subir na sua máquina
 
-Seis contêineres, mais o Traefik que o instalador coloca na frente:
+Cinco contêineres, mais o Traefik que o instalador coloca na frente:
 
 | Contêiner | Para quê |
 |---|---|
@@ -21,18 +21,20 @@ Seis contêineres, mais o Traefik que o instalador coloca na frente:
 | `rabbitmq` | A fila por onde os eventos chegam ao gateway |
 | `postgres-mcp` | O índice de mensagens, as chaves, a conta do painel |
 | `postgres-evolution` | O estado do Evolution |
-| `minio` | Onde a mídia recebida é guardada |
 | `traefik` | TLS e o certificado Let's Encrypt |
 
-É por isso que a stack não roda na menor instância que um provedor vende.
+Juntos eles ocupam cerca de 300 MB de RAM depois de subir, e por isso 1 GB é o
+piso: numa máquina com menos de 2 GB o instalador cria swap, para que a primeira
+sincronização do histórico tenha para onde transbordar. A mídia não fica
+guardada no servidor; o gateway busca no WhatsApp quando uma ferramenta pede.
 
 ## 1. O servidor
 
 | | Mínimo | Recomendado |
 |---|---|---|
 | CPU | 1 vCPU | 2 vCPU |
-| RAM | 2 GB | 4 GB |
-| Disco | 20 GB SSD | 80 GB SSD — o índice cresce junto com o seu histórico |
+| RAM | 1 GB (o instalador cria swap) | 2 GB |
+| Disco | 20 GB SSD | 40 GB SSD ou mais — o índice cresce junto com o seu histórico |
 | Sistema | Família Debian | Ubuntu 24.04 LTS (o que é testado) |
 | Arquitetura | x86-64 ou arm64 | qualquer uma |
 | Rede | portas 80 e 443 acessíveis pela internet | |
@@ -49,7 +51,7 @@ você já responde pela LGPD, e o caminho até o WhatsApp é mais curto.
 
 | Provedor | Região brasileira | Observações |
 |---|---|---|
-| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | Preço mensal fixo, o caminho mais simples dentro da AWS |
+| [AWS Lightsail](https://aws.amazon.com/lightsail/) | São Paulo | US$ 7/mês com IP e disco incluídos, mesmo preço em todas as regiões. Passo a passo em [aws.pt-BR.md](aws.pt-BR.md) |
 | [Vultr](https://www.vultr.com/) | São Paulo | Cobrança por hora, rápido de destruir e tentar de novo |
 | [Magalu Cloud](https://magalu.cloud/) | Brasil | Empresa brasileira, dados e faturamento no Brasil |
 | [Hostinger VPS](https://www.hostinger.com.br/servidor-vps) | São Paulo | O mais barato dos cinco, planos de longo prazo |

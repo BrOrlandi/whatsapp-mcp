@@ -58,6 +58,34 @@ CURRENT_STEP="checking free disk space"
 AVAILABLE_MB=$(df -Pm /opt 2>/dev/null | awk 'NR==2 {print $4}' || echo 0)
 [ "${AVAILABLE_MB:-0}" -ge 5000 ] || warn "less than 5 GB free on /opt (${AVAILABLE_MB} MB); the images and the databases need room."
 
+# The stack sits at about 300 MB once running, but pulling the images and the
+# first history sync spike well past that. A 1 GB machine gets through them
+# only with somewhere to spill, and the 1 GB plans cloud providers sell ship
+# with no swap at all — so the kernel's answer is to kill a container.
+CURRENT_STEP="checking memory"
+MEM_MB=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+SWAP_MB=$(awk '/^SwapTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+[ "${MEM_MB}" -ge 800 ] || warn "${MEM_MB} MB of RAM is below the 1 GB this stack needs, even with swap."
+if [ "${MEM_MB}" -lt 1900 ] && [ "${SWAP_MB}" -lt 1024 ] && [ ! -e /swapfile ]; then
+    ROOT_FREE_MB=$(df -Pm / | awk 'NR==2 {print $4}')
+    if [ "${ROOT_FREE_MB:-0}" -ge 4096 ]; then
+        fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+        chmod 600 /swapfile
+        mkswap /swapfile >/dev/null
+        swapon /swapfile
+        grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        # Swap is the overflow, not working memory: keep the databases in RAM
+        # and only push out what has gone cold.
+        echo 'vm.swappiness=10' > /etc/sysctl.d/99-whatsapp-mcp-swap.conf
+        sysctl -q -p /etc/sysctl.d/99-whatsapp-mcp-swap.conf || true
+        info "${MEM_MB} MB of RAM: added a 2 GB swap file at /swapfile"
+    else
+        warn "${MEM_MB} MB of RAM and no swap, and too little disk to add one; the first history sync may run out of memory."
+    fi
+else
+    info "${MEM_MB} MB of RAM, ${SWAP_MB} MB of swap"
+fi
+
 # ---------------------------------------------------------------- packages
 
 CURRENT_STEP="installing base packages"
