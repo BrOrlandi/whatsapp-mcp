@@ -85,6 +85,73 @@ are harmless through event and message uniqueness constraints. Transient
 database failures are explicitly requeued and retried after reconnect; malformed
 JSON is rejected without requeue, to prevent a poison-message loop.
 
+## Media
+
+No media file is stored on the server. Audio, video, images, documents and
+stickers are fetched from WhatsApp when a tool asks for them:
+
+1. **At ingestion** the gateway keeps the event exactly as Evolution published
+   it, in the `events` table. For a media message that payload carries the
+   protobuf message WhatsApp sent: the file's `directPath` on WhatsApp's media
+   CDN, the `mediaKey` it is encrypted with, `fileEncSHA256`/`fileSHA256`, the
+   mimetype and the length. It does not carry the file.
+2. **On `download_media` or `transcribe_audio`** the gateway reads that payload
+   back (`RawMessage`), extracts the message from it (`events.MessageContent`,
+   which also finds it inside a history-sync conversation), and posts it to
+   Evolution's `POST /message/downloadmedia`.
+3. **Evolution, through whatsmeow**, downloads the encrypted file from the CDN,
+   checks the hashes, decrypts it with the `mediaKey` and answers with the
+   bytes as a data URI.
+4. **The gateway hands it on**: as base64 in the tool result, or, with
+   `link: true`, held in memory for ten minutes behind a one-message token on
+   `/media/<token>` (up to 25 MB; a larger file is fetched again when the link
+   is opened). Nothing is written to disk.
+
+A transcript is the one derivative that is kept, in PostgreSQL, so a voice note
+is transcribed once.
+
+**WhatsApp discards media.** Some time after a file is sent, the CDN answers
+404. Evolution wraps that in a 500; the gateway names it `ErrMediaExpired`, the
+tools say the file is gone and that only the sender resending it brings it
+back, and a media link answers 410. The retention is WhatsApp's and is not
+documented; in one real run, voice notes sent in August were already gone by
+late September. Asking the sender's phone to re-upload (whatsmeow's media retry receipt)
+is not something Evolution exposes, so it is not attempted.
+
+### Keeping media, if that is ever wanted
+
+Until v0.4.0-beta.1 the stack ran a MinIO that never received a file:
+`MINIO_ENABLED` was on, but Evolution writes media to its store only when
+`WEBHOOK_FILES` is true, which the stack never set, and nothing created the
+bucket. It was removed when `quay.io/minio/minio` started answering 401 — MinIO
+archived its community edition and serves neither images nor binaries any more
+(dl.min.io answers 410).
+
+Keeping a copy of every file past WhatsApp's retention would take three things:
+
+- **An object store.** Evolution's `MINIO_*` variables speak plain S3 through
+  minio-go: `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`,
+  `MINIO_BUCKET`, `MINIO_USE_SSL` and `MINIO_REGION`. On a host outside AWS
+  that means a MinIO container again, from a maintained community build such
+  as `pgsty/minio` (amd64 and arm64, same data format, `curl` inside for the
+  healthcheck), pinned by digest. On AWS it can be an S3 bucket in the
+  instance's region; S3 Standard is about US$ 0.023 per GB-month. Either way
+  the bucket has to be created by the installer, and it should carry a
+  lifecycle rule that expires objects (a year is a reasonable default), since
+  nothing else ever deletes them.
+- **`WEBHOOK_FILES=true`** on Evolution, so it downloads every incoming file
+  and stores it at `evolution-go-medias/<message id><ext>`. Without an object
+  store it inlines the file as base64 in the RabbitMQ event instead, which
+  would bloat the queue and the `events` table.
+- **A fallback in the gateway**, reading the stored object when the CDN
+  answers 404. It does not exist: today the gateway never reads Evolution's
+  store.
+
+Evolution also tries to set a public-read policy on the bucket at startup. On a
+MinIO that only the Compose network reaches that is harmless; on S3, Block
+Public Access refuses it, Evolution logs a warning and carries on, and the
+access key should not be granted `s3:PutBucketPolicy` in the first place.
+
 ## Instance tokens
 
 The panel mints a per-instance Evolution token, stores it in PostgreSQL and uses
