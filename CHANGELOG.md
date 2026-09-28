@@ -15,7 +15,10 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
-## Unreleased
+## 0.4.0-beta.1
+
+The panel can update the server it runs on, voice notes can be transcribed on
+the user's own machine, and the stack fits a 1 GB server.
 
 ### Updating from the panel
 
