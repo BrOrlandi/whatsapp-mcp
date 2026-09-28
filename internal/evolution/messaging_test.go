@@ -2,6 +2,7 @@ package evolution
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,5 +90,20 @@ func TestCheckNumbersReadsEvolutionsActualShape(t *testing.T) {
 	// decide whether sending is even possible.
 	if found[1].OnWhatsApp || found[1].JID != "" {
 		t.Fatalf("a number with no account was reported as reachable: %+v", found[1])
+	}
+}
+
+// WhatsApp discards media some time after it is sent, and Evolution reports
+// that as a 500 wrapping the CDN's 404. That is named, so nobody retries a
+// download that cannot succeed or mistakes it for the server being down.
+func TestDownloadMediaNamesExpiredMedia(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"failed to download media: download failed with status code 404"}`))
+	}))
+	defer server.Close()
+	_, err := New(server.URL, "global", time.Second).DownloadMedia(context.Background(), "tok", []byte(`{"audioMessage":{}}`))
+	if !errors.Is(err, ErrMediaExpired) {
+		t.Fatalf("err = %v, want ErrMediaExpired", err)
 	}
 }

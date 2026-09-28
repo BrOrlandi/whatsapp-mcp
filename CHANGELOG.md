@@ -15,6 +15,20 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
+## 0.4.0-beta.2
+
+### Fixes
+
+- Media WhatsApp has already discarded — its servers keep a file only for a
+  while after it is sent — is now reported as that. `download_media` says the
+  media expired and that only the sender resending it brings it back;
+  `link: true` fetches the file before handing out a URL, so it fails there
+  with the reason instead of giving a URL that answers a bare 502, and keeps
+  the file for the link so the download is immediate. A large file that was
+  not kept and has expired by the time it is fetched answers 410.
+- The index's gap warnings sent the client to `backfill_gap`, a tool that
+  does not exist. They now name `sync_history` with `before`.
+
 ## 0.4.0-beta.1
 
 The panel can update the server it runs on, voice notes can be transcribed on

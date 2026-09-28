@@ -411,7 +411,7 @@ func (s *Server) coverage(ctx context.Context, session Session) map[string]any {
 	// than as a quiet one.
 	if gaps, err := s.index.IndexGaps(ctx, session.InstanceID, store.Silence, 5); err == nil && len(gaps) > 0 {
 		coverage["gaps"] = gaps
-		coverage["gaps_note"] = "No message at all was indexed during these windows, which is what a gateway outage leaves behind. Treat a read that falls inside one as unknown rather than empty, and call backfill_gap to try to refill it."
+		coverage["gaps_note"] = "No message at all was indexed during these windows, which is what a gateway outage leaves behind. Treat a read that falls inside one as unknown rather than empty, and call sync_history with before set to the end of the window to try to refill it."
 	}
 	return coverage
 }
@@ -435,6 +435,9 @@ func (s *Server) readResult(ctx context.Context, session Session, payload map[st
 func liveError(err error) map[string]any {
 	if errors.Is(err, evolution.ErrNotConnected) {
 		return toolError("the WhatsApp instance is not connected; open the control panel and reconnect it")
+	}
+	if errors.Is(err, evolution.ErrMediaExpired) {
+		return toolError("the media of this message has expired on WhatsApp's servers, which keep files only for a limited time after they are sent; it cannot be downloaded any more, and only the sender resending it brings it back")
 	}
 	return toolError("WhatsApp request failed: %v", err)
 }
@@ -470,7 +473,7 @@ func (s *Server) chatMessages(ctx context.Context, session Session, args argumen
 	if len(messages) == 0 {
 		if gap, found := s.gapOver(ctx, session, query.Since, query.Until); found {
 			payload["gap"] = gap
-			payload["warning"] = "This period falls inside a window where the index holds no message from any conversation, so it is unknown rather than empty. Call backfill_gap before concluding nothing was said."
+			payload["warning"] = "This period falls inside a window where the index holds no message from any conversation, so it is unknown rather than empty. Call sync_history with before set to the end of this window before concluding nothing was said."
 		}
 	}
 	return s.readResult(ctx, session, payload)
@@ -688,19 +691,30 @@ func (s *Server) mediaLink(ctx context.Context, session Session, messageID strin
 	if s.publicURL == "" {
 		return toolError("this gateway has no public URL configured, so it cannot hand out download links; call download_media without link")
 	}
-	token, expires, err := s.links.create(session.InstanceID, message.MessageID)
+	// The file is fetched now rather than when the URL is opened: media that
+	// WhatsApp has already discarded fails here, with the reason, instead of
+	// as a bare error from a URL the caller cannot interpret. What was
+	// fetched is kept for the link, so the download itself is immediate.
+	media, failure := s.media(ctx, session, message.MessageID)
+	if failure != nil {
+		return failure
+	}
+	mimeType, data, err := decodeMedia(media, "application/octet-stream")
+	if err != nil {
+		return toolError("Evolution returned no usable media for message %q: %v", messageID, err)
+	}
+	token, expires, err := s.links.create(session.InstanceID, message.MessageID, mimeType, data)
 	if err != nil {
 		return toolError("could not create a download link: %v", err)
 	}
 	url := s.publicURL + "/media/" + token
-	file := message.MessageID
-	if message.MediaType == "audio" {
-		file += ".ogg"
-	}
+	file := message.MessageID + extension(mimeType)
 	return s.readResult(ctx, session, map[string]any{
 		"message":    describe(message),
 		"url":        url,
 		"expires_at": expires.UTC(),
+		"mimetype":   mimeType,
+		"bytes":      len(data),
 		"curl":       "curl -fsSL -o " + file + " '" + url + "'",
 		"note":       "The URL needs no credential and stops working at expires_at. Treat it as a secret until then.",
 	})

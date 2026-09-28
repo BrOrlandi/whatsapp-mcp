@@ -103,6 +103,7 @@ type fakeLive struct {
 	pollResults []evolution.PollResult
 	organised   []string
 	media       *evolution.Media
+	mediaErr    error
 }
 
 func (f *fakeLive) WarmSession(_ context.Context, token, recipient string) error {
@@ -234,6 +235,9 @@ func (f *fakeLive) DownloadMedia(_ context.Context, token string, message json.R
 	f.note(token)
 	if f.err != nil {
 		return evolution.Media{}, f.err
+	}
+	if f.mediaErr != nil {
+		return evolution.Media{}, f.mediaErr
 	}
 	if f.media != nil {
 		return *f.media, nil

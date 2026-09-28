@@ -68,6 +68,12 @@ type Anchor struct {
 // pairing, not by retrying.
 var ErrNotConnected = errors.New("the WhatsApp instance is not connected")
 
+// ErrMediaExpired reports that WhatsApp no longer has a message's media.
+// Its servers keep a file for a limited time after it is sent, and Evolution
+// answers the download with the CDN's 404 wrapped in a 500. Retrying does not
+// bring it back; only the sender resending it does.
+var ErrMediaExpired = errors.New("the media of this message has expired on WhatsApp's servers")
+
 // classify turns Evolution's own wording into the one failure the caller can
 // act on differently.
 func classify(err error) error {
@@ -267,6 +273,10 @@ func (c *Client) SendMedia(ctx context.Context, token, recipient, kind, url, cap
 func (c *Client) DownloadMedia(ctx context.Context, token string, message json.RawMessage) (Media, error) {
 	var media Media
 	if err := c.call(ctx, http.MethodPost, "/message/downloadmedia", token, map[string]any{"message": message}, &media); err != nil {
+		text := strings.ToLower(err.Error())
+		if strings.Contains(text, "status code 404") || strings.Contains(text, "status code 410") {
+			return Media{}, errors.Join(ErrMediaExpired, err)
+		}
 		return Media{}, classify(err)
 	}
 	return media, nil

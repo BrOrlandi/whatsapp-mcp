@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BrOrlandi/whatsapp-mcp/internal/events"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 )
 
@@ -40,13 +41,21 @@ type mediaLink struct {
 	instanceID string
 	messageID  string
 	expires    time.Time
+	// mimeType and data hold the file fetched when the link was made, when it
+	// is small enough to keep; otherwise it is fetched again on download.
+	mimeType string
+	data     []byte
 }
+
+// maxKeptMedia is the largest file a link keeps in memory. Voice notes and
+// photos are far below it; a long video is fetched again when downloaded.
+const maxKeptMedia = 25 << 20
 
 func newMediaLinks() *mediaLinks {
 	return &mediaLinks{links: map[string]mediaLink{}, now: time.Now}
 }
 
-func (l *mediaLinks) create(instanceID, messageID string) (string, time.Time, error) {
+func (l *mediaLinks) create(instanceID, messageID, mimeType string, data []byte) (string, time.Time, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", time.Time{}, err
@@ -61,7 +70,11 @@ func (l *mediaLinks) create(instanceID, messageID string) (string, time.Time, er
 		}
 	}
 	expires := now.Add(MediaLinkTTL)
-	l.links[token] = mediaLink{instanceID: instanceID, messageID: messageID, expires: expires}
+	link := mediaLink{instanceID: instanceID, messageID: messageID, expires: expires}
+	if len(data) <= maxKeptMedia {
+		link.mimeType, link.data = mimeType, data
+	}
+	l.links[token] = link
 	return token, expires, nil
 }
 
@@ -95,20 +108,15 @@ func (s *Server) MediaHandler() http.Handler {
 			http.Error(w, "this media link does not exist or has expired; ask download_media for a new one", http.StatusNotFound)
 			return
 		}
-		session, err := s.resolve(r.Context(), link.instanceID)
-		if err != nil {
-			http.Error(w, "the instance behind this link is no longer managed here", http.StatusGone)
-			return
-		}
-		media, failure := s.media(r.Context(), session, link.messageID)
-		if failure != nil {
-			http.Error(w, "could not fetch this media from WhatsApp", http.StatusBadGateway)
-			return
-		}
-		mimeType, data, err := decodeMedia(media, "application/octet-stream")
-		if err != nil {
-			http.Error(w, "WhatsApp returned no usable media", http.StatusBadGateway)
-			return
+		mimeType, data := link.mimeType, link.data
+		if data == nil {
+			var status int
+			var reason string
+			mimeType, data, status, reason = s.fetchForLink(r, link)
+			if data == nil {
+				http.Error(w, reason, status)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", mimeType)
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
@@ -119,6 +127,36 @@ func (s *Server) MediaHandler() http.Handler {
 		}
 		_, _ = w.Write(data)
 	})
+}
+
+// fetchForLink downloads a link's media again, for files too large to have
+// been kept. Media WhatsApp has discarded is a 410 with the reason, so it is
+// not mistaken for this server being down.
+func (s *Server) fetchForLink(r *http.Request, link mediaLink) (string, []byte, int, string) {
+	session, err := s.resolve(r.Context(), link.instanceID)
+	if err != nil {
+		return "", nil, http.StatusGone, "the instance behind this link is no longer managed here"
+	}
+	payload, err := s.index.RawMessage(r.Context(), session.InstanceID, link.messageID)
+	if err != nil {
+		return "", nil, http.StatusNotFound, "this message is no longer in the index"
+	}
+	content := events.MessageContent(payload, link.messageID)
+	if len(content) == 0 {
+		return "", nil, http.StatusNotFound, "this message carries no media"
+	}
+	media, err := s.live.DownloadMedia(r.Context(), session.Token, content)
+	switch {
+	case errors.Is(err, evolution.ErrMediaExpired):
+		return "", nil, http.StatusGone, "media expired on WhatsApp: its servers keep files only for a limited time, and only the sender resending it brings it back"
+	case err != nil:
+		return "", nil, http.StatusBadGateway, "could not fetch this media from WhatsApp: " + err.Error()
+	}
+	mimeType, data, err := decodeMedia(media, "application/octet-stream")
+	if err != nil {
+		return "", nil, http.StatusBadGateway, "WhatsApp returned no usable media"
+	}
+	return mimeType, data, 0, ""
 }
 
 // decodeMedia turns what Evolution's download route returns into bytes and a

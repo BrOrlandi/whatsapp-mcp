@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -324,5 +325,25 @@ func TestDownloadMediaLinkServesTheFileUntilItExpires(t *testing.T) {
 	bare := testServer(audioIndex(), live, nil)
 	if _, isError := call(t, bare, "download_media", map[string]any{"message_id": "A1", "link": true}); !isError {
 		t.Fatal("a link was minted without a public URL")
+	}
+}
+
+// Media WhatsApp has already discarded is reported as that, with the reason,
+// both when a link is asked for and when a large file is fetched again.
+func TestExpiredMediaIsNamedAsExpired(t *testing.T) {
+	expired := errors.Join(evolution.ErrMediaExpired, errors.New("Evolution /message/downloadmedia returned HTTP 500: status code 404"))
+	live := &fakeLive{mediaErr: expired}
+	server := testServer(audioIndex(), live, nil).WithPublicURL("https://mcp.example")
+	for _, args := range []map[string]any{{"message_id": "A1", "link": true}, {"message_id": "A1"}} {
+		payload, isError := call(t, server, "download_media", args)
+		if !isError || !strings.Contains(payload["error"].(string), "expired on WhatsApp") {
+			t.Fatalf("%v: %#v", args, payload)
+		}
+	}
+	token, _, _ := server.links.create("inst-1", "A1", "", nil)
+	recorder := httptest.NewRecorder()
+	server.MediaHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/media/"+token, nil))
+	if recorder.Code != http.StatusGone || !strings.Contains(recorder.Body.String(), "media expired on WhatsApp") {
+		t.Fatalf("status %d, body %q", recorder.Code, recorder.Body.String())
 	}
 }
