@@ -13,7 +13,7 @@ Set the client ID to `chatgpt`, leave the client secret empty, and copy the
 exact production callback URL shown there. Add it to the existing `.env`:
 
 ```dotenv
-PUBLIC_URL=https://wpp-mcp.on-forge.com
+PUBLIC_URL=https://whatsapp-mcp.example.com
 OAUTH_CLIENT_ID=chatgpt
 OAUTH_REDIRECT_URIS=https://chatgpt.com/connector_platform_oauth_redirect
 ```
@@ -64,9 +64,9 @@ them, while existing panel sessions still require a fresh login.
 ## Verify and troubleshoot
 
 ```sh
-curl -fsS https://wpp-mcp.on-forge.com/.well-known/oauth-protected-resource/mcp
-curl -fsS https://wpp-mcp.on-forge.com/.well-known/oauth-authorization-server
-curl -i https://wpp-mcp.on-forge.com/mcp
+curl -fsS https://whatsapp-mcp.example.com/.well-known/oauth-protected-resource/mcp
+curl -fsS https://whatsapp-mcp.example.com/.well-known/oauth-authorization-server
+curl -i https://whatsapp-mcp.example.com/mcp
 ```
 
 The first two requests must return JSON, and the third must return `401` with
