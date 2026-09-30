@@ -10,6 +10,8 @@ import (
 type Config struct {
 	ListenAddr         string
 	PublicURL          string
+	OAuthClientID      string
+	OAuthRedirectURIs  []string
 	EvolutionURL       string
 	EvolutionAPIKey    string
 	EvolutionTimeout   time.Duration
@@ -57,6 +59,8 @@ func Load() Config {
 		// The address clients reach this gateway at. It is not a secret; it is
 		// what the panel prints in the ready-to-paste client configuration.
 		PublicURL:          env("PUBLIC_URL", "http://127.0.0.1:8080"),
+		OAuthClientID:      env("OAUTH_CLIENT_ID", "chatgpt"),
+		OAuthRedirectURIs:  list("OAUTH_REDIRECT_URIS"),
 		EvolutionURL:       env("EVOLUTION_URL", "http://evolution-go:4000"),
 		EvolutionAPIKey:    os.Getenv("EVOLUTION_API_KEY"),
 		EvolutionTimeout:   duration("EVOLUTION_TIMEOUT", 5*time.Second),

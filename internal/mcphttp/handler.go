@@ -86,23 +86,28 @@ const (
 )
 
 type handler struct {
-	server *mcp.Server
-	auth   Authenticator
-	logger *slog.Logger
-	limit  *ratelimit.Attempts
+	server           *mcp.Server
+	auth             Authenticator
+	logger           *slog.Logger
+	limit            *ratelimit.Attempts
+	resourceMetadata string
 }
 
 // New builds the MCP HTTP handler. Mount it at the endpoint the client is
 // configured with.
-func New(server *mcp.Server, auth Authenticator, logger *slog.Logger) http.Handler {
+func New(server *mcp.Server, auth Authenticator, logger *slog.Logger, resourceMetadata ...string) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &handler{server: server, auth: auth, logger: logger, limit: ratelimit.New(maxFailures, lockout)}
+	h := &handler{server: server, auth: auth, logger: logger, limit: ratelimit.New(maxFailures, lockout)}
+	if len(resourceMetadata) > 0 {
+		h.resourceMetadata = resourceMetadata[0]
+	}
+	return h
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodPost && h.resourceMetadata == "" {
 		// Streamable HTTP allows a GET for a server-initiated stream. This server
 		// has nothing to push, so it says so plainly instead of holding a
 		// connection open.
@@ -128,6 +133,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.limit.Succeed(clientIP(r))
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeError(w, http.StatusMethodNotAllowed, "this MCP endpoint accepts POST")
+		return
+	}
 
 	session, err := h.server.Resolve(r.Context(), instanceID)
 	if err != nil {
@@ -173,6 +183,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *handler) deny(w http.ResponseWriter, r *http.Request, reason string) {
 	h.logger.Warn("MCP request denied", "reason", reason, "remote", clientIP(r))
 	w.Header().Set("WWW-Authenticate", `Bearer realm="whatsapp-mcp"`)
+	if h.resourceMetadata != "" {
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+h.resourceMetadata+`", scope="whatsapp"`)
+		writeError(w, http.StatusUnauthorized, "a valid OAuth access token or API key is required")
+		return
+	}
 	writeError(w, http.StatusUnauthorized, "a valid API key is required")
 }
 

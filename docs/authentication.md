@@ -1,11 +1,11 @@
 # Authentication
 
-Two credentials exist, for two different audiences, and they are deliberately
-not the same kind of secret.
+Clients authenticate with an API key or an OAuth access token. The panel
+password and internal Evolution token serve separate purposes.
 
 ## Client keys
 
-A client needs exactly one thing: an API key. The key identifies the account and
+A client using fixed credentials needs exactly one thing: an API key. The key identifies the account and
 the WhatsApp instance it is authorised for, so there is no user, no password and
 no instance name to configure.
 
@@ -30,6 +30,15 @@ session to resume, so a dropped connection costs nothing.
 
 Issue one key per client. That is what lets you revoke the laptop without
 knocking the desktop offline, and what makes "last used" mean something.
+
+## OAuth clients
+
+ChatGPT and dots connect through OAuth instead of a fixed API key. Enable
+the pre-registered public client following [OAuth setup](oauth.md). The existing
+panel login approves access to one selected WhatsApp instance. Codes require
+S256 PKCE; access tokens expire after one hour, and rotating refresh tokens
+expire with the authorization after 30 days. Replaying a consumed refresh
+token revokes the authorization. The panel can revoke the connection immediately.
 
 ## The panel account
 
