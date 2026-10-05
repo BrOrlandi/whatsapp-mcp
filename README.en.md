@@ -21,6 +21,13 @@
 
 ---
 
+> **There is a cheaper version that runs on your own computer.**
+> [WhatsApp MCP Local](https://github.com/BrOrlandi/whatsapp-mcp-local) is an app
+> for macOS, Windows and Linux: no server and no monthly bill, but it only
+> receives messages while the computer is on. This one is the server version,
+> built to run around the clock on a rented machine, which means a monthly
+> hosting cost.
+
 > ### Use this at your own risk
 >
 > WhatsApp publishes no official API for a personal account. To make an MCP
