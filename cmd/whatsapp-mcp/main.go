@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -81,8 +82,19 @@ func main() {
 	// The licence automation is on by default: registrations go to an address
 	// the email worker answers, and the wizard waits on the licence coming in
 	// rather than on a person's inbox.
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber, httpapi.WithSelfUpdate(selfupdate.New(cfg.UpdateDir)))
-	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db}, logger)
+	options := []httpapi.Option{httpapi.WithSelfUpdate(selfupdate.New(cfg.UpdateDir))}
+	metadataURL := ""
+	if len(cfg.OAuthRedirectURIs) > 0 {
+		oauth, err := httpapi.WithOAuth(db, cfg.PublicURL, cfg.OAuthClientID, cfg.OAuthRedirectURIs)
+		if err != nil {
+			logger.Error("configure OAuth", "error", err)
+			os.Exit(1)
+		}
+		options = append(options, oauth)
+		metadataURL = strings.TrimRight(cfg.PublicURL, "/") + "/.well-known/oauth-protected-resource/mcp"
+	}
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber, options...)
+	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db, strings.TrimRight(cfg.PublicURL, "/") + "/mcp"}, logger, metadataURL)
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           httpapi.FullHandler(state, cfg.FreshnessWindow, webHandler, remoteMCP, mcpServer.MediaHandler()),
@@ -244,10 +256,13 @@ func pollDatabase(ctx context.Context, db *store.Store, state *health.State) {
 
 // apiKeyAuth authenticates an MCP client against the stored API keys and
 // records the use, so the panel can show a credential nobody uses any more.
-type apiKeyAuth struct{ store *store.Store }
+type apiKeyAuth struct {
+	store    *store.Store
+	resource string
+}
 
 func (a apiKeyAuth) Authenticate(ctx context.Context, secret string) (string, error) {
-	key, err := a.store.ResolveAPIKey(ctx, secret)
+	key, err := a.store.ResolveAPIKey(ctx, secret, a.resource)
 	if err != nil {
 		return "", err
 	}

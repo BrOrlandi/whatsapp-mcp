@@ -469,7 +469,7 @@ and acts on. */}}
 </div>
 
 <div class="tabs__panel tabs__panel--outros">
-<p class="muted">Serve para Cursor, ChatGPT, Windsurf, n8n e qualquer outro assistente que aceite MCP. Em vez de você configurar, peça para ele: copie o texto abaixo e mande no chat da ferramenta.</p>
+<p class="muted">Serve para Cursor, Windsurf, n8n e outros assistentes que aceitem uma chave MCP. Em vez de você configurar, peça para ele: copie o texto abaixo e mande no chat da ferramenta. O ChatGPT e os dots usam a conexão por OAuth.</p>
 <div class="snippet"><div class="snippet__head"><span class="snippet__title">Copie e mande para o seu assistente</span></div>
 <pre class="plain" data-copy><code>{{.AgentPrompt}}</code></pre></div>
 <p class="muted">Se ele não puder se configurar sozinho, vai responder com o passo a passo do próprio aplicativo.</p>
@@ -481,6 +481,14 @@ and acts on. */}}
 {{define "conectar"}}{{template "head" .}}{{template "nav" .}}
 <h1>Seu WhatsApp nas suas ferramentas de IA</h1>
 <p class="lead">Aqui você vê se está tudo funcionando e liga o seu WhatsApp a um assistente de inteligência artificial — o Claude, o ChatGPT, o Cursor, o que você usar.</p>
+
+{{if .OAuthClientID}}
+<section class="card"><div class="card__head"><h2>ChatGPT e dots</h2></div><div class="card__body">
+<p>Nas configurações do plugin no ChatGPT, informe o endereço <code>{{.Endpoint}}</code> e escolha OAuth com identificação de cliente <code>{{.OAuthClientID}}</code>, sem segredo de cliente.</p>
+<p>Ao conectar a conta, entre neste painel e permita o acesso ao WhatsApp selecionado. Depois habilite o plugin nas ferramentas do seu dot.</p>
+<p class="muted">Use o endereço de retorno que o administrador registrou no servidor. Você pode desconectar o ChatGPT na lista de conexões abaixo.</p>
+</div></section>
+{{end}}
 
 {{if .Ready}}
 {{/* The two sentences that answer "está tudo certo?" without anybody having to

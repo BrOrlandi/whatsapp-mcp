@@ -162,6 +162,7 @@ type webApp struct {
 	// updater hands update requests to the host's agent. Nil, or no agent
 	// installed, and the panel shows the SSH command instead of a button.
 	updater SelfUpdater
+	oauth   *oauthServer
 }
 
 const (
@@ -183,11 +184,14 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	if licenseAutoWait <= 0 {
 		licenseAutoWait = 3 * time.Minute
 	}
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout), transcription: transcription}
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages + oauthPages)), logins: ratelimit.New(loginFailures, loginLockout), transcription: transcription}
 	for _, option := range options {
 		option(a)
 	}
 	mux := http.NewServeMux()
+	if a.oauth != nil {
+		a.oauth.mount(mux, a)
+	}
 	mux.HandleFunc("GET /", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
 	mux.HandleFunc("POST /setup", a.setup)
@@ -483,7 +487,11 @@ func (a *webApp) login(w http.ResponseWriter, r *http.Request) {
 	}
 	a.logins.Succeed(source)
 	a.setSession(w, r)
-	http.Redirect(w, r, "/", 303)
+	next := oauthReturn(r.URL.Query().Get("next"))
+	if next == "" {
+		next = "/"
+	}
+	http.Redirect(w, r, next, 303)
 }
 
 // setSession issues the panel cookie.
@@ -769,9 +777,10 @@ type connectPage struct {
 	InstanceName    string
 	// Phone is the connected line, written the way its owner writes it.
 	// Account is the profile name WhatsApp reports for it.
-	Phone    string
-	Account  string
-	Endpoint string
+	Phone         string
+	Account       string
+	Endpoint      string
+	OAuthClientID string
 	// Connections are the live credentials, presented as tools rather than
 	// keys. Keys keeps the raw rows for the parts of the page that still count
 	// them.
@@ -806,7 +815,7 @@ func clientOptions() []clientOption {
 	hints := map[string]string{
 		"desktop": "O aplicativo do Claude no computador. É o caminho mais simples: copiar, colar e reiniciar.",
 		"code":    "O Claude que roda no terminal. Um comando só.",
-		"outros":  "Cursor, ChatGPT, Windsurf, n8n… Geramos um texto pronto para você colar no seu assistente, e ele mesmo se configura.",
+		"outros":  "Cursor, Windsurf, n8n… Geramos um texto pronto para você colar no seu assistente, e ele mesmo se configura.",
 	}
 	options := make([]clientOption, 0, len(clients))
 	for index, client := range clients {
@@ -851,6 +860,9 @@ func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.status != nil {
 		page.Account = a.status.Snapshot().WhatsApp.PushName
+	}
+	if a.oauth != nil {
+		page.OAuthClientID = a.oauth.clientID
 	}
 	page.Keys = keys
 	page.Setup = newClientSetup(page.Endpoint, "")

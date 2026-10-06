@@ -88,7 +88,8 @@ func (s *Store) CreateAPIKey(ctx context.Context, name, instanceID, digest, pref
 // ResolveAPIKey authenticates a presented credential and returns the instance
 // it is bound to. The digest comparison is constant time, and the lookup itself
 // is by digest so the secret never reaches a query log.
-func (s *Store) ResolveAPIKey(ctx context.Context, secret string) (APIKey, error) {
+// OAuth credentials additionally require the exact resource and an active grant.
+func (s *Store) ResolveAPIKey(ctx context.Context, secret, resource string) (APIKey, error) {
 	if !strings.HasPrefix(secret, KeyPrefix) {
 		return APIKey{}, ErrKeyUnknown
 	}
@@ -96,7 +97,9 @@ func (s *Store) ResolveAPIKey(ctx context.Context, secret string) (APIKey, error
 	var key APIKey
 	var stored string
 	var lastUsed sql.NullTime
-	err := s.DB.QueryRowContext(ctx, `SELECT id,name,instance_id,key_prefix,key_hash,created_at,last_used_at FROM api_keys WHERE key_hash=$1 AND revoked_at IS NULL`, digest).
+	err := s.DB.QueryRowContext(ctx, `SELECT id,name,instance_id,key_prefix,key_hash,created_at,last_used_at FROM api_keys k
+		WHERE key_hash=$1 AND revoked_at IS NULL AND (expires_at IS NULL OR
+		(expires_at>now() AND EXISTS(SELECT 1 FROM oauth_grants g WHERE g.key_id=k.id AND g.resource=$2 AND g.expires_at>now())))`, digest, resource).
 		Scan(&key.ID, &key.Name, &key.InstanceID, &key.Prefix, &stored, &key.CreatedAt, &lastUsed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return APIKey{}, ErrKeyUnknown

@@ -123,6 +123,8 @@ services:
     environment:
       LISTEN_ADDR: :8080
       PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-chatgpt}
+      OAUTH_REDIRECT_URIS: ${OAUTH_REDIRECT_URIS:-}
       EVOLUTION_URL: http://evolution-go:4000
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-5s}
