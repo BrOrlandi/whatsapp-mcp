@@ -21,12 +21,16 @@
 
 ---
 
-> **There is a cheaper version that runs on your own computer.**
-> [WhatsApp MCP Local](https://github.com/BrOrlandi/whatsapp-mcp-local) is an app
-> for macOS, Windows and Linux: no server and no monthly bill, but it only
-> receives messages while the computer is on. This one is the server version,
-> built to run around the clock on a rented machine, which means a monthly
-> hosting cost.
+> **For most people,
+> [WhatsApp MCP Local](https://github.com/BrOrlandi/whatsapp-mcp-local) is the
+> simpler choice.** It is an app for macOS, Windows and Linux that runs on your
+> own computer: free, no server and no monthly bill, but it only receives
+> messages while the computer is on.
+>
+> The two versions are independent: you install one or the other, and neither
+> needs the other. This one is the server version, for those who want WhatsApp
+> around the clock, on claude.ai and on the phone too, and are fine paying for a
+> server every month.
 
 > ### Use this at your own risk
 >

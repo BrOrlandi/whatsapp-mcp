@@ -21,11 +21,15 @@
 
 ---
 
-> **Existe uma versão mais barata, que roda no seu computador.** O
-> [WhatsApp MCP Local](https://github.com/BrOrlandi/whatsapp-mcp-local) é um app
-> para macOS, Windows e Linux: sem servidor e sem mensalidade, mas só recebe
-> mensagens com o computador ligado. Esta aqui é a versão Servidor, feita para
-> rodar 24 horas numa máquina alugada, o que gera um custo de hospedagem todo mês.
+> **Para quase todo mundo, o
+> [WhatsApp MCP Local](https://github.com/BrOrlandi/whatsapp-mcp-local) é o
+> caminho mais simples.** É um app para macOS, Windows e Linux que roda no seu
+> computador: grátis, sem servidor e sem mensalidade, mas só recebe mensagens com
+> o computador ligado.
+>
+> As duas versões são independentes: você instala uma ou outra, e uma não
+> precisa da outra. Esta aqui é a versão Servidor, para quem quer o WhatsApp 24
+> horas, também no claude.ai e no celular, e topa pagar um servidor por mês.
 
 > ### Use por sua conta e risco
 >
