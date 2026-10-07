@@ -20,7 +20,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     -o /out/whatsapp-mcp ./cmd/whatsapp-mcp
 
 FROM alpine:3.22.1
-RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -u 10001 -G app app
+RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -u 10001 -G app app \
+    && mkdir -p /var/lib/whatsapp-mcp/data && chown app:app /var/lib/whatsapp-mcp/data
+# The data volume holds the files the tools downloaded and the exports. A
+# named volume mounted here starts with this directory's owner, so the
+# gateway can write to it without running as root.
 COPY --from=build /out/whatsapp-mcp /usr/local/bin/whatsapp-mcp
 USER app
 EXPOSE 8080

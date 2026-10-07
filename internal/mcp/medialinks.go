@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,8 +43,11 @@ type mediaLink struct {
 	instanceID string
 	messageID  string
 	expires    time.Time
-	// mimeType and data hold the file fetched when the link was made, when it
-	// is small enough to keep; otherwise it is fetched again on download.
+	// path is a file on the gateway's disk (a kept download, an export);
+	// otherwise mimeType and data hold the file fetched when the link was
+	// made, when it is small enough to keep, and it is fetched again on
+	// download when it is not.
+	path     string
 	mimeType string
 	data     []byte
 }
@@ -56,6 +61,19 @@ func newMediaLinks() *mediaLinks {
 }
 
 func (l *mediaLinks) create(instanceID, messageID, mimeType string, data []byte) (string, time.Time, error) {
+	link := mediaLink{instanceID: instanceID, messageID: messageID}
+	if len(data) <= maxKeptMedia {
+		link.mimeType, link.data = mimeType, data
+	}
+	return l.add(link)
+}
+
+// createFile hands out a link to a file on the gateway's disk.
+func (l *mediaLinks) createFile(instanceID, path, mimeType string) (string, time.Time, error) {
+	return l.add(mediaLink{instanceID: instanceID, path: path, mimeType: mimeType})
+}
+
+func (l *mediaLinks) add(link mediaLink) (string, time.Time, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", time.Time{}, err
@@ -64,18 +82,14 @@ func (l *mediaLinks) create(instanceID, messageID, mimeType string, data []byte)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	for key, link := range l.links {
-		if now.After(link.expires) {
+	for key, old := range l.links {
+		if now.After(old.expires) {
 			delete(l.links, key)
 		}
 	}
-	expires := now.Add(MediaLinkTTL)
-	link := mediaLink{instanceID: instanceID, messageID: messageID, expires: expires}
-	if len(data) <= maxKeptMedia {
-		link.mimeType, link.data = mimeType, data
-	}
+	link.expires = now.Add(MediaLinkTTL)
 	l.links[token] = link
-	return token, expires, nil
+	return token, link.expires, nil
 }
 
 func (l *mediaLinks) resolve(token string) (mediaLink, bool) {
@@ -106,6 +120,26 @@ func (s *Server) MediaHandler() http.Handler {
 		link, ok := s.links.resolve(strings.TrimPrefix(r.URL.Path, "/media/"))
 		if !ok {
 			http.Error(w, "this media link does not exist or has expired; ask download_media for a new one", http.StatusNotFound)
+			return
+		}
+		if link.path != "" {
+			if link.mimeType != "" {
+				w.Header().Set("Content-Type", link.mimeType)
+			}
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(link.path)))
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			file, err := os.Open(link.path)
+			if err != nil {
+				http.Error(w, "this file is no longer on the gateway; ask for a new link", http.StatusGone)
+				return
+			}
+			defer file.Close()
+			info, err := file.Stat()
+			if err != nil {
+				http.Error(w, "this file cannot be read", http.StatusInternalServerError)
+				return
+			}
+			http.ServeContent(w, r, "", info.ModTime(), file)
 			return
 		}
 		mimeType, data := link.mimeType, link.data
@@ -220,4 +254,25 @@ func extension(mimeType string) string {
 		return extensions[0]
 	}
 	return ""
+}
+
+// mimeOfExt names a file's format from its extension, for a kept file whose
+// message did not say.
+func mimeOfExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".ogg", ".opus":
+		return "audio/ogg"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".mp4":
+		return "video/mp4"
+	case ".pdf":
+		return "application/pdf"
+	}
+	if t := mime.TypeByExtension(ext); t != "" {
+		return t
+	}
+	return "application/octet-stream"
 }

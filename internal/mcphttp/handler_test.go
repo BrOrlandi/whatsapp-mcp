@@ -18,7 +18,12 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 )
 
-type fakeIndex struct{ tokens map[string]string }
+// The fakes embed the interfaces so a method these tests never reach needs
+// no stub; reaching one would panic and fail the test loudly.
+type fakeIndex struct {
+	mcp.Index
+	tokens map[string]string
+}
 
 func (f fakeIndex) SelectedInstance(context.Context) (string, error) { return "", nil }
 func (f fakeIndex) ManagedInstances(context.Context) (map[string]string, error) {
@@ -59,7 +64,10 @@ func (f fakeIndex) RawMessage(context.Context, string, string) ([]byte, error) {
 	return nil, errors.New("empty")
 }
 
-type fakeLive struct{ tokens []string }
+type fakeLive struct {
+	mcp.Live
+	tokens []string
+}
 
 func (f *fakeLive) Contacts(_ context.Context, token string) ([]evolution.Contact, error) {
 	f.tokens = append(f.tokens, token)
@@ -69,10 +77,10 @@ func (f *fakeLive) Groups(context.Context, string) ([]evolution.Group, error) { 
 func (f *fakeLive) Group(context.Context, string, string) (evolution.Group, error) {
 	return evolution.Group{}, nil
 }
-func (f *fakeLive) SendText(context.Context, string, string, string) (evolution.SentMessage, error) {
+func (f *fakeLive) SendText(context.Context, string, string, string, evolution.SendOptions) (evolution.SentMessage, error) {
 	return evolution.SentMessage{}, nil
 }
-func (f *fakeLive) SendMedia(context.Context, string, string, string, string, string, string) (evolution.SentMessage, error) {
+func (f *fakeLive) SendMedia(context.Context, string, string, string, string, string, string, evolution.SendOptions) (evolution.SentMessage, error) {
 	return evolution.SentMessage{}, nil
 }
 func (f *fakeLive) DownloadMedia(context.Context, string, json.RawMessage) (evolution.Media, error) {

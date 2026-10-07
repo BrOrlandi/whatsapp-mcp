@@ -239,11 +239,41 @@ func (c *Client) Delivered(ctx context.Context, token, messageID string) (Delive
 	return Delivery{MessageID: first(payload.Result.MessageID, messageID), Status: payload.Result.Status, At: payload.Result.Timestamp}, nil
 }
 
+// SendOptions are what a send can add to the message itself: the message it
+// quotes, the people it mentions, and the forwarded mark.
+type SendOptions struct {
+	// QuotedID is the id of the message replied to, from the same chat.
+	QuotedID string
+	// QuotedParticipant is who wrote the quoted message, for a group.
+	QuotedParticipant string
+	// Mentions are the JIDs mentioned; each appears in the text as @<number>.
+	Mentions []string
+	// Forwarded marks the message as forwarded, the way the phone shows it.
+	Forwarded bool
+}
+
+func (o SendOptions) apply(body map[string]any) {
+	if o.QuotedID != "" {
+		quoted := map[string]any{"messageId": o.QuotedID}
+		if o.QuotedParticipant != "" {
+			quoted["participant"] = o.QuotedParticipant
+		}
+		body["quoted"] = quoted
+	}
+	if len(o.Mentions) > 0 {
+		body["mentionedJid"] = o.Mentions
+	}
+	if o.Forwarded {
+		body["forwardingScore"] = 1
+	}
+}
+
 // SendText sends a text message. The recipient is a JID or a phone number;
 // Evolution formats it when asked to.
-func (c *Client) SendText(ctx context.Context, token, recipient, text string) (SentMessage, error) {
+func (c *Client) SendText(ctx context.Context, token, recipient, text string, opts SendOptions) (SentMessage, error) {
 	var result sendResult
 	body := map[string]any{"number": recipient, "text": text, "formatJid": true}
+	opts.apply(body)
 	if err := c.call(ctx, http.MethodPost, "/send/text", token, body, &result); err != nil {
 		return SentMessage{}, classify(err)
 	}
@@ -251,9 +281,19 @@ func (c *Client) SendText(ctx context.Context, token, recipient, text string) (S
 }
 
 // SendMedia sends media fetched from a URL. Evolution downloads the URL itself
-// and validates the format against the declared kind.
-func (c *Client) SendMedia(ctx context.Context, token, recipient, kind, url, caption, filename string) (SentMessage, error) {
+// and validates the format against the declared kind. A sticker goes through
+// its own route, which converts the image to WebP.
+func (c *Client) SendMedia(ctx context.Context, token, recipient, kind, url, caption, filename string, opts SendOptions) (SentMessage, error) {
 	var result sendResult
+	if kind == "sticker" {
+		body := map[string]any{"number": recipient, "sticker": url, "formatJid": true}
+		opts.Forwarded = false // the sticker route takes no forwarding score
+		opts.apply(body)
+		if err := c.call(ctx, http.MethodPost, "/send/sticker", token, body, &result); err != nil {
+			return SentMessage{}, classify(err)
+		}
+		return result.toSent(), nil
+	}
 	body := map[string]any{"number": recipient, "type": kind, "url": url, "formatJid": true}
 	if caption != "" {
 		body["caption"] = caption
@@ -261,6 +301,7 @@ func (c *Client) SendMedia(ctx context.Context, token, recipient, kind, url, cap
 	if filename != "" {
 		body["filename"] = filename
 	}
+	opts.apply(body)
 	if err := c.call(ctx, http.MethodPost, "/send/media", token, body, &result); err != nil {
 		return SentMessage{}, classify(err)
 	}

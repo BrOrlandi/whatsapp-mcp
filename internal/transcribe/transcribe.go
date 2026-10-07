@@ -76,6 +76,9 @@ type Store interface {
 type Audio struct {
 	MimeType string
 	Data     []byte
+	// Prompt is context for the engine: the conversation's names and
+	// recent words, which it then spells the way the conversation does.
+	Prompt string
 }
 
 // Status is what may be shown about the saved key: whether there is one, and
@@ -170,6 +173,11 @@ func (s *Service) Transcribe(ctx context.Context, instanceID, messageID string, 
 	_ = form.WriteField("response_format", "verbose_json")
 	if language = strings.ToLower(strings.TrimSpace(language)); language != "" {
 		_ = form.WriteField("language", language)
+	}
+	// The conversation's names and recent words steer Whisper towards how
+	// they are spelled.
+	if prompt := strings.TrimSpace(audio.Prompt); prompt != "" {
+		_ = form.WriteField("prompt", prompt)
 	}
 	part, err := form.CreateFormFile("file", filename)
 	if err != nil {

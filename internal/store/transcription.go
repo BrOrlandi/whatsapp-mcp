@@ -22,13 +22,16 @@ type TranscriptionKey struct {
 
 // Transcript is what Whisper heard in one voice note.
 type Transcript struct {
-	InstanceID string    `json:"-"`
-	MessageID  string    `json:"message_id"`
-	Text       string    `json:"text"`
-	Language   string    `json:"language,omitempty"`
-	Model      string    `json:"model"`
-	Duration   float64   `json:"duration_seconds,omitempty"`
-	CreatedAt  time.Time `json:"transcribed_at"`
+	InstanceID string `json:"-"`
+	MessageID  string `json:"message_id"`
+	Text       string `json:"text"`
+	// Raw is what speech recognition first heard, when the text was
+	// corrected afterwards.
+	Raw       string    `json:"raw_text,omitempty"`
+	Language  string    `json:"language,omitempty"`
+	Model     string    `json:"model"`
+	Duration  float64   `json:"duration_seconds,omitempty"`
+	CreatedAt time.Time `json:"transcribed_at"`
 }
 
 // TranscriptionKey returns the saved key, or ErrNoTranscriptionKey.
@@ -57,7 +60,7 @@ func (s *Store) ClearTranscriptionKey(ctx context.Context) error {
 // Transcript returns the stored transcript of one message, or ErrNoTranscript.
 func (s *Store) Transcript(ctx context.Context, instanceID, messageID string) (Transcript, error) {
 	t := Transcript{InstanceID: instanceID, MessageID: messageID}
-	err := s.DB.QueryRowContext(ctx, `SELECT text,language,model,duration_seconds,created_at FROM transcriptions WHERE instance_id=$1 AND message_id=$2`, instanceID, messageID).Scan(&t.Text, &t.Language, &t.Model, &t.Duration, &t.CreatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT text,raw_text,language,model,duration_seconds,created_at FROM transcriptions WHERE instance_id=$1 AND message_id=$2`, instanceID, messageID).Scan(&t.Text, &t.Raw, &t.Language, &t.Model, &t.Duration, &t.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Transcript{}, ErrNoTranscript
 	}
@@ -68,6 +71,6 @@ func (s *Store) Transcript(ctx context.Context, instanceID, messageID string) (T
 // replaces the first, which is what an explicit retry in another language asks
 // for.
 func (s *Store) SaveTranscript(ctx context.Context, t Transcript) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO transcriptions(instance_id,message_id,text,language,model,duration_seconds) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(instance_id,message_id) DO UPDATE SET text=EXCLUDED.text, language=EXCLUDED.language, model=EXCLUDED.model, duration_seconds=EXCLUDED.duration_seconds, created_at=now()`, t.InstanceID, t.MessageID, t.Text, t.Language, t.Model, t.Duration)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO transcriptions(instance_id,message_id,text,raw_text,language,model,duration_seconds) VALUES($1,$2,$3,$7,$4,$5,$6) ON CONFLICT(instance_id,message_id) DO UPDATE SET text=EXCLUDED.text, raw_text=EXCLUDED.raw_text, language=EXCLUDED.language, model=EXCLUDED.model, duration_seconds=EXCLUDED.duration_seconds, created_at=now()`, t.InstanceID, t.MessageID, t.Text, t.Language, t.Model, t.Duration, t.Raw)
 	return err
 }

@@ -9,6 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	// The image carries no zone database; embedding it lets TZ name the
+	// operator's time zone, which message_stats' days and the date-only
+	// filters are counted in.
+	_ "time/tzdata"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/config"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
@@ -77,7 +81,9 @@ func main() {
 		}
 	}()
 	transcriber := transcribe.New(db)
-	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow).WithTranscriber(transcriber).WithPublicURL(cfg.PublicURL)
+	mcpServer := mcp.New(db, evolutionClient, state, cfg.FreshnessWindow).WithTranscriber(transcriber).WithPublicURL(cfg.PublicURL).
+		WithFiles(cfg.MediaDir, cfg.ExportDir).WithInternalURL(cfg.InternalURL).WithWebhooks(hooks).WithLogger(logger)
+	go mcpServer.RunRetention(ctx)
 	if cfg.StdioEnabled {
 		go func() {
 			if err := mcpServer.Serve(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {

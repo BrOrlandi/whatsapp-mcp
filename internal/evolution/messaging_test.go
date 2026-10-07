@@ -2,7 +2,9 @@ package evolution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +21,7 @@ func TestSendTextReadsTheNestedAcknowledgement(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sent, err := New(server.URL, "global", time.Second).SendText(context.Background(), "tok", "55@s.whatsapp.net", "oi")
+	sent, err := New(server.URL, "global", time.Second).SendText(context.Background(), "tok", "55@s.whatsapp.net", "oi", SendOptions{})
 	if err != nil {
 		t.Fatalf("send failed: %v", err)
 	}
@@ -105,5 +107,82 @@ func TestDownloadMediaNamesExpiredMedia(t *testing.T) {
 	_, err := New(server.URL, "global", time.Second).DownloadMedia(context.Background(), "tok", []byte(`{"audioMessage":{}}`))
 	if !errors.Is(err, ErrMediaExpired) {
 		t.Fatalf("err = %v, want ErrMediaExpired", err)
+	}
+}
+
+// A reply, a mention and a forward travel in the fields Evolution reads:
+// quoted, mentionedJid and forwardingScore. A sticker goes to its own route.
+func TestSendOptionsReachEvolution(t *testing.T) {
+	var bodies []map[string]any
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		paths = append(paths, r.URL.Path)
+		_, _ = w.Write([]byte(`{"data":{"Info":{"ID":"X"}}}`))
+	}))
+	defer server.Close()
+	client := New(server.URL, "global", time.Second)
+	opts := SendOptions{QuotedID: "Q1", QuotedParticipant: "551@s.whatsapp.net", Mentions: []string{"552@s.whatsapp.net"}, Forwarded: true}
+	if _, err := client.SendText(context.Background(), "tok", "120@g.us", "oi @552", opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMedia(context.Background(), "tok", "120@g.us", "sticker", "https://x.example/s.webp", "", "", opts); err != nil {
+		t.Fatal(err)
+	}
+	text := bodies[0]
+	quoted, _ := text["quoted"].(map[string]any)
+	if paths[0] != "/send/text" || quoted["messageId"] != "Q1" || quoted["participant"] != "551@s.whatsapp.net" || text["forwardingScore"] != float64(1) {
+		t.Fatalf("text body = %v", text)
+	}
+	if mentions, _ := text["mentionedJid"].([]any); len(mentions) != 1 || mentions[0] != "552@s.whatsapp.net" {
+		t.Fatalf("mentions = %v", text["mentionedJid"])
+	}
+	if paths[1] != "/send/sticker" || bodies[1]["sticker"] != "https://x.example/s.webp" || bodies[1]["forwardingScore"] != nil {
+		t.Fatalf("sticker = %s %v", paths[1], bodies[1])
+	}
+}
+
+func TestGroupAndPresenceRoutes(t *testing.T) {
+	var got []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = append(got, r.URL.Path+" "+string(body))
+		if r.URL.Path == "/group/invitelink" {
+			_, _ = w.Write([]byte(`{"message":"success","data":"https://chat.whatsapp.com/ABC"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":"success"}`))
+	}))
+	defer server.Close()
+	c := New(server.URL, "global", time.Second)
+	ctx := context.Background()
+	if err := c.UpdateParticipants(ctx, "tok", "120@g.us", "promote", []string{"551@s.whatsapp.net"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateParticipants(ctx, "tok", "120@g.us", "kick", []string{"551"}); err == nil {
+		t.Fatal("an unknown action must be refused before Evolution is called")
+	}
+	link, err := c.GroupInviteLink(ctx, "tok", "120@g.us", true)
+	if err != nil || link != "https://chat.whatsapp.com/ABC" {
+		t.Fatalf("link = %q, %v", link, err)
+	}
+	if err := c.Presence(ctx, "tok", "551@s.whatsapp.net", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MarkRead(ctx, "tok", "551@s.whatsapp.net", []string{"A", "B"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`/group/participant {"action":"promote","groupJid":"120@g.us","participants":["551@s.whatsapp.net"]}`,
+		`/group/invitelink {"groupJid":"120@g.us","reset":true}`,
+		`/message/presence {"isAudio":true,"number":"551@s.whatsapp.net","state":"composing"}`,
+		`/message/markread {"id":["A","B"],"number":"551@s.whatsapp.net"}`,
+	}
+	for i, w := range want {
+		if i >= len(got) || got[i] != w {
+			t.Fatalf("call %d = %q, want %q", i, got, w)
+		}
 	}
 }

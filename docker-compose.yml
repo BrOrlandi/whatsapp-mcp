@@ -152,6 +152,17 @@ services:
       # false stops it.
       UPDATE_CHECK: ${UPDATE_CHECK:-true}
       UPDATE_DIR: /var/lib/whatsapp-mcp/update
+      # The files the tools downloaded (kept, so a file stays readable after
+      # WhatsApp discards it, and cleared from Configurações › Arquivos
+      # baixados) and what export_messages wrote.
+      MEDIA_DIR: /var/lib/whatsapp-mcp/data/media
+      EXPORT_DIR: /var/lib/whatsapp-mcp/data/exports
+      # How Evolution reaches this gateway inside the stack, to fetch the files
+      # the gateway hands it: a forwarded photo, a sticker sent again.
+      INTERNAL_URL: http://whatsapp-mcp:8080
+      # The time zone message_stats counts days and months in, and date-only
+      # filters (since 2026-09-01) start at midnight of. An IANA name.
+      TZ: ${TZ:-America/Sao_Paulo}
     # The directory the host's update agent watches. The panel writes update
     # requests into it and reads the progress back; the agent, not this
     # container, is what drives Docker. install.sh points UPDATE_DIR_HOST at
@@ -159,6 +170,7 @@ services:
     # agent the directory stays empty and the panel shows the SSH command.
     volumes:
       - ${UPDATE_DIR_HOST:-./state/update}:/var/lib/whatsapp-mcp/update
+      - whatsapp_mcp_data:/var/lib/whatsapp-mcp/data
     # Bound to loopback by default: the panel has no business facing the
     # internet directly. Put a TLS-terminating reverse proxy in front of it and
     # point PUBLIC_URL at the hostname it answers on. PANEL_BIND=0.0.0.0 opens
@@ -181,3 +193,4 @@ volumes:
   postgres_evolution_data:
   rabbitmq_data:
   postgres_mcp_data:
+  whatsapp_mcp_data:

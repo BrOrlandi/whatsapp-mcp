@@ -49,6 +49,13 @@ type Config struct {
 	// progress back; with no agent there, the panel offers the SSH command
 	// instead of a button.
 	UpdateDir string
+	// MediaDir keeps the files the tools downloaded, ExportDir what
+	// export_messages wrote; both live on the gateway's data volume.
+	MediaDir  string
+	ExportDir string
+	// InternalURL is how Evolution reaches this gateway inside the stack,
+	// to fetch the files the gateway hands it (forwards, reused stickers).
+	InternalURL string
 }
 
 func Load() Config {
@@ -78,6 +85,9 @@ func Load() Config {
 		LicenseAutoWait:    duration("EVOLUTION_LICENSE_AUTO_WAIT", 3*time.Minute),
 		UpdateCheck:        boolEnv("UPDATE_CHECK", true),
 		UpdateDir:          env("UPDATE_DIR", "/var/lib/whatsapp-mcp/update"),
+		MediaDir:           env("MEDIA_DIR", "/var/lib/whatsapp-mcp/data/media"),
+		ExportDir:          env("EXPORT_DIR", "/var/lib/whatsapp-mcp/data/exports"),
+		InternalURL:        env("INTERNAL_URL", "http://whatsapp-mcp:8080"),
 	}
 }
 

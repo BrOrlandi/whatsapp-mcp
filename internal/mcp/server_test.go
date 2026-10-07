@@ -30,6 +30,15 @@ type fakeIndex struct {
 	rawErr      error
 	lastQuery   store.MessageQuery
 	err         error
+	settings    map[string]string
+	unread      []store.Chat
+	marks       map[string]store.Mark
+	flags       []string
+	reads       []string
+	own         []string
+	mentions    []store.Message
+	stats       []store.Bucket
+	lastFilter  store.Filter
 }
 
 func (f *fakeIndex) SelectedInstance(context.Context) (string, error) { return f.selected, nil }
@@ -46,8 +55,17 @@ func (f *fakeIndex) InstanceToken(_ context.Context, id string) (string, error) 
 func (f *fakeIndex) Coverage(context.Context, string) (store.Coverage, error) {
 	return f.coverage, f.err
 }
-func (f *fakeIndex) ListChats(context.Context, string, string, int) ([]store.Chat, error) {
-	return f.chats, nil
+func (f *fakeIndex) ListChats(_ context.Context, _ string, search string, _ int) ([]store.Chat, error) {
+	if search == "" {
+		return f.chats, nil
+	}
+	var found []store.Chat
+	for _, c := range f.chats {
+		if strings.Contains(strings.ToLower(c.Name+" "+c.ChatJID), strings.ToLower(search)) {
+			found = append(found, c)
+		}
+	}
+	return found, nil
 }
 func (f *fakeIndex) Messages(_ context.Context, _ string, query store.MessageQuery) ([]store.Message, error) {
 	f.lastQuery = query
@@ -104,6 +122,9 @@ type fakeLive struct {
 	organised   []string
 	media       *evolution.Media
 	mediaErr    error
+	sendOptions []evolution.SendOptions
+	actions     []string
+	inviteLink  string
 }
 
 func (f *fakeLive) WarmSession(_ context.Context, token, recipient string) error {
@@ -204,12 +225,13 @@ func (f *fakeLive) Group(_ context.Context, token, jid string) (evolution.Group,
 	f.note(token)
 	return f.group, f.err
 }
-func (f *fakeLive) SendText(_ context.Context, token, to, text string) (evolution.SentMessage, error) {
+func (f *fakeLive) SendText(_ context.Context, token, to, text string, opts evolution.SendOptions) (evolution.SentMessage, error) {
 	f.note(token)
 	if f.err != nil {
 		return evolution.SentMessage{}, f.err
 	}
 	f.sentText = append(f.sentText, to+"|"+text)
+	f.sendOptions = append(f.sendOptions, opts)
 	return evolution.SentMessage{ID: first(f.sentID, "SENT1")}, nil
 }
 
@@ -223,12 +245,13 @@ func first(values ...string) string {
 	}
 	return ""
 }
-func (f *fakeLive) SendMedia(_ context.Context, token, to, kind, url, caption, filename string) (evolution.SentMessage, error) {
+func (f *fakeLive) SendMedia(_ context.Context, token, to, kind, url, caption, filename string, opts evolution.SendOptions) (evolution.SentMessage, error) {
 	f.note(token)
 	if f.err != nil {
 		return evolution.SentMessage{}, f.err
 	}
 	f.sentMedia = append(f.sentMedia, strings.Join([]string{to, kind, url, caption, filename}, "|"))
+	f.sendOptions = append(f.sendOptions, opts)
 	return evolution.SentMessage{ID: "SENT2"}, nil
 }
 func (f *fakeLive) DownloadMedia(_ context.Context, token string, message json.RawMessage) (evolution.Media, error) {
@@ -272,7 +295,7 @@ func testServer(index *fakeIndex, live *fakeLive, state *health.State) *Server {
 	if state == nil {
 		state = readyState()
 	}
-	return New(index, live, state, time.Minute)
+	return New(index, live, state, time.Minute).WithFiles(testFiles(), testFiles())
 }
 
 // call runs one tool and returns the decoded payload plus whether the tool
@@ -313,9 +336,15 @@ func TestToolsListCoversTheMVPSurface(t *testing.T) {
 			t.Errorf("tools/list is missing %s", tool)
 		}
 	}
-	// Forwarding has no route in Evolution Go, so promising it would be a lie.
-	if strings.Contains(response, "forward_message") {
-		t.Error("tools/list offers forwarding, which WhatsApp does not expose")
+	// The server offers every tool of WhatsApp MCP Local 1.3.
+	for _, tool := range []string{
+		"health", "forward_message", "mark_chat_read", "send_typing", "get_message_context", "message_stats",
+		"export_messages", "list_unread", "list_unanswered", "list_mentions", "mark_handled", "snooze_chat",
+		"manage_group_participants", "update_group", "get_group_invite_link", "leave_group", "media_stats", "purge_media",
+	} {
+		if !strings.Contains(response, `"`+tool+`"`) {
+			t.Errorf("tools/list is missing %s", tool)
+		}
 	}
 }
 
@@ -333,7 +362,7 @@ func TestLiveToolsUseTheSessionToken(t *testing.T) {
 		{"list_contacts", nil},
 		{"list_groups", nil},
 		{"get_group", map[string]any{"group_jid": "g@g.us"}},
-		{"send_text_message", map[string]any{"to": "5511", "text": "oi"}},
+		{"send_text_message", map[string]any{"to": "5511999998888", "text": "oi"}},
 	} {
 		if _, isError := call(t, server, tool.name, tool.args); isError {
 			t.Fatalf("%s failed", tool.name)
@@ -486,19 +515,19 @@ func TestSyncHistoryAnchorsOnTheOldestIndexedMessage(t *testing.T) {
 // Media is decoded by Evolution from the stored protobuf, so the tool has to
 // find that payload and say so plainly when it cannot.
 func TestDownloadMediaUsesTheStoredPayload(t *testing.T) {
-	index := &fakeIndex{raw: []byte(`{"event":"Message","data":{"Message":{"audioMessage":{"seconds":3}}}}`)}
+	index := &fakeIndex{raw: []byte(`{"event":"Message","data":{"Message":{"audioMessage":{"seconds":3}}}}`),
+		messages: []store.Message{{MessageID: "M1", ChatJID: "5511@s.whatsapp.net", MediaType: "audio"}}}
 	live := &fakeLive{}
 	server := testServer(index, live, nil)
 	payload, isError := call(t, server, "download_media", map[string]any{"message_id": "M1"})
 	if isError {
 		t.Fatalf("download failed: %#v", payload)
 	}
-	media := payload["media"].(map[string]any)
-	if media["mimetype"] != "audio/ogg" {
-		t.Fatalf("media = %#v", media)
+	if payload["mime_type"] != "audio/ogg" || payload["media_type"] != "audio" {
+		t.Fatalf("media = %#v", payload)
 	}
 
-	missing := testServer(&fakeIndex{rawErr: errors.New("no rows")}, &fakeLive{}, nil)
+	missing := testServer(&fakeIndex{rawErr: errors.New("no rows"), messages: index.messages}, &fakeLive{}, nil)
 	payload, isError = call(t, missing, "download_media", map[string]any{"message_id": "M1"})
 	if !isError || !strings.Contains(payload["error"].(string), "not in the index") {
 		t.Fatalf("payload = %#v", payload)
@@ -768,7 +797,7 @@ func TestPollRoundTrip(t *testing.T) {
 func TestSendPollRejectsASingleOption(t *testing.T) {
 	server := testServer(&fakeIndex{tokens: map[string]string{"inst-1": "tok-1"}, selected: "inst-1"}, &fakeLive{}, nil)
 	payload, isError := call(t, server, "send_poll", map[string]any{"to": "55@s.whatsapp.net", "question": "vamos?", "options": []string{"sim"}})
-	if !isError || !strings.Contains(payload["error"].(string), "at least two options") {
+	if !isError || !strings.Contains(payload["error"].(string), "two to twelve options") {
 		t.Fatalf("payload = %#v", payload)
 	}
 }
