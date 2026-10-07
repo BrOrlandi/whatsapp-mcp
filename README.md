@@ -215,22 +215,32 @@ Comece se apresentando em uma frase e fazendo a primeira pergunta do passo 1.
 
 ## O que dá para pedir
 
-24 ferramentas, em quatro grupos:
+42 ferramentas — as mesmas da [versão Local](https://github.com/BrOrlandi/whatsapp-mcp-local),
+mais duas que só o servidor tem:
 
-- **Ler** — listar conversas, ler um período, buscar em texto completo, pedir
-  histórico mais antigo do que o já indexado, transcrever áudios com o Whisper
-  da OpenAI (com a sua chave, salva no painel em **Transcrição**).
-- **Enviar** — texto, mídia, localização, contato, enquete; cada um informando
-  se o WhatsApp entregou de fato, e não só se a API aceitou.
+- **Ler** — listar conversas, ler um período, buscar em texto completo, ver o
+  que veio antes e depois de uma mensagem, contar mensagens por conversa,
+  pessoa, dia ou mês, exportar conversas inteiras, pedir histórico mais antigo
+  do que o já indexado, transcrever áudios com o Whisper da OpenAI (com a sua
+  chave, salva em **Configurações**).
+- **Triagem** — quem está esperando a sua resposta, o que está não lido, onde
+  te mencionaram; marcar como resolvido ou adiar uma conversa.
+- **Enviar** — texto (respondendo uma mensagem, mencionando pessoas, com
+  rascunho antes de enviar), mídia, figurinha, localização, contato, enquete,
+  encaminhar, marcar como lida, "digitando…"; cada envio informando se o
+  WhatsApp entregou de fato, e não só se a API aceitou.
 - **Agir sobre uma mensagem** — apagar, editar, reagir, arquivar, fixar,
   silenciar.
+- **Grupos** — adicionar, remover e promover pessoas, trocar nome e descrição,
+  link de convite, sair. O que não tem volta pede confirmação.
 - **Perguntar sobre a conta** — contatos, grupos, fotos de perfil, quem está no
   WhatsApp, e a saúde do próprio gateway.
 
-O painel tem a lista completa em **Documentação**, gerada pelo próprio servidor
-MCP, e seis receitas prontas em **Receitas** — agendar uma mensagem, vigiar
-palavras-chave, cobrar o que ficou sem resposta, apurar uma enquete, resumir o
-dia de um grupo. Cada uma é um prompt para colar.
+O painel tem a lista completa em **Funções**, gerada pelo próprio servidor MCP,
+receitas prontas em **Receitas** e as dúvidas comuns em **Ajuda**. Para agir
+na hora em que uma mensagem chega — avisar, responder sozinho, registrar —, os
+**webhooks** (em **Configurações › Webhooks**) mandam cada mensagem nova para
+um script seu. Veja [docs/webhooks.md](docs/webhooks.md).
 
 ## Mantendo atualizado
 
@@ -266,6 +276,7 @@ Além do risco do cliente não oficial, lá no topo deste arquivo:
 | [Self-hosting](docs/self-hosting.md) | Configuração, TLS, backups |
 | [Arquitetura](docs/architecture.md) | Por que é construído assim |
 | [Ferramentas MCP](docs/mcp-tools.md) | Cada ferramenta, e as semânticas que importam |
+| [Webhooks](docs/webhooks.md) | O que um script recebe a cada mensagem nova, e como conferir a assinatura |
 | [Autenticação](docs/authentication.md) | Chaves, sessões, o que quem tem uma chave pode fazer |
 | [Operação](docs/operations.md) | Saúde, o pipeline de eventos, referência de configuração |
 | [Desenvolvimento](docs/development.md) | Modos de execução local, checagens, releases |

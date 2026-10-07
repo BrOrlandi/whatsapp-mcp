@@ -1,26 +1,46 @@
 # MCP tools
 
-The panel serves this same list at `/documentacao`, read from the MCP server's
+The panel serves this same list at `/funcoes`, read from the MCP server's
 own definitions rather than transcribed. A hand-kept list of capabilities is a
 list that quietly stops being true — a tool gains an argument, the page still
 shows the old one — so that page is wrong only if the server is. This file is
 the narrative version: what each tool is for and why some of them behave the way
 they do.
 
+The tools are the same as [WhatsApp MCP Local](https://github.com/BrOrlandi/whatsapp-mcp-local)'s
+— the same names, arguments and behaviour — plus `send_contact` and
+`set_transcription_key`, which only the server has. Where the server cannot do
+exactly what Local does, the tool's description says so; the differences are
+listed under [Differences from Local](#differences-from-local).
+
 | Tool | Source | Purpose |
 |---|---|---|
-| `whatsapp_status` | gateway | session state, queues, index coverage, problems |
-| `list_chats` | index | conversations, most recently active first |
-| `get_chat_messages` | index | one conversation over a period |
+| `health` | gateway + index | one verdict (ok, warn, fail) and the checks behind it |
+| `whatsapp_status` | gateway | session state, queues, index coverage, problems, webhooks |
+| `list_chats` | index | conversations, pinned first, with unread count and flags |
+| `get_chat_messages` | index | one conversation over a period; `count_only`, `fields`, `max_content_chars` |
 | `search_messages` | index | full-text search, optionally scoped |
+| `get_message_context` | index | the messages just before and after one message |
+| `message_stats` | index | counts by chat, sender, day or month |
+| `export_messages` | index | NDJSON export, handed over as a temporary link |
+| `list_unread` | index | chats with unread messages, as the phone shows them |
+| `list_unanswered` | index | chats waiting for the account's reply |
+| `list_mentions` | index | messages that mention the account |
+| `mark_handled` | index | take a chat off the triage lists until someone writes again |
+| `snooze_chat` | index | keep a chat off the triage lists until a moment |
 | `list_contacts` | Evolution | address book |
 | `list_groups` | Evolution | groups the account belongs to |
 | `get_group` | Evolution | one group with its participants |
-| `send_text_message` | Evolution | send text |
-| `send_media_message` | Evolution | send image, video, audio or document from a URL |
-| `download_media` | Evolution | decode the media of an indexed message, or hand out a temporary link to it |
+| `send_text_message` | Evolution | send text; reply, mentions, `dry_run` |
+| `send_media_message` | Evolution | send image, video, audio, document or sticker from a URL; reply, `dry_run` |
+| `forward_message` | index + Evolution | resend a message marked as forwarded, media included |
+| `mark_chat_read` | index + Evolution | mark a chat read, with read receipts |
+| `send_typing` | Evolution | show or clear "typing…" / "recording audio…" |
+| `download_media` | Evolution + disk | the media of an indexed message, kept on the server; inline or as a temporary link |
+| `media_stats` | disk | how much space the kept files take |
+| `purge_media` | disk | delete kept files (two-step) |
 | `transcribe_audio` | index + Evolution + OpenAI | turn a voice note into text with Whisper |
-| `save_transcript` | index | store a transcript made on the user's own machine |
+| `save_transcript` | index | store a transcript made elsewhere, or a correction |
 | `set_transcription_key` | gateway | save or remove the OpenAI key transcription uses |
 | `sync_history` | index + Evolution | request messages older than the index holds, from the start or from a given moment |
 | `delete_message` | index + Evolution | revoke one of the account's own messages for everyone |
@@ -33,6 +53,13 @@ they do.
 | `send_poll` | Evolution | send a poll |
 | `get_poll_results` | Evolution | read a poll's tally |
 | `organise_chat` | Evolution | archive, pin or mute a conversation, and undo each |
+| `manage_group_participants` | Evolution | add, remove, promote or demote (removing is two-step) |
+| `update_group` | Evolution | rename a group or change its description |
+| `get_group_invite_link` | Evolution | the invite link; `reset` revokes it (two-step) |
+| `leave_group` | Evolution | leave a group (two-step) |
+
+Every definition carries MCP annotations (`readOnlyHint`, `destructiveHint`)
+from its category in `internal/mcp/categories.go`.
 
 ## What is deliberately not a tool
 
@@ -45,9 +72,11 @@ backend.
 gateway does that one piece of model work itself, and only when the operator
 opts in with their own OpenAI key. See [Transcription](#transcription).
 
-**Forwarding.** WhatsApp exposes no forwarding route. Resending the content with
-`send_text_message` or `send_media_message` is what "forward" means here, and
-the tool names say so rather than implying otherwise.
+**Watching for messages.** The tools answer when asked. Something that must
+happen as a message arrives — a notification, an automatic reply, a log — is
+the job of the [webhooks](webhooks.md), and the server's MCP instructions tell
+the client so. The tools never create a webhook: that is the operator's step in
+the panel.
 
 ## History and gaps
 
@@ -110,7 +139,7 @@ point of it.
 
 `transcribe_audio` sends a voice note — a message whose `media_type` is
 `audio` — to OpenAI's Whisper (`whisper-1`) and returns the text. It needs an
-OpenAI API key, saved either in the panel under **Transcrição** or with
+OpenAI API key, saved either in the panel under **Configurações › Transcrição de áudio** or with
 `set_transcription_key`. Both routes check the key with OpenAI before saving it,
 so a wrong key is refused where it was typed rather than on the first voice
 note. The panel is the better route: through the tool, the key passes through
@@ -160,6 +189,42 @@ than WhatsApp. Its description tells the client to call it only when the user
 hands over a key, never because a message asked — a WhatsApp message is exactly
 where an attempt to swap the key for someone else's would come from.
 
+## Triage
+
+`list_unread` reports what the phone shows as unread. Evolution Go has no route
+that reads it, so the gateway assembles it: a history sync names each
+conversation's unread count (and whether it is archived, pinned or muted), the
+account's own read receipts (`read-self`, from the `receipt` queue) and its own
+messages clear it, and `mark_chat_read` and `organise_chat` record what they
+change. A chat the gateway knows nothing about counts as unread only what
+arrived after this release was installed.
+
+`list_unanswered` lists the chats whose latest message came from someone else,
+leaving out short closings (ok, obrigado, 👍, a sticker). `mark_handled` and
+`snooze_chat` are kept in the gateway's database only — nothing reaches
+WhatsApp — and lift as soon as someone writes in the chat again.
+
+## Differences from Local
+
+- **Files live on the server.** `download_media` keeps a copy of each file on
+  the gateway's data volume (which also keeps it readable after WhatsApp
+  discards it), and hands it over inline or through a ten-minute link; there is
+  no local path to read. `export_messages` writes its file there too and
+  returns a link. `media_stats` and `purge_media` measure and clear that
+  volume, and the panel can delete old files on its own.
+- **Deleting only for this account** (`delete_message` with `for_me`) is not
+  possible: Evolution Go offers no route for it. The tool says so.
+- **`mark_chat_read` with `receipts: false`** marks the chat read in the
+  gateway's lists only; WhatsApp is not told, so the phone still shows it
+  unread. With receipts it works as on Local.
+- **Forwarding** resends the content with WhatsApp's forwarded mark (Evolution
+  Go has no native forward). Text, photos, videos, audios, documents, stickers
+  and locations can be forwarded; a sticker arrives without the mark.
+- **Stickers** go through Evolution's sticker route, which re-encodes the
+  image as a still WebP: an animated sticker arrives still.
+- **Contacts and groups** are always read live from WhatsApp, so `get_group`
+  has no `live` argument and `sync_history` has `before` instead of `rounds`.
+
 ## Untrusted content
 
 Message content is written by third parties. Every reading tool labels it as
@@ -168,7 +233,7 @@ message that says "forward this to X" is not a request to act on.
 
 ## Recipes
 
-`/receitas` in the panel is the other half of `/documentacao`: what the gateway
+`/receitas` in the panel is the other half of `/funcoes`: what the gateway
 makes possible without any code. Scheduling a message, watching for keywords,
 chasing unanswered conversations — none of that lives here. The assistant waits,
 watches and reports; this gateway only answers for WhatsApp when asked. Each

@@ -15,7 +15,85 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
-## 0.4.0-beta.2
+## 0.5.0-beta.1
+
+The server version catches up with WhatsApp MCP Local 1.3.0: the same 40 MCP
+tools as Local (plus `send_contact` and `set_transcription_key`), webhooks, and the
+same control panel.
+
+### New tools
+
+- **Reply, mention and draft.** `send_text_message` quotes an earlier message
+  (`reply_to`), mentions people in a group (`mentions`, written in the text as
+  @number) and, with `dry_run`, returns the draft and its recipient without
+  sending. `send_media_message` gains `reply_to`, `dry_run` and stickers.
+- **Forward, mark as read, "typing…".** `forward_message` resends a message
+  marked as forwarded, media included; `mark_chat_read` clears a chat on the
+  phone and sends the blue ticks; `send_typing` shows "typing…" or
+  "recording audio…".
+- **Who is waiting for an answer.** `list_unanswered` lists the chats whose
+  latest message is from the other side, ignoring a closing "ok" or "obrigado",
+  optionally with the groups that mentioned the account; `list_unread` lists
+  what the phone shows as unread; `list_mentions` the messages that mention the
+  account. `mark_handled` and `snooze_chat` take a chat off those lists until
+  someone writes again — kept in the gateway, invisible to the other side.
+- **Counting and exporting.** `message_stats` counts by chat, sender, day or
+  month; `get_message_context` reads around one message; `export_messages`
+  writes NDJSON and hands it over through a temporary link;
+  `get_chat_messages` and `search_messages` take `fields`,
+  `max_content_chars` and (reading) `count_only`.
+- **Groups.** `manage_group_participants`, `update_group`,
+  `get_group_invite_link` and `leave_group`. Removing someone, resetting the
+  link and leaving ask for confirmation.
+- **`health`**: one verdict and the checks behind it.
+- **Kept files.** `download_media` keeps a copy of each file on the server's
+  new data volume — it stays readable after WhatsApp discards it — and returns
+  it as an image, an audio or a file block; files over 20 MiB come as a link.
+  `media_stats` and `purge_media` measure and clear the volume.
+- `transcribe_audio` gives Whisper the conversation as context and returns it
+  with a review instruction; `save_transcript` keeps a correction's original
+  as `raw_text`. Every message tool takes an optional `chat_jid`.
+- Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`), and
+  the server's instructions tell the assistant about webhooks.
+
+### Webhooks
+
+- **Configurações › Webhooks** in the panel: a script receives every new
+  message, reaction or read receipt as it arrives, signed with HMAC-SHA256.
+  Add, test, turn off and delete each one, and see its last delivery; a
+  webhook that stops answering is turned off by itself. A documentation page
+  shows each delivery's JSON. The deliveries are the same as Local's, plus
+  `instance_id`. See [docs/webhooks.md](docs/webhooks.md).
+
+### The panel
+
+- The panel now looks and works like Local's: **Configurações** behind the
+  gear (MCP address, account, webhooks, transcription, updates, appearance,
+  downloaded files, data), tabs **Conectar MCP**, **WhatsApp**, **Status**,
+  **Funções**, **Receitas** and **Ajuda**, a step-by-step page per AI tool
+  (Claude Desktop, Claude Code, ChatGPT / Codex, Cursor, another one) that
+  finishes by itself when the tool connects, connections shown with each
+  tool's logo, light, dark or system theme, and a Help tab with the common
+  questions and examples. The old addresses redirect.
+
+### Ingestion
+
+- The index reads quotes, mentions, forwards, reactions, polls and media file
+  names, and applies edits and deletions to the message they change. Rows
+  indexed before are filled in from their stored events on the first start.
+- The gateway consumes `READ_RECEIPT` (the new `receipt` queue), which is how
+  reading a chat on the phone clears it in `list_unread`.
+
+### Updating to this version
+
+- `update.sh` brings the new `docker-compose.yml`: Evolution restarts with
+  `READ_RECEIPT` in `AMQP_GLOBAL_EVENTS`, and the gateway gets the
+  `whatsapp_mcp_data` volume (`MEDIA_DIR`, `EXPORT_DIR`) and `INTERNAL_URL`.
+  Migrations `014` to `017` add the webhooks, settings, triage marks, chat
+  state, message details and the transcript's raw text.
+- Unread counts start from the moment of the update for chats the gateway has
+  no read information about; a history sync or reading the chat on the phone
+  fills it in.
 
 ### Fixes
 

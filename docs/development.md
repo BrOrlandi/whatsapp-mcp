@@ -42,6 +42,15 @@ go build ./cmd/whatsapp-mcp
 docker compose config
 ```
 
+The store's SQL (unread counts, triage, statistics, webhooks, the enrichment
+of old rows) is tested against a real PostgreSQL, and those tests skip unless
+`TEST_DATABASE_URL` points at one they may create databases in:
+
+```sh
+docker run -d --rm --name wamcp-testdb -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:17.6
+TEST_DATABASE_URL='postgres://postgres:test@127.0.0.1:55432/postgres?sslmode=disable' go test ./internal/store/
+```
+
 ## Images
 
 `ghcr.io/brorlandi/whatsapp-mcp` is built and pushed by

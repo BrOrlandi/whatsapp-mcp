@@ -10,6 +10,7 @@ Start with the [README](../README.md); this directory is the detail behind it.
 | [self-hosting.md](self-hosting.md) | Running your own instance: configuration, secrets, first access, pairing, TLS, upgrades, backups. |
 | [architecture.md](architecture.md) | Why the gateway has the shape it has, what each container is for, how ingestion works. |
 | [mcp-tools.md](mcp-tools.md) | Every tool, what is deliberately *not* a tool, and the semantics of history, gaps, sending and destructive actions. |
+| [webhooks.md](webhooks.md) | Webhooks: what a script receives for each new message, reaction and receipt, how deliveries are signed and retried, and where they come from. |
 | [authentication.md](authentication.md) | Client keys, the panel account, the internal instance token, and what a key holder can do. |
 | [operations.md](operations.md) | Health and readiness, the event pipeline, the full configuration reference, retention, troubleshooting. |
 | [updating.md](updating.md) | Moving an instance to a newer version: the one-liner, what it does, why there is no downgrade, and the agent prompt for a failed update. |

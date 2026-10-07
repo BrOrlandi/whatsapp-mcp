@@ -74,20 +74,48 @@ needed after activation.
 
 Subscribing at connect time is what makes Evolution publish at all: its RabbitMQ
 producer drops every event unless the connect call sets `rabbitmqEnable`. The
-panel subscribes each instance to `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` and
-`CONNECTION` when it starts the client.
+panel subscribes each instance to `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC`,
+`READ_RECEIPT` and `CONNECTION` when it starts the client; in global mode the
+queues themselves follow `AMQP_GLOBAL_EVENTS` in the stack's compose file.
 
 The gateway consumes every queue those subscriptions create — `message`,
-`sendmessage`, `historysync` and the six connection queues — because a queue
-Evolution declares and nobody reads grows without bound. Valid events are
+`sendmessage`, `historysync`, `receipt` and the six connection queues — because
+a queue Evolution declares and nobody reads grows without bound. Valid events are
 acknowledged only after the PostgreSQL transaction commits. Duplicate deliveries
 are harmless through event and message uniqueness constraints. Transient
 database failures are explicitly requeued and retried after reconnect; malformed
 JSON is rejected without requeue, to prevent a poison-message loop.
 
+### What the index reads out of each event
+
+Every message row carries, besides its text and media type, the message it
+quotes, the people it mentions, whether it was forwarded, the message a
+reaction is to, and the file name and format of its media. An edit or a
+deletion for everyone is a protocol message: it changes the row it points at
+(`edited`, `revoked`) instead of adding one. Rows written before decoder
+version 3 are filled in from their stored events by the repair pass at
+startup.
+
+Receipts (`receipt` queue) are not kept as events — there is one per message
+delivered and read — only their effect: a `read-self` receipt, the account
+reading a chat on another device, moves that chat's `read_until` forward.
+Together with the unread count a history sync gives for each conversation, the
+account's own messages and what `mark_chat_read` and `organise_chat` record,
+that is the `chat_state` table `list_chats`, `list_unread` and
+`list_unanswered` read. Evolution Go 0.7.2 does not publish archive, pin or mute
+changes (its `Archive` handler fails before publishing), so `CHAT_PRESENCE` is
+not subscribed.
+
+### Webhooks
+
+After an event commits, the consumer hands it to the webhook manager, which
+posts live messages, reactions and receipts to the operator's scripts: one
+queue per webhook, in order, signed, retried, turned off after ten failures in
+a minute. See [webhooks.md](webhooks.md).
+
 ## Media
 
-No media file is stored on the server. Audio, video, images, documents and
+Audio, video, images, documents and
 stickers are fetched from WhatsApp when a tool asks for them:
 
 1. **At ingestion** the gateway keeps the event exactly as Evolution published
@@ -102,10 +130,20 @@ stickers are fetched from WhatsApp when a tool asks for them:
 3. **Evolution, through whatsmeow**, downloads the encrypted file from the CDN,
    checks the hashes, decrypts it with the `mediaKey` and answers with the
    bytes as a data URI.
-4. **The gateway hands it on**: as base64 in the tool result, or, with
-   `link: true`, held in memory for ten minutes behind a one-message token on
-   `/media/<token>` (up to 25 MB; a larger file is fetched again when the link
-   is opened). Nothing is written to disk.
+4. **The gateway keeps it and hands it on.** The file is written to the data
+   volume (`MEDIA_DIR`, `/var/lib/whatsapp-mcp/data/media/<instance>/<chat>/`),
+   and handed over inside the tool result (as an image, an audio or a file
+   block), or, with `link: true` or over 20 MiB, behind a ten-minute token on
+   `/media/<token>`. The next request for the same message is served from the
+   kept copy, which is also what keeps a file readable after WhatsApp
+   discards it. `media_stats`, `purge_media` and the panel's **Arquivos
+   baixados** card measure and clear the folder; an optional retention deletes
+   files older than a number of days. `export_messages` writes to
+   `EXPORT_DIR` on the same volume.
+
+When the gateway hands a file to Evolution — a forwarded photo, a sticker sent
+again from a `download_media` link — Evolution fetches it from
+`INTERNAL_URL/media/<token>`, the gateway's address inside the stack.
 
 A transcript is the one derivative that is kept, in PostgreSQL, so a voice note
 is transcribed once.

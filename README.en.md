@@ -222,23 +222,31 @@ step 1.
 
 ## What you can ask for
 
-24 tools, in four groups:
+42 tools — the same as the [Local version](https://github.com/BrOrlandi/whatsapp-mcp-local),
+plus two only the server has:
 
-- **Read** — list conversations, read a window, full-text search, request
-  history older than what is already indexed, transcribe voice notes with
-  OpenAI's Whisper (with your own key, saved in the panel under **Transcrição**).
-- **Send** — text, media from a URL, location, contact card, poll; each one
-  reporting whether WhatsApp actually delivered it, not just whether the API
-  accepted it.
+- **Read** — list conversations, read a window, full-text search, read around
+  one message, count messages by chat, person, day or month, export whole
+  conversations, request history older than what is already indexed,
+  transcribe voice notes with OpenAI's Whisper (with your own key, saved under
+  **Configurações**).
+- **Triage** — who is waiting for your answer, what is unread, where you were
+  mentioned; mark a chat handled or snooze it.
+- **Send** — text (replying to a message, mentioning people, with a draft
+  before sending), media, sticker, location, contact card, poll, forward, mark
+  as read, "typing…"; each send reporting whether WhatsApp actually delivered
+  it, not just whether the API accepted it.
 - **Act on a message** — delete, edit, react, archive, pin, mute.
+- **Groups** — add, remove and promote people, rename, describe, invite link,
+  leave. What cannot be undone asks for confirmation.
 - **Ask about the account** — contacts, groups, profile pictures, who is on
   WhatsApp, and the gateway's own health and index coverage.
 
-The panel carries the full list under **Documentação**, generated from the MCP
-server's own definitions, plus six ready recipes under **Receitas** — schedule a
-message, watch for keywords, chase what went unanswered, tally a poll,
-summarise a group's day. Each is a prompt to paste, with the tools it uses and
-the caveat that matters.
+The panel carries the full list under **Funções**, generated from the MCP
+server's own definitions, ready recipes under **Receitas** and the common
+questions under **Ajuda**. To act the moment a message arrives — notify, reply
+on its own, log — **webhooks** (under **Configurações › Webhooks**) post every
+new message to a script of yours. See [docs/webhooks.md](docs/webhooks.md).
 
 ## Keeping it current
 
@@ -275,6 +283,7 @@ Besides the unofficial-client risk at the top of this file:
 | [Updating](docs/updating.md) | The update command, what it does, and why there is no downgrade |
 | [Self-hosting](docs/self-hosting.md) | Configuration, TLS, backups |
 | [Architecture](docs/architecture.md) | Why it is built this way |
+| [Webhooks](docs/webhooks.md) | What a script receives for each new message, and how to check the signature |
 | [MCP tools](docs/mcp-tools.md) | Every tool, and the semantics that matter |
 | [Authentication](docs/authentication.md) | Keys, sessions, what a key holder can do |
 | [Operations](docs/operations.md) | Health, the event pipeline, the configuration reference |

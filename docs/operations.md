@@ -29,8 +29,9 @@ to scan a new QR code, `disconnected` tells them to wait.
 
 RabbitMQ uses durable quorum queues and manual acknowledgements. The gateway
 consumes every queue the subscribed events create — `message`, `sendmessage`,
-`historysync` and the six connection queues — because a queue Evolution declares
-and nobody reads grows without bound.
+`historysync`, `receipt` and the six connection queues — because a queue
+Evolution declares and nobody reads grows without bound. After each event
+commits it is handed to the [webhooks](webhooks.md).
 
 - Valid events are acknowledged only after the PostgreSQL transaction commits.
 - Duplicate deliveries are harmless through event and message uniqueness
@@ -67,6 +68,10 @@ Read by the `whatsapp-mcp` binary:
 | `STATUS_POLL_INTERVAL` | `15s` | How often the gateway reconciles session state with Evolution. |
 | `SETUP_TOKEN` | unset | Guards the first-run form: it opens only at `/setup?token=<value>`. Set it whenever the panel is reachable from the internet; leave it empty on loopback. Stops mattering once an administrator exists. |
 | `MCP_STDIO` | unset | `true` enables the stdio transport. Development only — it carries no credential. |
+| `TZ` | `America/Sao_Paulo` in the stack, UTC otherwise | The time zone `message_stats` counts days and months in, and date-only filters start at midnight of. |
+| `MEDIA_DIR` | `/var/lib/whatsapp-mcp/data/media` | Where the files the tools downloaded are kept, per instance and chat. On the stack's `whatsapp_mcp_data` volume. |
+| `EXPORT_DIR` | `/var/lib/whatsapp-mcp/data/exports` | Where `export_messages` writes. Same volume. |
+| `INTERNAL_URL` | `http://whatsapp-mcp:8080` | How Evolution reaches the gateway inside the stack, to fetch the files the gateway hands it (forwards, a sticker sent again). |
 | `UPDATE_CHECK` | `true` | Asks GitHub every six hours whether a newer release exists, so the panel can say so and hand over the update command. An unauthenticated GET of a public list, carrying nothing about the instance; it fails silently with no outbound network. `false` stops it. See [updating.md](updating.md). |
 
 The Compose stack adds the credentials for the services it runs
