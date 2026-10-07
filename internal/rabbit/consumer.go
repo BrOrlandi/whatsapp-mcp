@@ -17,6 +17,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/events"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/webhook"
 )
 
 // Queues are the queues Evolution creates for the events this gateway
@@ -41,6 +42,9 @@ type Consumer struct {
 	Store  *store.Store
 	State  *health.State
 	Logger *slog.Logger
+	// Hooks receives every committed live message, reaction and receipt, for
+	// the webhooks. Nil delivers nothing.
+	Hooks *webhook.Manager
 }
 
 func (c *Consumer) Run(ctx context.Context) error {
@@ -165,6 +169,11 @@ func (c *Consumer) handle(ctx context.Context, queue string, delivery amqp.Deliv
 		return err
 	}
 	c.observe(queue, decoded)
+	if c.Hooks != nil && c.Hooks.Active() {
+		for _, ev := range webhook.FromEvent(ctx, decoded, c.Store) {
+			c.Hooks.Dispatch(ctx, ev)
+		}
+	}
 	return nil
 }
 

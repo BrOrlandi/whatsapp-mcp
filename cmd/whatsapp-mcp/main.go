@@ -22,6 +22,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/webhook"
 )
 
 func main() {
@@ -62,7 +63,14 @@ func main() {
 	}
 	go pollEvolution(ctx, evolutionClient, db, state, cfg.StatusPollInterval, cfg.FreshnessWindow, logger)
 	go pollDatabase(ctx, db, state)
-	consumer := &rabbit.Consumer{URL: cfg.RabbitURL, Queues: cfg.RabbitQueues, Store: db, State: state, Logger: logger}
+	// Webhooks deliver every new message to the operator's scripts. The
+	// consumer hands each committed event over; the manager queues, signs,
+	// retries and turns off a webhook that stops answering.
+	hooks := webhook.New(db, logger, version.String(), db.SameChat)
+	if err := hooks.Start(ctx); err != nil {
+		logger.Warn("could not load the webhooks", "error", err)
+	}
+	consumer := &rabbit.Consumer{URL: cfg.RabbitURL, Queues: cfg.RabbitQueues, Store: db, State: state, Logger: logger, Hooks: hooks}
 	go func() {
 		if err := consumer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("RabbitMQ consumer stopped", "error", err)
