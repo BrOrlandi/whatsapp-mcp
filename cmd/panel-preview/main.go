@@ -18,10 +18,12 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/evolution"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/health"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/httpapi"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/mcp"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/selfupdate"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/webhook"
 )
 
 // fakeTranscription accepts any key shaped like an OpenAI one, since the
@@ -122,8 +124,77 @@ func (f *fakeStore) CreateAPIKey(_ context.Context, name, instance, digest, pref
 	f.keys = append(f.keys, key)
 	return nil
 }
-func (f *fakeStore) ListAPIKeys(context.Context) ([]store.APIKey, error) { return f.keys, nil }
-func (f *fakeStore) RevokeAPIKey(context.Context, int64) error           { return nil }
+func (f *fakeStore) ListAPIKeys(context.Context) ([]store.APIKey, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.APIKey(nil), f.keys...), nil
+}
+func (f *fakeStore) RevokeAPIKey(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, key := range f.keys {
+		if key.ID == id {
+			f.keys = append(f.keys[:i], f.keys[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+func (f *fakeStore) RenameAPIKey(_ context.Context, id int64, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.keys {
+		if f.keys[i].ID == id {
+			f.keys[i].Name = name
+		}
+	}
+	return nil
+}
+
+// fakeMedia stands in for the folder of downloaded files: a few made-up
+// files, which the retention and purge buttons actually empty.
+type fakeMedia struct {
+	mu        sync.Mutex
+	retention int
+	cleared   bool
+	exports   bool
+}
+
+func (f *fakeMedia) Inventory(context.Context, string) (mcp.MediaInventory, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inventory := mcp.MediaInventory{Dir: "/var/lib/whatsapp-mcp/data/media", ExportsDir: "/var/lib/whatsapp-mcp/data/exports",
+		ByType: map[string]mcp.MediaSum{}, ByChat: []mcp.ChatMediaSum{}, RetentionDays: f.retention}
+	if !f.cleared {
+		inventory.Files, inventory.Bytes, inventory.DuplicateBytes = 214, 61<<20, 185<<10
+		inventory.ByType["image"] = mcp.MediaSum{Files: 120, Bytes: 9 << 20}
+		inventory.ByType["audio"] = mcp.MediaSum{Files: 90, Bytes: 50 << 20}
+		inventory.ByType["document"] = mcp.MediaSum{Files: 4, Bytes: 2 << 20}
+	}
+	if !f.exports {
+		inventory.Exports = mcp.MediaSum{Files: 2, Bytes: 3 << 20}
+	}
+	return inventory, nil
+}
+func (f *fakeMedia) SetRetention(_ context.Context, days int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retention = days
+	return nil
+}
+func (f *fakeMedia) SweepMedia(context.Context) (int, int64, error) { return 0, 0, nil }
+func (f *fakeMedia) PurgeMedia(string, string, int, int64, bool) (int, int64, []map[string]any, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleared = true
+	return 214, 61 << 20, nil, nil
+}
+func (f *fakeMedia) PurgeExports() (int, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exports = true
+	return 2, 3 << 20, nil
+}
 func (f *fakeStore) OldestMessage(context.Context, string, string) (store.Message, error) {
 	return store.Message{MessageID: "OLD", ChatJID: "a@s.whatsapp.net", SentAt: time.Now().Add(-62 * 24 * time.Hour)}, nil
 }
@@ -249,7 +320,7 @@ func main() {
 	state.SetDependencies(true, true, true)
 	state.MarkEvent(time.Now().Add(-40 * time.Second))
 	state.SetWhatsApp("connected", "", "5511999999999@s.whatsapp.net", "Fulano de Tal")
-	for _, q := range []string{"message", "sendmessage", "historysync", "connected", "disconnected", "loggedout", "pairsuccess", "connectfailure", "temporaryban"} {
+	for _, q := range []string{"message", "sendmessage", "historysync", "receipt", "connected", "disconnected", "loggedout", "pairsuccess", "connectfailure", "temporaryban"} {
 		state.SetQueueConsuming(q, true, "")
 		state.MarkQueueEvent(q, time.Now().Add(-2*time.Minute), false)
 	}
@@ -291,7 +362,14 @@ func main() {
 	}
 	// The preview defaults to the automatic licence path, which is what a real
 	// install shows; PREVIEW_LICENSE_AUTO=false previews the manual one.
-	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait, &fakeTranscription{}, httpapi.WithSelfUpdate(selfupdate.New(os.Getenv("PREVIEW_UPDATE_DIR"))))
+	// Webhooks live in memory here and deliver for real: a webhook pointed at
+	// a listener on this machine receives the Testar button's delivery.
+	hooks := webhook.New(webhook.NewMemory(), nil, version.String(), nil)
+	if err := hooks.Start(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+	handler := httpapi.NewWebHandler(st, &fakeEvo{connected: os.Getenv("PREVIEW_PAIRED") != "false", unlicensed: unlicensed}, state, []byte("preview-session-key-preview-session-key"), publicURL, "", os.Getenv("PREVIEW_LICENSE_AUTO") != "false", "brorlandi.xyz", autoWait, &fakeTranscription{},
+		httpapi.WithSelfUpdate(selfupdate.New(os.Getenv("PREVIEW_UPDATE_DIR"))), httpapi.WithWebhooks(hooks), httpapi.WithMediaFiles(&fakeMedia{}))
 	// A second preview on the same machine would otherwise fail to bind and
 	// die silently, which reads as the panel being broken.
 	address := os.Getenv("PREVIEW_ADDR")

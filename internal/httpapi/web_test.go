@@ -743,7 +743,7 @@ func TestDashboardShowsOperationalStatus(t *testing.T) {
 
 	page := fetch(t, client, ts.URL+"/estado")
 	mustContain(t, page, "status page",
-		"Estado do serviço", "Sessão encerrada",
+		"<h1>Status</h1>", "Sessão encerrada", "Verificações",
 		"a sessão do WhatsApp foi encerrada e exige um novo QR code",
 		"a fila de eventos está inacessível",
 		"a fila historysync não está sendo consumida",
@@ -764,7 +764,7 @@ func TestCreatingAKeyShowsItOnceAndNeverInAURL(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
-	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"name": {"claude code"}})
+	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"cliente": {"claude-code"}, "name": {"claude no notebook"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,16 +790,17 @@ func TestCreatingAKeyShowsItOnceAndNeverInAURL(t *testing.T) {
 	if repo.digests[0] == secret || repo.digests[0] != store.HashAPIKey(secret) {
 		t.Fatal("the stored value is not the digest of the secret")
 	}
-	// The snippets must arrive usable: the endpoint, the secret in place, the
-	// one-line client command and the JSON block for clients configured by file.
-	mustContain(t, page, "key page", "https://mcp.example/mcp", "Bearer "+secret, "claude mcp add", "mcpServers", "WHATSAPP_MCP_KEY")
+	// The snippets must arrive usable: the endpoint, the secret in place and
+	// the chosen tool's own command, with the variant that keeps the key out
+	// of its configuration. The page then waits for that key to be used.
+	mustContain(t, page, "key page", "https://mcp.example/mcp", "Bearer "+secret, "claude mcp add", "WHATSAPP_MCP_KEY", `data-wait-key="1"`, `data-wait-tool="claude-code"`)
 
 	// Reloading must not repeat the secret.
 	reloaded := fetch(t, client, ts.URL+"/")
 	if strings.Contains(reloaded, secret) {
 		t.Fatal("the secret is shown again after a reload")
 	}
-	mustContain(t, reloaded, "dashboard", "claude code", repo.keys[0].Prefix)
+	mustContain(t, reloaded, "dashboard", "claude no notebook", repo.keys[0].Prefix)
 }
 
 func TestRevokingAKeyRemovesIt(t *testing.T) {
@@ -875,15 +876,23 @@ func TestPagesAreSeparateAndTheTabBarTracksThem(t *testing.T) {
 		absent                 []string
 	}{
 		{"/", "Seu WhatsApp nas suas ferramentas de IA", `href="/" aria-current="page"`, []string{"Adicionar instância", "Filas de ingestão"}},
-		{"/instancias", "Instâncias", `href="/instancias" aria-current="page"`, []string{"Suas conexões", "Filas de ingestão"}},
-		{"/estado", "Estado do serviço", `href="/estado" aria-current="page"`, []string{"Suas conexões", "Adicionar instância"}},
+		{"/whatsapp", "<h1>WhatsApp</h1>", `href="/whatsapp" aria-current="page"`, []string{"Suas conexões", "Filas de ingestão"}},
+		{"/status", "<h1>Status</h1>", `href="/status" aria-current="page"`, []string{"Suas conexões", "Adicionar instância"}},
+		{"/funcoes", "O que o MCP sabe fazer", `href="/funcoes" aria-current="page"`, []string{"Suas conexões"}},
+		{"/receitas", "<h1>Receitas</h1>", `href="/receitas" aria-current="page"`, []string{"Suas conexões"}},
+		{"/ajuda", "Perguntas frequentes", `href="/ajuda" aria-current="page"`, []string{"Suas conexões"}},
+		{"/configuracoes", "<h1>Configurações</h1>", `href="/configuracoes" aria-label="Configurações" title="Configurações" aria-current="page"`, []string{"Suas conexões"}},
 	} {
 		body := fetch(t, client, ts.URL+page.path)
-		mustContain(t, body, page.path, page.heading, page.current, `href="/instancias"`, `href="/estado"`)
+		mustContain(t, body, page.path, page.heading, page.current, `href="/whatsapp"`, `href="/status"`, `href="/ajuda"`)
 		mustNotContain(t, body, page.path, page.absent...)
-		// The theme switch rides in the masthead, and the script that applies
-		// the choice loads before the first paint.
-		mustContain(t, body, page.path, "data-theme-select", `src="/assets/theme.js"`)
+		// Configurações sits behind the gear in the masthead, and the script
+		// that applies the theme loads before the first paint.
+		mustContain(t, body, page.path, `class="gear" href="/configuracoes"`, `src="/assets/theme.js"`)
+	}
+	// The old addresses still land on their pages.
+	for from, to := range map[string]string{"/estado": "<h1>Status</h1>", "/documentacao": "O que o MCP sabe fazer", "/transcricao": "Transcrição de áudio", "/instancias": "<h1>WhatsApp</h1>"} {
+		mustContain(t, fetch(t, client, ts.URL+from), from, to)
 	}
 }
 
@@ -911,8 +920,14 @@ func TestDialogsAreMarkupOnly(t *testing.T) {
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
+	// Connecting a tool is a page of its own, one per tool, whose first step
+	// is a plain form.
 	connect := fetch(t, client, ts.URL+"/")
-	mustContain(t, connect, "connect", `id="nova-conexao"`, `href="#nova-conexao"`, `action="/chaves"`, `name="cliente"`)
+	mustContain(t, connect, "connect", `href="/conectar"`)
+	choose := fetch(t, client, ts.URL+"/conectar")
+	mustContain(t, choose, "choose", `href="/conectar/claude-desktop"`, `href="/conectar/claude-code"`, `href="/conectar/codex"`, `href="/conectar/cursor"`, `href="/conectar/outra"`)
+	tool := fetch(t, client, ts.URL+"/conectar/codex")
+	mustContain(t, tool, "tool", `action="/chaves"`, `name="cliente" value="codex"`)
 
 	instances := fetch(t, client, ts.URL+"/instancias")
 	mustContain(t, instances, "instances", `id="nova-instancia"`, `id="remover-0"`, `id="encerrar-sessao"`, `action="/instancias"`)
@@ -947,8 +962,8 @@ func TestAConnectionNamesItselfAfterTheChosenTool(t *testing.T) {
 	if len(repo.keys) != 1 || repo.keys[0].Name != "Claude Code" {
 		t.Fatalf("the connection was not named after the chosen tool: %+v", repo.keys)
 	}
-	// The instructions open on the tool that was picked, not on the first tab.
-	mustContain(t, string(body), "key page", `id="tab-code" checked`)
+	// The instructions are the picked tool's, not the first one's.
+	mustContain(t, string(body), "key page", "Conectar o Claude Code", "claude mcp add")
 
 	// A label the operator does type is kept, and one that cannot fit a row is
 	// refused rather than truncated.
@@ -1032,7 +1047,7 @@ func TestTheLandingPageDescribesConnectionsRatherThanKeys(t *testing.T) {
 	// Nothing connected yet: the page says so in those words and offers the one
 	// action that changes it. No phone number is left in its protocol shape.
 	page := fetch(t, client, ts.URL+"/")
-	mustContain(t, page, "no connection", "Nenhuma ferramenta de IA conectada", "Conectar uma ferramenta de IA", "55 (11) 92345-6789")
+	mustContain(t, page, "no connection", "Nenhuma ferramenta de IA conectada", "Conectar ferramenta de IA ao MCP", "55 (11) 92345-6789")
 	mustNotContain(t, page, "no connection", "5511923456789", "Chaves ativas", "Gerar nova chave")
 
 	// A connection exists but has never been used: it is waiting, not working.
@@ -1076,24 +1091,28 @@ func TestSetupOffersDesktopFirstAndAnEscapeHatchForEveryOtherTool(t *testing.T) 
 	evo := &fakeEvolution{instances: []evolution.Instance{{ID: "one", Name: "Pessoal", Status: evolution.StatusConnected}}}
 	ts, client := signedIn(t, repo, evo)
 
+	// Desktop leads the list of tools, and any other tool closes it.
+	page := fetch(t, client, ts.URL+"/conectar")
+	desktop := strings.Index(page, `href="/conectar/claude-desktop"`)
+	code := strings.Index(page, `href="/conectar/claude-code"`)
+	others := strings.Index(page, `href="/conectar/outra"`)
+	if desktop < 0 || code < 0 || others < 0 || !(desktop < code && code < others) {
+		t.Fatalf("the tools are not in the order desktop, code, outra: %d %d %d", desktop, code, others)
+	}
+
+	// The old dialog's value for "another tool" still lands on its route, and
+	// it hands over a prompt the assistant can act on rather than instructions
+	// the operator must translate.
 	r, err := client.PostForm(ts.URL+"/chaves", url.Values{"cliente": {"outros"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	page := string(body)
-
-	// Desktop is the first tab on the bar whichever one opens.
-	desktop := strings.Index(page, `for="tab-desktop"`)
-	code := strings.Index(page, `for="tab-code"`)
-	others := strings.Index(page, `for="tab-outros"`)
-	if desktop < 0 || code < 0 || others < 0 || !(desktop < code && code < others) {
-		t.Fatalf("the client tabs are not in the order desktop, code, outros: %d %d %d", desktop, code, others)
+	mustContain(t, string(body), "key page", "Conectar outra ferramenta", "Quero conectar um servidor MCP", "https://mcp.example/mcp")
+	if len(repo.keys) != 1 || repo.keys[0].Name != "Outra ferramenta de IA" {
+		t.Fatalf("keys = %+v", repo.keys)
 	}
-	// The chosen route is the one that opens, and it hands over a prompt the
-	// assistant can act on rather than instructions the operator must translate.
-	mustContain(t, page, "key page", `id="tab-outros" checked`, "Quero conectar um servidor MCP", "https://mcp.example/mcp")
 }
 
 // The connect page notices a client authenticating without a manual reload, so
@@ -1247,8 +1266,8 @@ func TestPasswordCanBeChangedOnPurpose(t *testing.T) {
 	evo := &fakeEvolution{}
 	ts, client := signedIn(t, repo, evo)
 
-	// The masthead offers the way in, on every page that carries it.
-	mustContain(t, fetch(t, client, ts.URL+"/instancias"), "instances", `href="/senha"`)
+	// Configurações offers the way in.
+	mustContain(t, fetch(t, client, ts.URL+"/configuracoes"), "settings", `href="/senha"`, `action="/logout"`)
 
 	page := fetch(t, client, ts.URL+"/senha")
 	mustContain(t, page, "senha", "Trocar a senha", `name="current_password"`)

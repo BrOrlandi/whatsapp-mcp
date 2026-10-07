@@ -28,6 +28,7 @@ import (
 	"github.com/BrOrlandi/whatsapp-mcp/internal/ratelimit"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/version"
+	"github.com/BrOrlandi/whatsapp-mcp/internal/webhook"
 )
 
 // StatusReader exposes the live gateway state to the panel. It is the same
@@ -162,6 +163,10 @@ type webApp struct {
 	// updater hands update requests to the host's agent. Nil, or no agent
 	// installed, and the panel shows the SSH command instead of a button.
 	updater SelfUpdater
+	// hooks are the webhooks Configurações sets up; media the files the
+	// tools downloaded. Nil leaves each card saying it is unavailable.
+	hooks *webhook.Manager
+	media MediaFiles
 }
 
 const (
@@ -183,12 +188,12 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	if licenseAutoWait <= 0 {
 		licenseAutoWait = 3 * time.Minute
 	}
-	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)), logins: ratelimit.New(loginFailures, loginLockout), transcription: transcription}
+	a := &webApp{store: store, evolution: client, status: status, publicURL: strings.TrimRight(publicURL, "/"), setupToken: setupToken, licenseAuto: licenseAuto, licenseEmailDomain: licenseEmailDomain, licenseAutoWait: licenseAutoWait, sessions: newSessions(sessionKey), templates: template.Must(template.Must(template.New("pages").Funcs(templateFuncs).Parse(pages)).Parse(webhookDocsSource)), logins: ratelimit.New(loginFailures, loginLockout), transcription: transcription}
 	for _, option := range options {
 		option(a)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", a.connect)
+	mux.HandleFunc("GET /{$}", a.connect)
 	mux.HandleFunc("GET /setup", a.setupPage)
 	mux.HandleFunc("POST /setup", a.setup)
 	mux.HandleFunc("GET /login", a.loginPage)
@@ -197,6 +202,9 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("GET /senha", a.passwordPage)
 	mux.HandleFunc("POST /senha", a.changePassword)
 	mux.HandleFunc("GET /instalacao", a.onboarding)
+	mux.HandleFunc("GET /conectar", a.connectChoose)
+	mux.HandleFunc("GET /conectar/{tool}", a.connectTool)
+	mux.HandleFunc("GET /whatsapp", a.instances)
 	mux.HandleFunc("GET /instancias", a.instances)
 	mux.HandleFunc("POST /instancias", a.createInstance)
 	mux.HandleFunc("POST /instancias/licenca", a.sendLicenseLink)
@@ -208,18 +216,26 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("POST /instancias/sair", a.logoutInstance)
 	mux.HandleFunc("POST /instancias/remover", a.deleteInstance)
 	mux.HandleFunc("POST /instancias/historico", a.syncHistory)
-	mux.HandleFunc("GET /estado", a.statusPage)
-	mux.HandleFunc("GET /transcricao", a.transcriptionPage)
+	mux.HandleFunc("GET /status", a.statusPage)
 	mux.HandleFunc("POST /transcricao", a.saveTranscriptionKey)
 	mux.HandleFunc("POST /transcricao/remover", a.removeTranscriptionKey)
 	mux.HandleFunc("POST /atualizar", a.requestUpdate)
 	mux.HandleFunc("GET /atualizacao", a.updatePage)
 	mux.HandleFunc("GET /api/atualizacao", a.updateJSON)
-	mux.HandleFunc("GET /documentacao", a.docs)
+	mux.HandleFunc("GET /funcoes", a.docs)
 	mux.HandleFunc("GET /receitas", a.recipes)
+	mux.HandleFunc("GET /ajuda", a.help)
+	mux.HandleFunc("GET /configuracoes", a.settings)
+	mux.HandleFunc("GET /webhooks/documentacao", a.webhookDocs)
+	// The pages' former addresses, still in bookmarks and in older answers of
+	// the MCP: transcription is a section of Configurações now.
+	for from, to := range map[string]string{"/estado": "/status", "/documentacao": "/funcoes", "/transcricao": "/configuracoes#transcricao"} {
+		mux.Handle("GET "+from, http.RedirectHandler(to, http.StatusFound))
+	}
 	mux.HandleFunc("GET /pair", a.pairPage)
 	mux.HandleFunc("POST /chaves", a.createKey)
 	mux.HandleFunc("POST /chaves/revogar", a.revokeKey)
+	mux.HandleFunc("POST /conexoes/renomear", a.renameConnection)
 	mux.Handle("GET /assets/", assetHandler())
 	for path, ico := range iconRoutes() {
 		mux.HandleFunc(path, iconHandler(ico))
@@ -227,6 +243,11 @@ func NewWebHandler(store ControlStore, client EvolutionAPI, status StatusReader,
 	mux.HandleFunc("GET /api/selected-instance", a.selectedJSON)
 	mux.HandleFunc("GET /api/progresso", a.progress)
 	mux.HandleFunc("GET /api/instalacao", a.onboardingJSON)
+	a.registerSettingsAPI(mux)
+	// Anything else is a page that does not exist: the panel's own 404 rather
+	// than the landing page, which a catch-all "GET /" used to serve for every
+	// mistyped address.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	return securityHeaders(mux)
 }
 
@@ -719,6 +740,74 @@ type statusView struct {
 	Coverage  store.Coverage
 	HasIndex  bool
 	LastEvent time.Time
+	Checks    []check
+}
+
+// check is one row of Verificações: a part of the server, and whether it is
+// doing its job.
+type check struct {
+	Title, Text string
+	// Status is ok, warn or fail, and is the only thing the template reads to
+	// pick a tone, so the class attribute never carries an unbounded value.
+	Status string
+}
+
+// checks are the parts a message passes through on its way to the tools, in
+// that order, each said in a sentence a person can act on.
+func checks(snapshot health.Snapshot) []check {
+	pass := func(ok bool) string {
+		if ok {
+			return "ok"
+		}
+		return "fail"
+	}
+	out := []check{
+		{"Sessão do WhatsApp", sessionDetail(snapshot.WhatsApp.State), sessionStatus(snapshot.WhatsApp.State)},
+		{"Evolution", map[bool]string{true: "A camada que mantém a sessão do WhatsApp responde.", false: "A camada que mantém a sessão do WhatsApp não responde."}[snapshot.EvolutionConnected], pass(snapshot.EvolutionConnected)},
+		{"Fila de eventos", map[bool]string{true: "O RabbitMQ entrega cada mensagem nova ao índice.", false: "O RabbitMQ está inacessível, então nenhuma mensagem nova é indexada."}[snapshot.RabbitConnected], pass(snapshot.RabbitConnected)},
+		{"Banco de dados", map[bool]string{true: "O índice de mensagens no PostgreSQL responde.", false: "O banco de dados do índice está inacessível."}[snapshot.DatabaseConnected], pass(snapshot.DatabaseConnected)},
+	}
+	arriving := check{Title: "Mensagens chegando", Status: "ok"}
+	switch {
+	case snapshot.LastEventAt.IsZero():
+		arriving.Text, arriving.Status = "Nenhum evento chegou desde que o servidor ligou.", "warn"
+	default:
+		arriving.Text = "Último evento " + relativeSince(snapshot.LastEventAt) + "."
+		if time.Since(snapshot.LastEventAt) > 6*time.Hour {
+			arriving.Status = "warn"
+		}
+	}
+	out = append(out, arriving)
+	if snapshot.Reprojection.Running {
+		out = append(out, check{"Índice", "Sendo reconstruído a partir dos eventos guardados; mensagens podem faltar até terminar.", "warn"})
+	}
+	return out
+}
+
+func sessionStatus(state string) string {
+	switch state {
+	case "connected":
+		return "ok"
+	case "pairing", "unknown", "":
+		return "warn"
+	}
+	return "fail"
+}
+
+func sessionDetail(state string) string {
+	switch state {
+	case "connected":
+		return "Conectada e recebendo."
+	case "pairing":
+		return "Pareando com o celular."
+	case "logged_out":
+		return "Encerrada: leia um novo QR code na aba WhatsApp."
+	case "banned":
+		return "A conta está temporariamente banida pelo WhatsApp."
+	case "disconnected", "failed":
+		return "Desconectada. Costuma voltar sozinha; se não voltar, reconecte na aba WhatsApp."
+	}
+	return "Ainda sem notícia da Evolution sobre a sessão."
 }
 
 // readStatus pairs the live snapshot with the index coverage. The coverage
@@ -729,31 +818,13 @@ func (a *webApp) readStatus(r *http.Request, selected string) *statusView {
 		return nil
 	}
 	snapshot := a.status.Snapshot()
-	view := &statusView{WhatsApp: snapshot.WhatsApp, Queues: snapshot.Queues, Problems: snapshot.Problems(), LastEvent: snapshot.LastEventAt}
+	view := &statusView{WhatsApp: snapshot.WhatsApp, Queues: snapshot.Queues, Problems: snapshot.Problems(), LastEvent: snapshot.LastEventAt, Checks: checks(snapshot)}
 	if selected != "" {
 		if coverage, err := a.store.Coverage(r.Context(), selected); err == nil {
 			view.Coverage, view.HasIndex = coverage, true
 		}
 	}
 	return view
-}
-
-// connection is one issued credential told as what it is to the person who
-// issued it: an AI tool wired to their WhatsApp. The key behind it is an
-// implementation detail the page mentions only in passing, because "revoke the
-// key wamcp-a1b2c3" is not a sentence anybody wants to reason about.
-type connection struct {
-	store.APIKey
-	// Tool is what to call this connection: the name the tool gave itself in
-	// the MCP handshake when there is one, and otherwise whatever the operator
-	// chose when creating it.
-	Tool string
-	// Detected marks a Tool that the tool itself reported, as opposed to a
-	// label typed in this panel. Only the first is evidence of anything.
-	Detected bool
-	// Live means a client has authenticated with this credential at least once,
-	// which is the only proof the panel has that a connection actually works.
-	Live bool
 }
 
 // connectPage is the landing page: the state of the WhatsApp line, the AI tools
@@ -773,10 +844,8 @@ type connectPage struct {
 	Account  string
 	Endpoint string
 	// Connections are the live credentials, presented as tools rather than
-	// keys. Keys keeps the raw rows for the parts of the page that still count
-	// them.
+	// keys.
 	Connections []connection
-	Keys        []store.APIKey
 	// HasKey and ClientConnected are facts the panel already holds rather than
 	// a stored notion of progress: a key exists or it does not, and a key that
 	// has been used proves a client authenticated with it. Disconnecting the
@@ -788,42 +857,10 @@ type connectPage struct {
 	// connection that does not exist yet.
 	LiveCount int64
 	LastUse   time.Time
-	Setup     clientSetup
 	Prompts   []string
-	// Clients is the list of setup routes the "new connection" dialog offers.
-	Clients []clientOption
-}
-
-// clientOption is one choice in the dialog that starts a connection.
-type clientOption struct {
-	Value, Label, Hint string
-	First              bool
-}
-
-// clientOptions describes each setup route in the words of someone who has
-// never heard of MCP.
-func clientOptions() []clientOption {
-	hints := map[string]string{
-		"desktop": "O aplicativo do Claude no computador. É o caminho mais simples: copiar, colar e reiniciar.",
-		"code":    "O Claude que roda no terminal. Um comando só.",
-		"outros":  "Cursor, ChatGPT, Windsurf, n8n… Geramos um texto pronto para você colar no seu assistente, e ele mesmo se configura.",
-	}
-	options := make([]clientOption, 0, len(clients))
-	for index, client := range clients {
-		options = append(options, clientOption{Value: client.Value, Label: client.Label, Hint: hints[client.Value], First: index == 0})
-	}
-	return options
-}
-
-// suggestedPrompts are starting points that exercise the tools people reach for
-// first. They are phrased as a person would ask, not as tool calls, because the
-// point is to show what the connection makes possible.
-var suggestedPrompts = []string{
-	"Qual é o número de telefone conectado no meu WhatsApp?",
-	"Liste minhas 10 conversas mais recentes do WhatsApp.",
-	"Me resuma a conversa do WhatsApp com o João da Silva de hoje.",
-	"Procure no meu WhatsApp as mensagens que falam sobre contrato.",
-	"Quais grupos do WhatsApp eu participo? Quem são os administradores do maior deles?",
+	// Newcomer keeps the examples on this page for the first days; after that
+	// they live in Ajuda.
+	Newcomer bool
 }
 
 func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
@@ -848,28 +885,23 @@ func (a *webApp) connect(w http.ResponseWriter, r *http.Request) {
 		InstanceName:    state.SelectedName,
 		Phone:           phone(state.SelectedNumber),
 		Endpoint:        a.endpoint(),
+		Prompts:         suggestedPrompts,
+		HasKey:          len(keys) > 0,
 	}
 	if a.status != nil {
 		page.Account = a.status.Snapshot().WhatsApp.PushName
 	}
-	page.Keys = keys
-	page.Setup = newClientSetup(page.Endpoint, "")
-	page.Prompts = suggestedPrompts
-	page.Clients = clientOptions()
-	page.HasKey = len(page.Keys) > 0
-	for _, key := range page.Keys {
-		if key.LastUsedAt.After(page.LastUse) {
-			page.LastUse, page.ClientConnected = key.LastUsedAt, true
-		}
-		view := connection{APIKey: key, Tool: key.Name, Live: !key.LastUsedAt.IsZero()}
-		if reported := toolLabel(key.ClientName); reported != "" {
-			view.Tool, view.Detected = reported, true
-		}
-		if view.Live {
+	page.Connections = a.connections(keys)
+	for _, c := range page.Connections {
+		if c.Live {
 			page.LiveCount++
+			page.ClientConnected = true
+			if c.LastUsedAt.After(page.LastUse) {
+				page.LastUse = c.LastUsedAt
+			}
 		}
-		page.Connections = append(page.Connections, view)
 	}
+	page.Newcomer = newcomer(page.Connections, time.Now())
 	a.render(w, "conectar", page)
 }
 
@@ -879,13 +911,27 @@ type instancesPage struct {
 	layout
 	selection
 	OK string
+	// AccountName is the profile name WhatsApp reports for the account in
+	// use, or the instance's own name; Status is what has arrived from it.
+	AccountName string
+	Status      *statusView
 }
 
 func (a *webApp) instances(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
-	a.render(w, "instancias", instancesPage{layout: a.newLayout(r, "Instâncias", "instancias"), selection: a.readSelection(r), OK: r.URL.Query().Get("ok")})
+	page := instancesPage{layout: a.newLayout(r, "WhatsApp", "whatsapp"), selection: a.readSelection(r), OK: r.URL.Query().Get("ok")}
+	page.AccountName = page.SelectedName
+	if a.status != nil {
+		if name := a.status.Snapshot().WhatsApp.PushName; name != "" {
+			page.AccountName = name
+		}
+	}
+	if page.Selected != "" {
+		page.Status = a.readStatus(r, page.Selected)
+	}
+	a.render(w, "instancias", page)
 }
 
 // wizardStep is one dot in the installation stepper.
@@ -1097,7 +1143,7 @@ func (a *webApp) statusPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	selected, _ := a.store.SelectedInstance(r.Context())
-	a.render(w, "estado", statusPage{layout: a.newLayout(r, "Estado", "estado"), Status: a.readStatus(r, selected)})
+	a.render(w, "estado", statusPage{layout: a.newLayout(r, "Status", "status"), Status: a.readStatus(r, selected)})
 }
 
 // endpoint is the address clients are told to use.
@@ -1232,7 +1278,7 @@ func (a *webApp) pairPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/instancias", http.StatusSeeOther)
 		return
 	}
-	page := pairPageData{layout: a.newLayout(r, "Conectar o WhatsApp", "instancias"), Name: state.SelectedName}
+	page := pairPageData{layout: a.newLayout(r, "Conectar o WhatsApp", "whatsapp"), Name: state.SelectedName}
 	page.Refresh = true
 	page.QRCode, page.Notice = a.pairingCode(r)
 	a.render(w, "pair", page)
@@ -1621,6 +1667,9 @@ var templateFuncs = template.FuncMap{
 	"len64":          len64,
 	"phone":          phone,
 	"initial":        initial,
+	"css":            css,
+	"icon":           icon,
+	"toolmark":       toolmark,
 }
 
 // len64 gives templates a length the counters can consume, since plural counts

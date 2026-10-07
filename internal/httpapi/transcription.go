@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
-	"strings"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/transcribe"
 )
@@ -19,15 +17,6 @@ type TranscriptionSettings interface {
 	Status(context.Context) (transcribe.Status, error)
 	SaveKey(context.Context, string) (transcribe.Status, error)
 	RemoveKey(context.Context) error
-}
-
-type transcriptionPage struct {
-	layout
-	Available      bool
-	Status         transcribe.Status
-	Saved          string
-	Links          openAILinks
-	PricePerMinute string
 }
 
 // openAILinks are the OpenAI pages the operator is sent to, before a key
@@ -45,34 +34,23 @@ var openAI = openAILinks{
 	Pricing: transcribe.PricingURL,
 }
 
-func (a *webApp) transcriptionPage(w http.ResponseWriter, r *http.Request) {
-	if !a.require(w, r) {
-		return
-	}
-	page := transcriptionPage{layout: a.newLayout(r, "Transcrição de áudios", "transcricao"), Available: a.transcription != nil, Saved: r.URL.Query().Get("ok"), Links: openAI, PricePerMinute: strings.Replace(strconv.FormatFloat(transcribe.PricePerMinute, 'f', -1, 64), ".", ",", 1)}
-	if a.transcription != nil {
-		status, err := a.transcription.Status(r.Context())
-		if err != nil {
-			page.Error = "Não foi possível ler a configuração de transcrição."
-		}
-		page.Status = status
-	}
-	a.render(w, "transcricao", page)
-}
+// The key is saved and removed from Configurações › Transcrição de áudio,
+// which these forms return to.
+const transcriptionSection = "/configuracoes"
 
 func (a *webApp) saveTranscriptionKey(w http.ResponseWriter, r *http.Request) {
 	if !a.require(w, r) {
 		return
 	}
 	if a.transcription == nil {
-		a.fail(w, r, "/transcricao", "A transcrição não está disponível neste servidor.")
+		a.fail(w, r, transcriptionSection, "A transcrição não está disponível neste servidor.")
 		return
 	}
 	if _, err := a.transcription.SaveKey(r.Context(), r.FormValue("api_key")); err != nil {
-		a.fail(w, r, "/transcricao", keyFailure(err))
+		a.fail(w, r, transcriptionSection, keyFailure(err))
 		return
 	}
-	http.Redirect(w, r, "/transcricao?ok="+url.QueryEscape("Chave salva. Os áudios já podem ser transcritos."), http.StatusSeeOther)
+	http.Redirect(w, r, transcriptionSection+"?ok="+url.QueryEscape("Chave salva. Os áudios já podem ser transcritos.")+"#transcricao", http.StatusSeeOther)
 }
 
 func (a *webApp) removeTranscriptionKey(w http.ResponseWriter, r *http.Request) {
@@ -80,14 +58,14 @@ func (a *webApp) removeTranscriptionKey(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if a.transcription == nil {
-		a.fail(w, r, "/transcricao", "A transcrição não está disponível neste servidor.")
+		a.fail(w, r, transcriptionSection, "A transcrição não está disponível neste servidor.")
 		return
 	}
 	if err := a.transcription.RemoveKey(r.Context()); err != nil {
-		a.fail(w, r, "/transcricao", "Não foi possível remover a chave.")
+		a.fail(w, r, transcriptionSection, "Não foi possível remover a chave.")
 		return
 	}
-	http.Redirect(w, r, "/transcricao?ok="+url.QueryEscape("Chave removida. As transcrições já feitas continuam guardadas."), http.StatusSeeOther)
+	http.Redirect(w, r, transcriptionSection+"?ok="+url.QueryEscape("Chave removida. As transcrições já feitas continuam guardadas.")+"#transcricao", http.StatusSeeOther)
 }
 
 // keyFailure says why a key was refused in words the operator can act on.

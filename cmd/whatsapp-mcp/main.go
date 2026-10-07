@@ -95,7 +95,8 @@ func main() {
 	// The licence automation is on by default: registrations go to an address
 	// the email worker answers, and the wizard waits on the licence coming in
 	// rather than on a person's inbox.
-	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber, httpapi.WithSelfUpdate(selfupdate.New(cfg.UpdateDir)))
+	webHandler := httpapi.NewWebHandler(db, evolutionClient, state, sessionKey, cfg.PublicURL, cfg.SetupToken, cfg.LicenseAuto, cfg.LicenseEmailDomain, cfg.LicenseAutoWait, transcriber, httpapi.WithSelfUpdate(selfupdate.New(cfg.UpdateDir)),
+		httpapi.WithWebhooks(hooks), httpapi.WithMediaFiles(mcpServer))
 	remoteMCP := mcphttp.New(mcpServer, apiKeyAuth{db}, logger)
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

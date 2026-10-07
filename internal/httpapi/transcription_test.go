@@ -80,7 +80,7 @@ func TestTranscriptionPageSavesShowsTheHintAndRemoves(t *testing.T) {
 	ts, client := transcriptionPanel(t, transcription)
 
 	page := fetch(t, client, ts.URL+"/transcricao")
-	mustContain(t, page, "transcricao", "Transcrição de áudios", "Não configurada", `name="api_key"`)
+	mustContain(t, page, "transcricao", "Transcrição de áudio", "Não configurada", `name="api_key"`, `id="transcricao"`)
 
 	page = postPage(t, client, ts.URL+"/transcricao", url.Values{"api_key": {"sk-refused-bad"}})
 	mustContain(t, page, "transcricao", "A OpenAI recusou esta chave")
@@ -89,7 +89,7 @@ func TestTranscriptionPageSavesShowsTheHintAndRemoves(t *testing.T) {
 	}
 
 	page = postPage(t, client, ts.URL+"/transcricao", url.Values{"api_key": {key}})
-	mustContain(t, page, "transcricao", "Chave salva", "Configurada", "sk-…4321")
+	mustContain(t, page, "transcricao", "Chave salva", "Ativa", "sk-…4321")
 	if strings.Contains(page, "supersecret") {
 		t.Fatal("the page shows the saved key")
 	}

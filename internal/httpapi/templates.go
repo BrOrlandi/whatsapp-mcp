@@ -1,373 +1,19 @@
 package httpapi
 
-import "strings"
-
-// darkPalette is the panel in the dark theme. The same declarations serve two
-// selectors — the system preference and an explicit choice from the masthead —
-// so they live here once and are stitched into the stylesheet where the marker
-// sits, instead of being kept in sync by hand.
-const darkPalette = `
---bg:#0a1513;--surface:#11211d;--surface-soft:#152b26;--surface-sunken:#0d1b18;--border:#23413a;--border-strong:#2f544b;
---text:#e4f1ec;--text-soft:#cbe0d8;--muted:#a7c0b8;
---brand:#2fc9a0;--brand-strong:#4adcb4;--brand-ink:#04211b;--brand-soft:#123029;
---accent:#93b4ff;--accent-soft:#16224a;
---danger:#ffaea7;--danger-bg:#361917;--danger-border:#67312e;
---ok:#6fdcaa;--ok-bg:#0f3526;--ok-border:#1d5a40;
---warn:#f2ce85;--warn-bg:#352a10;--off:#a4b9bf;--off-bg:#1a292d;
---shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
---shadow-lift:0 12px 40px rgba(0,0,0,.5);
-`
-
-// darkMarker is where the stylesheet asks for the dark palette.
-const darkMarker = "/*dark-palette*/"
-
-// pages is the stylesheet-complete template source the panel parses.
-var pages = strings.NewReplacer(darkMarker, darkPalette).Replace(pageSource)
+// pages is the template source the panel parses.
+var pages = pageSource
 
 // pageSource holds every template the control panel renders.
 //
-// The panel is split by task rather than stacked on one screen: connecting a
-// client, managing instances and reading the service state are different jobs
-// done at different moments, and putting them on one page made the flow hard to
-// follow. Dialogs use the :target selector so creating something never needs
-// JavaScript to work.
+// The markup is the Local version's — the masthead with the gear, the tabs
+// with icons, the cards, the connect flow, Ajuda and Configurações — so the
+// server panel and the desktop app look like one product. What differs is what
+// a server has and an app does not: a sign-in, a licence, several WhatsApp
+// accounts and an API key per connection. Dialogs use the :target selector so
+// creating something never needs JavaScript to work.
 const pageSource = `
 {{define "head"}}<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><script src="/assets/theme.js"></script>{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.Title}} · WhatsApp MCP</title><style>
-*,*::before,*::after{box-sizing:border-box}
-:root{
-color-scheme:light dark;
---bg:#eef3f1;--surface:#fff;--surface-soft:#f4f9f7;--surface-sunken:#e9f0ed;--border:#dbe6e1;--border-strong:#c3d5cd;
---text:#10241c;--text-soft:#2c443d;--muted:#54695f;
---brand:#0b6b5d;--brand-strong:#0a8172;--brand-ink:#fff;--brand-soft:#e3f3ef;
---accent:#1d4ed8;--accent-soft:#e8eeff;
---danger:#96201f;--danger-bg:#fdeceb;--danger-border:#f0c6c3;
---ok:#0b6b45;--ok-bg:#e1f4ea;--ok-border:#b6e0c9;
---warn:#7a5200;--warn-bg:#fbf0d6;--off:#4f646b;--off-bg:#e8eef0;
---radius:14px;--radius-sm:10px;--ring:#12a08c;
---shadow:0 1px 2px rgba(16,36,28,.06),0 8px 24px rgba(16,36,28,.06);
---shadow-lift:0 12px 40px rgba(16,36,28,.18);
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){/*dark-palette*/}}
-:root[data-theme=light]{color-scheme:light}
-:root[data-theme=dark]{color-scheme:dark;/*dark-palette*/}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-h1,h2,h3{line-height:1.25;margin:0;color:var(--text)}
-h1{font-size:clamp(1.35rem,1.1rem + 1.2vw,1.7rem)}
-h2{font-size:1.15rem}
-h3{font-size:.95rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-p{margin:.6em 0}
-a{color:var(--brand-strong)}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:var(--surface-sunken);border:1px solid var(--border);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
-pre{position:relative;overflow:auto;background:#07201b;color:#dffff4;padding:14px 16px;border-radius:var(--radius-sm);font-size:.85rem;line-height:1.55;margin:0}
-pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
-
-/* ---- shell ---- */
-.shell{max-width:1000px;margin:0 auto;padding:0 clamp(16px,4vw,24px) 72px}
-.masthead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:20px 0 14px}
-.masthead__tools{display:flex;align-items:center;gap:8px}
-.theme{display:inline-flex}
-.theme[hidden]{display:none}
-.theme__select{appearance:none;-webkit-appearance:none;font:inherit;font-size:1rem;line-height:1;width:38px;height:38px;padding:0;text-align:center;text-align-last:center;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);cursor:pointer}
-.theme__select:hover{background:var(--surface-soft)}
-.brand{display:flex;align-items:center;gap:12px;min-width:0;text-decoration:none;color:inherit}
-.brand__mark{width:38px;height:38px;flex:none}
-.brand__mark svg{width:100%;height:100%;display:block}
-.brand__name{font-weight:700;font-size:1rem;color:var(--brand);letter-spacing:-.01em}
-.brand__tagline{display:block;font-weight:400;font-size:.78rem;color:var(--muted);letter-spacing:0}
-/* ---- tools (documentação) ---- */
-.tools{display:grid;gap:14px;margin-top:24px}
-.tool{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
-.tool__head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:16px 18px 0}
-.tool__name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;color:var(--brand);font-size:1rem}
-.tool__desc{margin:0;padding:8px 18px 16px;color:var(--text-soft);font-size:.95rem;line-height:1.7;max-width:76ch}
-.tool__args{margin:0;padding:14px 18px 16px;list-style:none;display:grid;gap:12px;border-top:1px solid var(--border);background:var(--surface-soft)}
-.tool__arg{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:.9rem;line-height:1.65}
-.tool__argname{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;color:var(--text)}
-.tool__type{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem}
-.tool__req{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--warn)}
-.tool__argdesc{color:var(--text-soft);flex:1 1 240px;min-width:0}
-
-/* ---- recipes ---- */
-.recipes{display:grid;gap:20px;margin-top:24px}
-.recipe{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
-.recipe__head{padding:clamp(18px,3vw,22px) clamp(18px,3vw,24px) 0}
-.recipe__title{margin:0 0 10px;font-size:1.18rem;letter-spacing:-.01em}
-.recipe__summary{margin:0;color:var(--text-soft);font-size:.97rem;line-height:1.75;max-width:68ch}
-.recipe__meta{display:flex;flex-wrap:wrap;gap:8px;padding:16px clamp(18px,3vw,24px) 20px}
-.recipe__tool{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;line-height:1.5;padding:4px 10px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--border-strong);color:var(--text-soft)}
-.recipe__tool--when{font-family:inherit;background:var(--brand-soft);border-color:var(--brand-soft);color:var(--brand-strong);font-weight:600}
-.recipe__prompt{padding:0 clamp(18px,3vw,24px) clamp(18px,3vw,22px)}
-.recipe__prompt .snippet{margin:0}
-.recipe__prompt pre{border:1px solid var(--border)}
-.recipe__caveat{margin:0;padding:14px clamp(18px,3vw,24px) 16px;border-top:1px solid var(--border);background:var(--surface-soft);font-size:.9rem;color:var(--text-soft);line-height:1.7}
-.recipe__caveat strong{color:var(--warn)}
-.nav{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border);margin-bottom:24px}
-.nav a{position:relative;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;text-decoration:none;color:var(--muted);font-weight:600;font-size:.94rem;border-radius:var(--radius-sm) var(--radius-sm) 0 0;border-bottom:2px solid transparent;margin-bottom:-1px}
-.nav a:hover{color:var(--text);background:var(--surface-soft)}
-.nav a[aria-current=page]{color:var(--brand);border-bottom-color:var(--brand)}
-/* The tab bar carries a marker only when something is wrong. A green dot that
-   is always green is read as decoration within a day, and then the one day it
-   turns amber nobody notices. */
-.nav__alert{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;flex:none;border-radius:50%;background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger-border);font-size:.68rem;font-weight:800;line-height:1}
-.nav__alert--warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
-.nav__spacer{flex:1}
-
-/* ---- cards ---- */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);margin:0 0 18px;overflow:hidden}
-.card__head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:16px clamp(16px,3vw,22px);border-bottom:1px solid var(--border);background:var(--surface-soft)}
-.card__body{padding:clamp(16px,3vw,22px)}
-.card__body>:first-child{margin-top:0}
-.card__body>:last-child{margin-bottom:0}
-.card--accent .card__head{background:var(--brand-soft);border-bottom-color:var(--border-strong)}
-.card--accent .card__head h2{color:var(--brand)}
-.lead{color:var(--text-soft);margin-top:0;font-size:1.02rem;line-height:1.72;max-width:72ch}
-
-/* ---- steps ---- */
-.step{padding:4px 0}
-.step+.step{border-top:1px solid var(--border)}
-.step__summary{display:flex;align-items:center;gap:12px;padding:14px 0;cursor:pointer;list-style:none}
-.step__summary::-webkit-details-marker{display:none}
-.step__summary:hover .step__title{color:var(--brand)}
-.step[data-locked] .step__summary{cursor:default;opacity:.6}
-.step__n{width:30px;height:30px;flex:none;border-radius:50%;background:var(--brand);color:var(--brand-ink);display:grid;place-items:center;font-weight:700;font-size:.9rem}
-.step--done .step__n{background:var(--ok);font-size:1rem}
-.step[data-locked] .step__n{background:var(--off-bg);color:var(--off)}
-.step__title{font-weight:700}
-.step--done .step__title{color:var(--muted);font-weight:600}
-.step__state{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ok)}
-.step__state--waiting{color:var(--warn);display:inline-flex;align-items:center;gap:6px}
-.step__state--waiting::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-@media (prefers-reduced-motion:reduce){.step__state--waiting::before{animation:none}}
-.step__body{padding:0 0 18px 42px}
-.step__body>:first-child{margin-top:0}
-@media (max-width:520px){.step__body{padding-left:0}}
-
-/* ---- pills, badges ---- */
-.pill{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
-.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
-.pill--ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-border)}
-.pill--warn{background:var(--warn-bg);color:var(--warn)}
-.pill--off{background:var(--off-bg);color:var(--off)}
-.pill--plain::before{display:none}
-.pill--accent{background:var(--accent-soft);color:var(--accent)}
-
-/* ---- buttons ---- */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:.94rem;font-weight:600;text-decoration:none;padding:10px 16px;border:1px solid transparent;border-radius:var(--radius-sm);cursor:pointer;background:var(--brand);color:var(--brand-ink);white-space:nowrap}
-.btn:hover{background:var(--brand-strong)}
-.btn--block{width:100%}
-.btn--ghost{background:var(--surface);color:var(--brand-strong);border-color:var(--border-strong)}
-.btn--ghost:hover{background:var(--surface-soft)}
-.btn--quiet{background:transparent;color:var(--muted);border-color:transparent;padding:8px 10px;font-weight:500}
-.btn--quiet:hover{background:var(--surface-soft);color:var(--text)}
-.btn--danger{background:transparent;color:var(--danger);border-color:var(--danger-border)}
-.btn--danger:hover{background:var(--danger-bg)}
-.btn--small{padding:6px 11px;font-size:.86rem}
-:where(a,button,input,summary):focus-visible{outline:3px solid var(--ring);outline-offset:2px}
-.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.actions--end{justify-content:flex-end}
-.btn[disabled]{cursor:progress;opacity:.72}
-.btn[disabled]:hover{background:var(--brand)}
-.btn[aria-disabled=true]{pointer-events:none;opacity:.45}
-.spinner{width:15px;height:15px;flex:none;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.spinner{animation-duration:2.4s}}
-.busy{display:flex;align-items:center;gap:10px;margin:14px 0 0;color:var(--muted);font-size:.88rem;line-height:1.5}
-.busy[hidden]{display:none}
-
-/* ---- numbered how-to list ---- */
-.guide{list-style:none;counter-reset:guide;margin:0;padding:0;display:grid;gap:9px}
-.guide li{position:relative;counter-increment:guide;padding-left:32px;line-height:1.5}
-.guide li::before{content:counter(guide);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:var(--brand-soft);color:var(--brand);font-size:.76rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
-
-/* ---- forms ---- */
-/* A field is the label sitting above one control. The gap that separates one
-   field from the next belongs to whatever follows the control, not to the
-   label alone — with only a label margin, the next label lands flush against
-   the input above it. */
-.field{display:block;margin:0 0 7px}
-.field__label{display:block;font-weight:600;font-size:.9rem}
-.field__hint{display:block;font-weight:400;color:var(--muted);font-size:.84rem;margin-top:3px}
-input[type=text],input[type=email],input[type=password]{width:100%;font:inherit;padding:10px 12px;color:var(--text);background:var(--surface-soft);border:1px solid var(--border-strong);border-radius:var(--radius-sm)}
-input[type=text]:hover,input[type=email]:hover,input[type=password]:hover{border-color:var(--brand-strong)}
-input[type=radio]{accent-color:var(--brand-strong);width:18px;height:18px;flex:none;margin:0}
-/* Anything after a control opens a new block. .reveal is that same control
-   once password.js has wrapped it with the show/hide button, so both spellings
-   carry the rule and the spacing does not depend on the script having run. */
-input+.field,.reveal+.field{margin-top:20px}
-input+.actions,.reveal+.actions,input+.muted,.reveal+.muted{margin-top:16px}
-
-/* ---- alerts ---- */
-.alert{display:block;margin:0 0 18px;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid var(--danger-border);background:var(--danger-bg);color:var(--danger);font-size:.93rem}
-.alert--ok{border-color:var(--ok-border);background:var(--ok-bg);color:var(--ok)}
-.problems{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:8px}
-.problems li{padding:11px 13px;border-radius:var(--radius-sm);border:1px solid var(--danger-border);background:var(--danger-bg);color:var(--danger);font-size:.93rem}
-
-/* ---- lists ---- */
-.rows{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
-.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:13px 15px;background:var(--surface)}
-.row+.row{border-top:1px solid var(--border)}
-.row--on{background:var(--brand-soft)}
-.row__main{flex:1 1 220px;min-width:0}
-.row__title{font-weight:600;overflow-wrap:anywhere}
-.row__meta{display:block;font-weight:400;font-size:.84rem;color:var(--muted)}
-.row__label{display:flex;align-items:center;gap:11px;flex:1 1 220px;min-width:0;cursor:pointer}
-.row__remove{margin-left:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;text-decoration:none;color:var(--muted);font-size:.95rem;line-height:1;border:1px solid transparent}
-.row__remove:hover{background:var(--danger-bg);border-color:var(--danger-border);color:var(--danger)}
-.target{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:12px 14px;margin-bottom:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
-.target__name{font-weight:700;overflow-wrap:anywhere}
-.target__meta{color:var(--muted);font-size:.88rem;overflow-wrap:anywhere}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-
-/* ---- facts ---- */
-.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:0}
-.fact{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-soft)}
-.fact dt{font-size:.78rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-.fact dd{margin:3px 0 0;font-weight:600;font-size:1.02rem}
-.fact__detail{display:block;font-weight:400;font-size:.82rem;color:var(--muted)}
-
-/* ---- overview ---- */
-/* The two sentences the landing page exists to say: this phone line is up, and
-   these AI tools are plugged into it. Tone lives on the item, so the badge
-   picks it up through currentColor and the prose stays readable. */
-.overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:0 0 20px}
-.overview__item{display:flex;align-items:flex-start;gap:13px;padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);color:var(--muted)}
-.overview__item--ok{color:var(--ok);border-color:var(--ok-border);background:var(--ok-bg)}
-.overview__item--wait{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
-.overview__icon{width:32px;height:32px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:1rem;font-weight:800;line-height:1;background:var(--surface);border:1px solid currentColor}
-.overview__body{min-width:0}
-.overview__title{margin:0;font-weight:700;color:var(--text);font-size:1rem;line-height:1.35}
-.overview__detail{margin:4px 0 0;color:var(--text-soft);font-size:.9rem;line-height:1.5;overflow-wrap:anywhere}
-.overview__phone{display:block;font-size:1.08rem;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
-
-/* ---- connections ---- */
-.tool-mark{width:36px;height:36px;flex:none;border-radius:10px;display:grid;place-items:center;background:var(--brand-soft);color:var(--brand);border:1px solid var(--border);font-weight:800;font-size:1rem;text-transform:uppercase}
-.row--waiting .tool-mark{background:var(--warn-bg);color:var(--warn)}
-/* The primary action is a button, not a banner: stretched across the column
-   it read as a section header. It stays the width of its own label. */
-.hero{display:flex;justify-content:center;margin:0 0 22px}
-.btn--big{padding:11px 18px;font-size:.97rem}
-
-/* ---- picks (one question, whole-row targets) ---- */
-.disclose{margin:0}
-.disclose summary{cursor:pointer;font-weight:600;font-size:.94rem;color:var(--brand-strong);list-style:none}
-.disclose summary::-webkit-details-marker{display:none}
-.disclose[open] summary{margin-bottom:16px}
-.picks{list-style:none;margin:0 0 18px;padding:0;display:grid;gap:9px}
-.pick{display:flex;align-items:flex-start;gap:11px;padding:12px 13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer}
-.pick:hover{background:var(--surface-soft);border-color:var(--brand-strong)}
-.pick input{margin-top:3px}
-.pick:has(input:checked){border-color:var(--brand);background:var(--brand-soft)}
-.pick__text{min-width:0}
-.pick__title{display:block;font-weight:700;font-size:.95rem}
-.pick__hint{display:block;color:var(--muted);font-size:.85rem;line-height:1.5;margin-top:2px}
-
-/* ---- empty ---- */
-.empty{padding:28px 20px;text-align:center;border:1px dashed var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-soft)}
-.empty__title{font-weight:600;color:var(--text);margin:0}
-
-/* ---- snippets ---- */
-.snippet{margin:0 0 16px}
-.snippet__head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:7px}
-.snippet__title{font-weight:600;font-size:.92rem}
-.snippet__note{font-size:.84rem;color:var(--muted)}
-.copy{font:inherit;font-size:.78rem;font-weight:600;padding:4px 10px;border-radius:7px;border:1px solid var(--border-strong);background:var(--surface);color:var(--brand-strong);cursor:pointer;flex:none}
-.snippet--loose{position:relative}
-.snippet--loose .copy{position:absolute;top:8px;right:8px;z-index:1}
-.copy:hover{background:var(--surface-soft)}
-.copy--done{color:var(--ok);border-color:var(--ok-border)}
-.copy--failed{color:var(--danger);border-color:var(--danger-border)}
-
-/* ---- secret ---- */
-.secret{border:2px solid var(--ok);border-radius:var(--radius);background:var(--ok-bg);padding:18px;margin:0 0 20px}
-.secret__title{margin:0 0 4px;font-weight:700;color:var(--ok)}
-.secret__value{display:block;margin:12px 0 8px;padding:14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--ok-border);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:600;overflow-wrap:anywhere;user-select:all}
-
-/* ---- dialogs (CSS only) ---- */
-.overlay{position:fixed;inset:0;background:rgba(6,20,16,.55);display:none;place-items:center;padding:20px;z-index:50}
-.overlay:target{display:grid}
-.dialog{background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:var(--shadow-lift);width:min(460px,100%);max-height:90vh;overflow:auto}
-.dialog__head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border)}
-.dialog__head h2{font-size:1.05rem}
-.dialog__body{padding:20px}
-.dialog__close{text-decoration:none;color:var(--muted);font-size:1.5rem;line-height:1;padding:0 4px}
-.dialog__close:hover{color:var(--text)}
-
-.tabs__radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-.tabs__bar{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px}
-.tabs__tab{padding:8px 14px;font-weight:600;font-size:.92rem;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
-.tabs__tab:hover{color:var(--text);background:var(--surface-soft)}
-.tabs__panel{display:none}
-#tab-code:checked~.tabs__panel--code,#tab-desktop:checked~.tabs__panel--desktop,#tab-outros:checked~.tabs__panel--outros{display:block}
-#tab-code:checked~.tabs__bar label[for=tab-code],#tab-desktop:checked~.tabs__bar label[for=tab-desktop],#tab-outros:checked~.tabs__bar label[for=tab-outros]{color:var(--brand);border-bottom-color:var(--brand)}
-.tabs__radio:focus-visible~.tabs__bar label{outline:3px solid var(--ring);outline-offset:2px}
-.prompts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
-.prompt .snippet{margin:0}
-.prompt pre{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);padding:10px 12px;font-size:.92rem;white-space:pre-wrap}
-.prompt pre,.prompt pre code{font-family:inherit}
-/* The copy button floats over a headerless snippet, so the text has to keep
-   out from under it — otherwise a wrapped line runs beneath the button. */
-.prompt pre{padding-right:82px}
-.guide+.snippet{margin-top:16px}
-/* A block of plain Portuguese is not code: it gets the page's own colours and
-   wraps, instead of a terminal's palette and a sideways scrollbar. */
-pre.plain{background:var(--surface-sunken);color:var(--text);border:1px solid var(--border);white-space:pre-wrap;font-size:.92rem}
-pre.plain,pre.plain code{font-family:inherit}
-.qrcode{display:block;margin:0 auto;width:250px;height:250px;max-width:100%;background:#fff;padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)}
-.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
-.muted{color:var(--text-soft);font-size:.9rem;line-height:1.65}
-.stack>*+*{margin-top:16px}
-@media (max-width:520px){.row{align-items:flex-start}.row form,.row .btn{width:100%}}
-/* ---- installation wizard ---- */
-/* The first run is one column, one card and one question at a time: the panel
-   proper is what comes after it. */
-.wizard-shell{max-width:520px;margin:0 auto}
-.wizard{list-style:none;display:flex;align-items:center;gap:10px;margin:8px 0 22px;padding:0}
-.wizard__step{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:.85rem;font-weight:600;white-space:nowrap}
-.wizard__step+.wizard__step{flex:1;min-width:0}
-.wizard__step+.wizard__step::before{content:"";flex:1;min-width:14px;height:1px;background:var(--border-strong)}
-.wizard__n{width:26px;height:26px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:.8rem;font-weight:700;background:var(--surface-sunken);color:var(--muted);border:1px solid var(--border-strong)}
-.wizard__step--now{color:var(--brand)}
-.wizard__step--now .wizard__n{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
-.wizard__step--done{color:var(--ok)}
-.wizard__step--done .wizard__n{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-border)}
-.wizard__escape{display:flex;justify-content:center;margin-top:10px}
-.resend{margin-top:20px;border-top:1px solid var(--border);padding-top:14px}
-.resend summary{cursor:pointer;font-size:.9rem;font-weight:600;color:var(--brand-strong);list-style:none}
-.resend summary::-webkit-details-marker{display:none}
-.resend[open] summary{margin-bottom:12px}
-@media (max-width:460px){.wizard__label{display:none}}
-/* ---- colophon ---- */
-.colophon{margin-top:40px;padding:18px 0 4px;border-top:1px solid var(--border)}
-.colophon__line{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;margin:0;font-size:.85rem;color:var(--muted)}
-.colophon__link{display:inline-flex;align-items:center;gap:5px;color:var(--muted);text-decoration:none;font-weight:600}
-.colophon__link:hover{color:var(--brand-strong);text-decoration:underline}
-.colophon__icon{flex:none;display:block}
-.colophon__sep{color:var(--border-strong)}
-.colophon__support{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:var(--brand-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;text-decoration:none}
-.colophon__support:hover{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
-/* ---- update banner ---- */
-.update{margin:0 0 18px;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--warn-bg);color:var(--text)}
-.update__line{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:0 0 8px;font-size:.93rem}
-.update__version{font-weight:700;color:var(--warn)}
-.update__notes{color:var(--muted);font-weight:600;text-decoration:none}
-.update__notes:hover{color:var(--brand-strong);text-decoration:underline}
-.update .snippet{margin:0}
-.update__note{margin:8px 0 0;font-size:.84rem;color:var(--muted)}
-.update--rollback{border-color:var(--danger-border);background:var(--danger-bg)}
-.update--rollback .update__version{color:var(--danger)}
-.update form{margin:0}
-.progress{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;color:var(--text-soft);max-height:260px;overflow:auto;background:var(--surface-soft);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px}
-.colophon__version{font-variant-numeric:tabular-nums}
-/* ---- password reveal ---- */
-.reveal{position:relative;display:block}
-.reveal input{width:100%;padding-right:44px}
-.reveal__toggle{position:absolute;top:50%;right:6px;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer}
-.reveal__toggle:hover{color:var(--text);background:var(--surface-sunken)}
-.reveal__toggle:focus-visible{outline:3px solid var(--ring);outline-offset:1px}
-</style></head><body><div class="shell">{{end}}
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><script src="/assets/theme.js"></script>{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}<title>{{.Title}} · WhatsApp MCP</title><style>{{css}}</style></head><body><div class="shell">{{end}}
 
 {{define "foot"}}
 <footer class="colophon">
@@ -385,27 +31,21 @@ pre.plain,pre.plain code{font-family:inherit}
 
 {{define "githubmark"}}<svg class="colophon__icon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>{{end}}
 
-{{define "themeswitch"}}<span class="theme" hidden data-theme-switch>
-<select class="theme__select" aria-label="Tema da interface" data-theme-select>
-<option value="system" title="Seguir o sistema">◐</option>
-<option value="light" title="Tema claro">☀</option>
-<option value="dark" title="Tema escuro">☾</option>
-</select></span>{{end}}
+{{/* The way into Configurações, in the top right corner of every page. */}}
+{{define "settingslink"}}<a class="gear" href="/configuracoes" aria-label="Configurações" title="Configurações"{{if eq .Active "configuracoes"}} aria-current="page"{{end}}>{{icon "gear"}}</a>{{end}}
 
-{{define "brandmark"}}<span class="brand__mark">{{logo}}</span><span class="brand__name">WhatsApp MCP<span class="brand__tagline">Painel de controle</span></span>{{end}}
+{{define "brandmark"}}<span class="brand__mark">{{logo}}</span><span class="brand__name">WhatsApp MCP</span>{{end}}
 
 {{define "nav"}}
 <header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
-<div class="masthead__tools">{{template "themeswitch"}}
-<a class="btn btn--quiet" href="/senha">Senha</a>
-<form method="post" action="/logout"><button class="btn btn--quiet" type="submit">Sair</button></form></div></header>
+<div class="masthead__tools">{{template "settingslink" .}}</div></header>
 <nav class="nav" aria-label="Seções">
-<a href="/"{{if eq .Active "conectar"}} aria-current="page"{{end}}>Conectar</a>
-<a href="/instancias"{{if eq .Active "instancias"}} aria-current="page"{{end}}>Instâncias</a>
-<a href="/estado"{{if eq .Active "estado"}} aria-current="page"{{end}}>{{if ne .SessionTone "ok"}}<span class="nav__alert{{if eq .SessionTone "warn"}} nav__alert--warn{{end}}" aria-hidden="true">!</span><span class="sr-only">Atenção: </span>{{end}}Estado</a>
-<a href="/transcricao"{{if eq .Active "transcricao"}} aria-current="page"{{end}}>Transcrição</a>
-<a href="/documentacao"{{if eq .Active "documentacao"}} aria-current="page"{{end}}>Documentação</a>
-<a href="/receitas"{{if eq .Active "receitas"}} aria-current="page"{{end}}>Receitas</a>
+<a href="/"{{if eq .Active "conectar"}} aria-current="page"{{end}}>{{icon "plug"}}<span>Conectar MCP</span></a>
+<a href="/whatsapp"{{if eq .Active "whatsapp"}} aria-current="page"{{end}}>{{icon "chat"}}<span>WhatsApp</span></a>
+<a href="/status"{{if eq .Active "status"}} aria-current="page"{{end}}>{{icon "activity"}}{{if ne .SessionTone "ok"}}<span class="sr-only">Atenção: </span>{{end}}<span class="nav__label">Status</span>{{if ne .SessionTone "ok"}}<span class="nav__alert{{if eq .SessionTone "warn"}} nav__alert--warn{{end}}" aria-hidden="true">!</span>{{end}}</a>
+<a href="/funcoes"{{if eq .Active "funcoes"}} aria-current="page"{{end}}>{{icon "list"}}<span>Funções</span></a>
+<a href="/receitas"{{if eq .Active "receitas"}} aria-current="page"{{end}}>{{icon "book"}}<span>Receitas</span></a>
+<a href="/ajuda"{{if eq .Active "ajuda"}} aria-current="page"{{end}}>{{icon "help"}}<span>Ajuda</span></a>
 </nav>
 {{template "updatebanner" .}}
 {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
@@ -415,72 +55,128 @@ pre.plain,pre.plain code{font-family:inherit}
 rendered only on the pages behind the session cookie, and "this instance is
 running an outdated version" is not something to tell whoever loads the sign-in
 page. */}}
-{{define "updatebanner"}}{{$page := .}}{{with rolledBackFrom}}
-<div class="update update--rollback" role="alert">
-<p class="update__line">Esta instância voltou para a versão {{version}}, mas o banco de dados já rodou a <span class="update__version">{{.}}</span>.</p>
-<p class="update__note">As migrações só andam para frente: uma versão mais antiga pode não entender o que a {{.}} gravou, e falhar em algum canto. Volte para a {{.}} ou uma mais nova.</p>
-{{if $page.CanSelfUpdate}}{{if $page.UpdateBusy}}<p class="update__note"><a href="/atualizacao">Atualização em andamento →</a></p>{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.}}"><div class="actions" style="margin-top:10px"><button class="btn btn--small" type="submit">Voltar para a {{.}}</button></div></form>{{end}}{{end}}
-</div>
-{{else}}{{with newRelease}}
-<div class="update">
-<p class="update__line">Versão <span class="update__version">{{.}}</span> disponível — esta instância roda a {{version}}.
-<a class="update__notes" href="{{releaseURL .}}" rel="noopener noreferrer" target="_blank">Ver o que mudou</a></p>
-{{if $page.CanSelfUpdate}}{{if $page.UpdateBusy}}<p class="update__note"><a href="/atualizacao">Atualização em andamento →</a></p>{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.}}"><div class="actions"><button class="btn btn--small" type="submit">Atualizar para a {{.}}</button></div></form>
-<p class="update__note">O servidor faz backup do banco antes de tudo e reinicia o painel no fim — você vai precisar entrar de novo. Os segredos, o pareamento e as mensagens indexadas são preservados.</p>{{end}}
-{{else}}<div class="snippet"><pre data-copy><code>{{updateCommand}}</code></pre></div>
-<p class="update__note">Rode na sua instância, por SSH. Os segredos, o pareamento e as mensagens indexadas são preservados; o banco é copiado antes de qualquer migração.</p>{{end}}
-</div>
-{{end}}{{end}}{{end}}
 
-{{/* The three routes a person can take out of this panel, in the order they
-should try them: the app that needs no terminal, the terminal, and then the
-"whatever you are using" escape hatch — a message the assistant itself reads
-and acts on. */}}
-{{define "clientTabs"}}
-<div class="tabs">
-<input class="tabs__radio" type="radio" name="aba" id="tab-desktop"{{if eq .Preferred "desktop"}} checked{{end}}>
-<input class="tabs__radio" type="radio" name="aba" id="tab-code"{{if eq .Preferred "code"}} checked{{end}}>
-<input class="tabs__radio" type="radio" name="aba" id="tab-outros"{{if eq .Preferred "outros"}} checked{{end}}>
-<div class="tabs__bar" role="tablist">
-<label class="tabs__tab" for="tab-desktop">Claude Desktop</label>
-<label class="tabs__tab" for="tab-code">Claude Code</label>
-<label class="tabs__tab" for="tab-outros">Outra ferramenta</label>
-</div>
-
-<div class="tabs__panel tabs__panel--desktop">
-<p class="muted">No aplicativo do Claude no seu computador:</p>
-<ol class="guide">
-<li>Abra o Claude e vá em <strong>Configurações → Desenvolvedor → Editar configuração</strong>.</li>
-<li>Copie o texto abaixo e cole no arquivo que abrir.</li>
-<li>Salve, feche o Claude e abra de novo.</li>
-</ol>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Cole isto no arquivo de configuração</span></div>
-<pre data-copy><code>{{.JSON}}</code></pre></div>
-<p class="muted">Se já houver outros servidores no arquivo, acrescente só o trecho <code>"whatsapp"</code> dentro de <code>mcpServers</code>, sem apagar o resto.</p>
-</div>
-
-<div class="tabs__panel tabs__panel--code">
-<p class="muted">Um comando no terminal, de dentro de qualquer pasta. Cole e aperte Enter.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Comando</span></div>
-<pre data-copy><code>{{.Command}}</code></pre></div>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Sem a chave no arquivo</span><span class="snippet__note">opcional, para quem prefere</span></div>
-<pre data-copy><code>{{.CommandEnv}}</code></pre></div>
-<p class="muted">Na segunda forma o Claude Code lê a chave de <code>WHATSAPP_MCP_KEY</code>, que você exporta no seu shell, e ela não fica na configuração. Confira depois com <code>claude mcp list</code>.</p>
-</div>
-
-<div class="tabs__panel tabs__panel--outros">
-<p class="muted">Serve para Cursor, ChatGPT, Windsurf, n8n e qualquer outro assistente que aceite MCP. Em vez de você configurar, peça para ele: copie o texto abaixo e mande no chat da ferramenta.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Copie e mande para o seu assistente</span></div>
-<pre class="plain" data-copy><code>{{.AgentPrompt}}</code></pre></div>
-<p class="muted">Se ele não puder se configurar sozinho, vai responder com o passo a passo do próprio aplicativo.</p>
-</div>
-</div>
-{{if not .HasSecret}}<p class="muted">Onde aparece <code>SUA_CHAVE</code>, coloque a chave que você guardou quando criou a conexão. Não guardou? Crie uma conexão nova — é rápido, e a chave só aparece uma vez.</p>{{end}}
+{{/* Connecting an AI tool is a flow of its own: the tool first, then the
+steps for that one, which end when it connects. No tabs on the way. */}}
+{{define "flowhead"}}
+<header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
+<div class="masthead__tools">{{template "settingslink" .}}</div></header>
+<div class="flow">
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 {{end}}
+
+{{define "toolpicks"}}<ul class="toolpicks">
+{{range .}}<li><a class="toolpick" href="/conectar/{{.Key}}"><span class="toolpick__icon">{{toolmark .Mark}}</span>
+<span class="toolpick__text"><span class="toolpick__name">{{.Name}}</span><span class="toolpick__hint">{{.Hint}}</span></span>
+{{if eq .State "live"}}<span class="pill pill--ok">Conectado</span>{{else if eq .State "configured"}}<span class="pill pill--warn">Aguardando</span>{{end}}
+<span class="toolpick__go" aria-hidden="true">{{icon "chevron"}}</span></a></li>
+{{end}}</ul>{{end}}
+
+{{define "conectarescolha"}}{{template "head" .}}{{template "flowhead" .}}
+<a class="flow__back" href="/">{{icon "back"}}Voltar</a>
+<h1>Conectar ferramenta de IA ao MCP</h1>
+<p class="lead">Onde você vai usar o seu WhatsApp?</p>
+{{template "toolpicks" .Tools}}
+<p class="muted flow__note">Cada ferramenta ganha uma chave de acesso própria, e funciona em qualquer computador: o servidor fica na internet. O Claude no navegador ou no celular e o ChatGPT na web ainda não aceitam essa chave.</p>
+</div>
+{{template "foot"}}{{end}}
+
+{{define "conectarferramenta"}}{{template "head" .}}{{template "flowhead" .}}
+{{if not .Done}}<a class="flow__back" href="/conectar">{{icon "back"}}Escolher outra ferramenta</a>{{end}}
+<div class="flow__title"><span class="toolpick__icon">{{toolmark .Tool.Mark}}</span><h1>{{.Tool.Title}}</h1></div>
+
+{{if .Done}}
+<section class="card card--accent">
+<div class="card__head"><h2>{{.Tool.Connected}}</h2><span class="pill pill--ok">Conectado</span></div>
+<div class="card__body stack">
+<p class="muted">Já pode pedir coisas do seu WhatsApp para a sua IA. Para testar, mande isto no chat:</p>
+<div class="snippet"><pre class="plain" data-copy><code>{{.Verification}}</code></pre></div>
+<div class="actions"><a class="btn" href="/">Voltar ao painel</a></div>
+</div></section>
+{{else if not .Setup.HasSecret}}
+{{if .Live}}<p class="alert alert--ok">{{.Tool.Connected}}. Crie outra conexão só se quiser configurar de novo, ou em outro computador.</p>{{end}}
+<section class="card">
+<div class="card__body">
+<ol class="flowsteps">
+<li class="flowstep"><h2 class="flowstep__title">Crie a chave de acesso desta conexão</h2>
+<p class="muted">Cada ferramenta usa uma chave própria, que dá acesso ao seu WhatsApp neste servidor. Ela aparece uma única vez, na tela seguinte, já preenchida no passo a passo.</p>
+<form method="post" action="/chaves" data-busy="Criando…"><input type="hidden" name="cliente" value="{{.Tool.Key}}">
+{{if eq .Tool.Key "outra"}}<label class="field" for="key-name"><span class="field__label">Nome da ferramenta</span>
+<span class="field__hint">Opcional, só para você reconhecer depois. Ex.: &ldquo;Windsurf&rdquo;, &ldquo;n8n&rdquo;.</span></label>
+<input id="key-name" type="text" name="name" maxlength="60" placeholder="Outra ferramenta de IA" autocomplete="off" spellcheck="false">{{end}}
+<div class="actions"><button class="btn" type="submit">Criar a chave e ver o passo a passo</button></div>
+</form></li>
+<li class="flowstep"><h2 class="flowstep__title">Configure {{.Tool.Who}}</h2>
+<p class="muted">Com a chave criada, os passos aparecem aqui, prontos para copiar e colar.</p></li>
+<li class="flowstep"><h2 class="flowstep__title">Espere a conexão</h2>
+<p class="muted">Esta tela avisa sozinha quando {{.Tool.Who}} se conectar.</p></li>
+</ol>
+</div></section>
+{{else}}
+<div class="secret">
+<p class="secret__title">Guarde esta chave agora</p>
+<code class="secret__value">{{.Setup.Secret}}</code>
+<p class="muted">Ela aparece uma única vez, aqui, e já vem preenchida nos passos abaixo, então normalmente você nem precisa copiá-la à parte. Se quiser guardar, use o seu gerenciador de senhas — nunca um arquivo que você compartilha.</p>
+</div>
+<section class="card">
+<div class="card__body">
+<ol class="flowsteps">
+{{if eq .Tool.Key "claude-desktop"}}
+<li class="flowstep"><h2 class="flowstep__title">Abra a configuração do Claude Desktop</h2>
+<p class="muted">No Claude Desktop, vá em <strong>Configurações → Desenvolvedor → Editar configuração</strong>. Ainda não tem o app? <a href="https://claude.ai/download" target="_blank" rel="noopener">Baixar o Claude Desktop</a>.</p></li>
+<li class="flowstep"><h2 class="flowstep__title">Cole a configuração do WhatsApp</h2>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">claude_desktop_config.json</span></div>
+<pre data-copy><code>{{.Setup.JSON}}</code></pre></div>
+<p class="muted">Se já houver outros servidores no arquivo, acrescente só o trecho <code>"whatsapp"</code> dentro de <code>mcpServers</code>, sem apagar o resto.</p></li>
+<li class="flowstep"><h2 class="flowstep__title">Feche o Claude Desktop e abra de novo</h2>
+<p class="muted">Só assim ele carrega o WhatsApp.</p></li>
+{{else if eq .Tool.Key "claude-code"}}
+<li class="flowstep"><h2 class="flowstep__title">Adicione o WhatsApp ao Claude Code</h2>
+<p class="muted">Rode este comando no terminal, de qualquer pasta.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Comando</span></div>
+<pre data-copy><code>{{.Setup.Command}}</code></pre></div>
+<details class="resend"><summary>Prefiro não deixar a chave na configuração</summary>
+<p class="muted">Nesta forma o Claude Code lê a chave de <code>WHATSAPP_MCP_KEY</code>, que você exporta no seu shell. Confira depois com <code>claude mcp list</code>.</p>
+<div class="snippet"><pre data-copy><code>{{.Setup.CommandEnv}}</code></pre></div>
+</details></li>
+<li class="flowstep"><h2 class="flowstep__title">Abra uma sessão nova do Claude Code</h2>
+<p class="muted">Uma sessão que já estava aberta não vê o WhatsApp.</p></li>
+{{else if eq .Tool.Key "codex"}}
+<li class="flowstep"><h2 class="flowstep__title">Adicione o WhatsApp ao Codex</h2>
+<p class="muted">Acrescente este trecho ao arquivo de configuração do Codex, que vale para o app do ChatGPT, o app do Codex, o terminal e o editor de código.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">~/.codex/config.toml</span></div>
+<pre data-copy><code>{{.Setup.CodexTOML}}</code></pre></div>
+<details class="resend"><summary>Prefiro rodar um comando</summary>
+<p class="muted">Neste caso a chave fica numa variável de ambiente, que precisa estar exportada sempre que o Codex abrir.</p>
+<div class="snippet"><pre data-copy><code>{{.Setup.CodexCommand}}</code></pre></div>
+</details></li>
+<li class="flowstep"><h2 class="flowstep__title">Abra uma conversa nova no Codex</h2>
+<p class="muted">Pode ser no app do ChatGPT, no app do Codex, no terminal ou no editor. Se o app estiver aberto, feche e abra de novo.</p></li>
+{{else if eq .Tool.Key "cursor"}}
+<li class="flowstep"><h2 class="flowstep__title">Adicione o WhatsApp ao Cursor</h2>
+<p class="muted">Abra o arquivo abaixo, que o Cursor também abre pelas configurações de MCP dele, e cole o texto. Se já houver outros servidores no arquivo, acrescente só o trecho <code>"whatsapp"</code> dentro de <code>mcpServers</code>, sem apagar o resto.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">~/.cursor/mcp.json</span></div>
+<pre data-copy><code>{{.Setup.CursorJSON}}</code></pre></div></li>
+<li class="flowstep"><h2 class="flowstep__title">Feche o Cursor e abra de novo</h2>
+<p class="muted">Depois, peça ao agente do Cursor o que quiser do seu WhatsApp.</p></li>
+{{else}}
+<li class="flowstep"><h2 class="flowstep__title">Peça para a sua ferramenta se configurar</h2>
+<p class="muted">Serve para o Windsurf, o n8n e qualquer outra que aceite MCP. Copie o texto abaixo e mande no chat dela.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Copie e mande para a sua ferramenta</span></div>
+<pre class="plain" data-copy><code>{{.Setup.AgentPrompt}}</code></pre></div></li>
+<li class="flowstep"><h2 class="flowstep__title">Reinicie a ferramenta</h2>
+<p class="muted">Quando ela terminar a configuração, feche e abra de novo, ou comece uma conversa nova.</p></li>
+{{end}}
+<li class="flowstep"><h2 class="flowstep__title">Espere a conexão</h2><p class="busy" role="status"{{if .KeyID}} data-wait-key="{{.KeyID}}" data-wait-tool="{{.Tool.Key}}"{{end}}><span class="spinner" aria-hidden="true"></span>Esta tela avisa quando {{.Tool.Who}} se conectar.</p></li>
+</ol>
+</div></section>
+{{end}}
+</div>
+{{template "foot"}}{{end}}
 
 {{define "conectar"}}{{template "head" .}}{{template "nav" .}}
 <h1>Seu WhatsApp nas suas ferramentas de IA</h1>
-<p class="lead">Aqui você vê se está tudo funcionando e liga o seu WhatsApp a um assistente de inteligência artificial — o Claude, o ChatGPT, o Cursor, o que você usar.</p>
+<p class="lead">Aqui você vê se está tudo funcionando e liga o seu WhatsApp a uma ferramenta de inteligência artificial que aceite MCP, como o Claude, o Codex ou a que você usar.</p>
 
 {{if .Ready}}
 {{/* The two sentences that answer "está tudo certo?" without anybody having to
@@ -498,7 +194,7 @@ and acts on. */}}
 <div class="overview__item overview__item--ok">
 <span class="overview__icon" aria-hidden="true">&#10003;</span>
 <div class="overview__body">
-<p class="overview__title">{{plural .LiveCount "ferramenta de IA conectada" "ferramentas de IA conectadas"}}</p>
+<p class="overview__title">{{plural .LiveCount "ferramenta de IA conectada ao MCP" "ferramentas de IA conectadas ao MCP"}}</p>
 <p class="overview__detail">Já pode pedir coisas do seu WhatsApp para a sua IA. Última vez em uso: {{relativeSince .LastUse}}.</p>
 </div></div>
 {{else if .HasKey}}
@@ -518,29 +214,31 @@ and acts on. */}}
 {{end}}
 </section>
 
-<div class="hero"><a class="btn btn--big" href="#nova-conexao">Conectar uma ferramenta de IA</a></div>
+<div class="hero"><a class="btn btn--big" href="/conectar">Conectar ferramenta de IA ao MCP</a></div>
 
 <section class="card">
-<div class="card__head"><h2>Suas conexões</h2>{{if .Connections}}<a class="btn btn--ghost btn--small" href="#nova-conexao">Nova conexão</a>{{end}}</div>
+<div class="card__head"><h2>Suas conexões</h2>{{if .Connections}}<a class="btn btn--ghost btn--small" href="/conectar">Nova conexão</a>{{end}}</div>
 <div class="card__body">
 {{if .Connections}}
 <ul class="rows">
-{{range $i, $conexao := .Connections}}<li class="row{{if not .Live}} row--waiting{{end}}">
-<span class="tool-mark" aria-hidden="true">{{initial .Tool}}</span>
+{{range $i, $c := .Connections}}<li class="row{{if not .Live}} row--waiting{{end}}">
+{{if .Mark}}<span class="tool-mark tool-mark--logo" aria-hidden="true">{{toolmark .Mark}}</span>{{else}}<span class="tool-mark" aria-hidden="true">{{initial .Tool}}</span>{{end}}
 <span class="row__main"><span class="row__title">{{.Tool}}</span>
-<span class="row__meta">{{if .Live}}Funcionando &middot; usada {{relativeSince .LastUsedAt}}{{else}}Ainda não se conectou &middot; cole a configuração na ferramenta{{end}} &middot; <span class="mono">{{.Prefix}}&hellip;</span></span></span>
+<span class="row__meta">{{if .Live}}Funcionando &middot; usada {{relativeSince .LastUsedAt}}{{else}}Ainda não se conectou &middot; configure a ferramenta e reinicie{{end}} &middot; <span class="mono">{{.Prefix}}&hellip;</span>{{with .Version}} <span class="tip tip--quiet" tabindex="0" aria-describedby="tip-versao-{{$i}}"><span aria-hidden="true">?</span><span class="tip__body" role="tooltip" id="tip-versao-{{$i}}">{{$c.Tool}} {{.}}</span></span>{{end}}</span></span>
 {{if .Live}}<span class="pill pill--ok">Conectada</span>{{else}}<span class="pill pill--warn">Aguardando</span>{{end}}
+{{if .Renamable}}<a class="btn btn--quiet btn--small" href="#renomear-{{$i}}">Renomear</a>{{end}}
 <a class="btn btn--danger btn--small" href="#desconectar-{{$i}}">Desconectar</a>
 </li>{{end}}
 </ul>
-<p class="muted">Cada ferramenta tem a sua própria conexão. Desconectar uma vale na hora e não mexe nas outras.</p>
+<p class="muted">Cada ferramenta tem a sua própria chave de acesso. Desconectar uma vale na hora e não mexe nas outras.</p>
 {{else}}
 <div class="empty"><p class="empty__title">Nenhuma ferramenta de IA conectada ainda</p>
 <p class="muted">Clique no botão acima, escolha onde você vai usar e siga o passo a passo. Leva menos de um minuto.</p></div>
 {{end}}
 </div></section>
 
-{{if .ClientConnected}}
+{{/* The first days only: after that the examples live in Ajuda. */}}
+{{if and .ClientConnected .Newcomer}}
 <section class="card">
 <div class="card__head"><h2>Experimente pedir</h2></div>
 <div class="card__body">
@@ -548,18 +246,7 @@ and acts on. */}}
 <ul class="prompts">
 {{range .Prompts}}<li class="prompt"><div class="snippet"><pre data-copy><code>{{.}}</code></pre></div></li>{{end}}
 </ul>
-</div></section>
-{{end}}
-
-{{if .HasKey}}
-<section class="card">
-<div class="card__head"><h2>Ver o passo a passo de novo</h2></div>
-<div class="card__body">
-<details class="disclose">
-<summary>Mostrar como configurar uma ferramenta de IA</summary>
-{{template "clientTabs" .Setup}}
-<p class="muted">O endereço deste MCP é <code>{{.Endpoint}}</code>. Ele não é segredo — o segredo é a chave, que aparece uma única vez, quando a conexão é criada.</p>
-</details>
+<p class="muted" style="margin-bottom:0">Mais exemplos e respostas para dúvidas na <a href="/ajuda">Ajuda</a>.</p>
 </div></section>
 {{end}}
 
@@ -571,31 +258,22 @@ and acts on. */}}
 <div class="actions" style="justify-content:center;margin-top:14px">
 {{if .NeedsActivation}}<a class="btn" href="/instalacao">Ativar a licença</a>{{end}}
 {{if .NeedsPairing}}<a class="btn" href="/pair">Ler o QR code</a>{{end}}
-<a class="btn btn--ghost" href="/instancias">Ir para Instâncias</a>
+<a class="btn btn--ghost" href="/whatsapp">Ir para WhatsApp</a>
 </div></div>
 </div></section>
 {{end}}
 
-<div class="overlay" id="nova-conexao" role="dialog" aria-modal="true" aria-labelledby="nova-conexao-titulo">
+{{range $i, $c := .Connections}}
+{{if .Renamable}}<div class="overlay" id="renomear-{{$i}}" role="dialog" aria-modal="true" aria-labelledby="renomear-{{$i}}-titulo">
 <div class="dialog">
-<div class="dialog__head"><h2 id="nova-conexao-titulo">Conectar uma ferramenta de IA</h2><a class="dialog__close" href="#" aria-label="Fechar">&times;</a></div>
+<div class="dialog__head"><h2 id="renomear-{{$i}}-titulo">Renomear esta conexão</h2><a class="dialog__close" href="#" aria-label="Fechar">&times;</a></div>
 <div class="dialog__body">
-<form method="post" action="/chaves">
-<p class="muted">Onde você vai usar o seu WhatsApp? Na tela seguinte aparece o passo a passo, pronto para copiar e colar.</p>
-<ul class="picks">
-{{range .Clients}}<li><label class="pick">
-<input type="radio" name="cliente" value="{{.Value}}"{{if .First}} checked{{end}}>
-<span class="pick__text"><span class="pick__title">{{.Label}}</span><span class="pick__hint">{{.Hint}}</span></span>
-</label></li>{{end}}
-</ul>
-<label class="field" for="key-name"><span class="field__label">Apelido desta conexão</span>
-<span class="field__hint">Opcional, só para você reconhecer depois. Ex.: &ldquo;meu notebook&rdquo;.</span></label>
-<input id="key-name" type="text" name="name" maxlength="60" placeholder="Deixe em branco para usar o nome da ferramenta" autocapitalize="sentences" spellcheck="false">
-<div class="actions actions--end"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn" type="submit">Criar conexão</button></div>
+<form method="post" action="/conexoes/renomear"><input type="hidden" name="id" value="{{.ID}}">
+<label class="field" for="nome-{{$i}}"><span class="field__label">Nome</span><span class="field__hint">Como esta ferramenta aparece aqui. Deixe em branco para voltar ao nome original.</span></label>
+<input id="nome-{{$i}}" type="text" name="name" value="{{.Tool}}" maxlength="40" autocomplete="off" spellcheck="false">
+<div class="actions actions--end" style="margin-top:14px"><a class="btn btn--quiet" href="#">Cancelar</a><button class="btn" type="submit">Salvar</button></div>
 </form>
-</div></div></div>
-
-{{range $i, $conexao := .Connections}}
+</div></div></div>{{end}}
 <div class="overlay" id="desconectar-{{$i}}" role="dialog" aria-modal="true" aria-labelledby="desconectar-{{$i}}-titulo">
 <div class="dialog">
 <div class="dialog__head"><h2 id="desconectar-{{$i}}-titulo">Desconectar esta ferramenta?</h2><a class="dialog__close" href="#" aria-label="Fechar">&times;</a></div>
@@ -610,42 +288,31 @@ and acts on. */}}
 {{end}}
 {{template "foot"}}{{end}}
 
-{{define "chave"}}{{template "head" .}}{{template "nav" .}}
-<h1>Conexão criada</h1>
-<p class="lead">Falta só levar isto para a sua ferramenta de IA. O passo a passo abaixo está pronto para copiar e colar.</p>
-
-<div class="secret">
-<p class="secret__title">Guarde esta chave agora</p>
-<code class="secret__value">{{.Secret}}</code>
-<p class="muted">Ela aparece uma única vez, aqui. Já vem preenchida no passo a passo abaixo, então normalmente você nem precisa copiá-la à parte. Se quiser guardar, use o seu gerenciador de senhas — nunca um arquivo que você compartilha.</p>
-</div>
-
-<section class="card card--accent">
-<div class="card__head"><h2>Passo a passo</h2><span class="pill pill--accent pill--plain">{{.Name}}</span></div>
-<div class="card__body">
-{{template "clientTabs" .Setup}}
-</div></section>
-
-<section class="card">
-<div class="card__head"><h2>Para saber se deu certo</h2></div>
-<div class="card__body">
-<p class="muted">Depois de configurar e reiniciar a ferramenta, mande esta mensagem no chat dela. Se ela responder com os dados do seu WhatsApp, está funcionando.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Mensagem de teste</span></div>
-<pre class="plain" data-copy><code>{{.Prompt}}</code></pre></div>
-<p class="muted">A tela de conexões avisa sozinha quando a ferramenta se conectar pela primeira vez.</p>
-</div></section>
-
-<div class="actions"><a class="btn btn--ghost" href="/">Voltar para as minhas conexões</a></div>
-{{template "foot"}}{{end}}
-
 {{define "instancias"}}{{template "head" .}}{{template "nav" .}}
-<h1>Instâncias</h1>
-<p class="lead">Uma instância é uma conta de WhatsApp conectada. O MCP usa uma por vez.</p>
+<h1>WhatsApp</h1>
+<p class="lead">As contas de WhatsApp conectadas a este servidor e o que já chegou delas. O MCP usa uma por vez.</p>
 {{with .OK}}<p class="alert alert--ok" role="status">{{.}}</p>{{end}}
 {{if .LicenseHealed}}<p class="alert alert--ok" role="status">A licen&ccedil;a da Evolution foi reativada automaticamente a partir da que este painel guardava, sem que ningu&eacute;m precisasse registrar de novo.</p>{{end}}
 
+{{/* An instance the panel cannot even list is not one it can operate, so the
+     controls for it stay out of the way until Evolution answers again. */}}
+{{if and .Selected (not .Unavailable)}}
 <section class="card">
-<div class="card__head"><h2>Instâncias disponíveis</h2><a class="btn btn--ghost btn--small" href="#nova-instancia">Adicionar instância</a></div>
+<div class="card__head"><h2>Conta em uso: {{.SelectedName}}</h2>{{with .SessionLabel}}<span class="pill pill--{{$.SessionTone}}">{{.}}</span>{{end}}</div>
+<div class="card__body stack">
+<div class="hello"><span class="avatar" style="background:#128c7e">{{initial .AccountName}}</span><div><p class="hello__name">{{.AccountName}}</p>{{with .SelectedNumber}}<p class="hello__phone">{{phone .}}</p>{{end}}</div></div>
+{{if .NeedsPairing}}<p class="note">A instância ainda não está pareada. Leia o QR code para conectar o WhatsApp.</p>
+<div class="actions"><a class="btn" href="/pair">Ler o QR code</a></div>{{end}}
+{{with .Status}}<dl class="facts">
+<div class="fact"><dt>Último evento</dt><dd>{{relativeSince .LastEvent}}<span class="fact__detail">{{moment .LastEvent}}</span></dd></div>
+{{if .HasIndex}}<div class="fact"><dt>Mensagens guardadas</dt><dd>{{count .Coverage.Messages}}</dd></div>
+<div class="fact"><dt>Histórico desde</dt><dd>{{moment .Coverage.OldestAt}}</dd></div>{{end}}
+</dl>{{end}}
+</div></section>
+{{end}}
+
+<section class="card">
+<div class="card__head"><h2>Instâncias</h2><a class="btn btn--ghost btn--small" href="#nova-instancia">Adicionar instância</a></div>
 <div class="card__body">
 {{if .Unavailable}}
 {{if .NeedsActivation}}<div class="empty"><p class="empty__title">A licença ainda não foi ativada</p>
@@ -653,6 +320,7 @@ and acts on. */}}
 <div class="actions" style="justify-content:center;margin-top:14px"><a class="btn" href="/instalacao">Ativar a licença</a></div></div>
 {{else}}<p class="alert" role="alert">{{.Notice}}</p>{{end}}
 {{else if .Instances}}
+<p class="muted">Uma instância é uma conta de WhatsApp conectada a este servidor.</p>
 <form method="post" action="/instancias/selecionar">
 <ul class="rows">
 {{range $i, $inst := .Instances}}<li class="row{{if .Selected}} row--on{{end}}">
@@ -674,37 +342,29 @@ and acts on. */}}
 {{end}}
 </div></section>
 
-{{/* An instance the panel cannot even list is not one it can operate, so the
-     controls for it stay out of the way until Evolution answers again. */}}
 {{if and .Selected (not .Unavailable)}}
 <section class="card">
-<div class="card__head"><h2>Instância em uso: {{.SelectedName}}</h2>{{with .SessionLabel}}<span class="pill pill--{{$.SessionTone}}">{{.}}</span>{{end}}</div>
+<div class="card__head"><h2>Histórico</h2></div>
 <div class="card__body stack">
-{{if .NeedsPairing}}<p>A instância ainda não está pareada. Leia o QR code para conectar o WhatsApp.</p>
-<div class="actions"><a class="btn" href="/pair">Ler o QR code</a></div>{{end}}
+<p class="muted">O índice cobre o que chegou desde que a instância foi conectada. Cada pedido traz mais histórico do celular para este servidor, e ele fica disponível para a sua ferramenta de IA consultar pelo MCP. O WhatsApp devolve mensagens anteriores a uma que ele já conhece, então cada pedido recua mais um trecho; o celular precisa estar com internet.</p>
+<div class="actions"><form method="post" action="/instancias/historico"><button class="btn btn--ghost btn--small" type="submit">Buscar mensagens mais antigas</button></form></div>
+</div></section>
 
-<div>
-<h3>Conexão</h3>
-<div class="actions" style="margin-top:10px">
+<section class="card">
+<div class="card__head"><h2>Conexão</h2></div>
+<div class="card__body stack">
+<div class="actions">
 <form method="post" action="/instancias/conectar"><button class="btn btn--ghost btn--small" type="submit">Reconectar</button></form>
 <form method="post" action="/instancias/desconectar"><button class="btn btn--ghost btn--small" type="submit">Desconectar</button></form>
 </div>
 <p class="muted">Desconectar apenas para o cliente e preserva o pareamento.</p>
-</div>
+</div></section>
 
-<div>
-<h3>Histórico</h3>
-<p class="muted">O índice cobre o que chegou desde que a instância foi conectada. O WhatsApp devolve mensagens anteriores a uma que ele já conhece, então cada pedido recua mais um trecho.</p>
-<div class="actions"><form method="post" action="/instancias/historico"><button class="btn btn--ghost btn--small" type="submit">Puxar mensagens mais antigas</button></form></div>
-</div>
-
-<div>
-<h3>Zona de risco</h3>
-<div class="actions" style="margin-top:10px">
-<a class="btn btn--danger btn--small" href="#encerrar-sessao">Encerrar sessão do WhatsApp</a>
-</div>
-<p class="muted">Para apagar uma instância, use o ✕ na linha dela, na lista acima.</p>
-</div>
+<section class="card">
+<div class="card__head"><h2>Zona de risco</h2></div>
+<div class="card__body">
+<div class="actions"><a class="btn btn--danger btn--small" href="#encerrar-sessao">Encerrar sessão do WhatsApp</a></div>
+<p class="muted">O servidor sai da lista de dispositivos conectados do seu celular. As mensagens já indexadas continuam onde estão. Para apagar uma instância, use o ✕ na linha dela, na lista acima.</p>
 </div></section>
 {{end}}
 
@@ -753,8 +413,8 @@ and acts on. */}}
 {{template "foot"}}{{end}}
 
 {{define "estado"}}{{template "head" .}}{{template "nav" .}}
-<h1>Estado do serviço</h1>
-<p class="lead">O mesmo retrato que as ferramentas do MCP e os endpoints de saúde reportam.</p>
+<h1>Status</h1>
+<p class="lead">Se o seu WhatsApp está conectado e se as mensagens estão chegando a este servidor. É o mesmo retrato que as ferramentas do MCP e os endpoints de saúde reportam.</p>
 
 {{with .Status}}
 <section class="card">
@@ -771,6 +431,17 @@ and acts on. */}}
 {{end}}
 </dl>
 {{if .WhatsApp.Reason}}<p class="muted">Motivo informado pelo WhatsApp: <code>{{.WhatsApp.Reason}}</code></p>{{end}}
+</div></section>
+
+<section class="card">
+<div class="card__head"><h2>Verificações</h2></div>
+<div class="card__body">
+<ul class="rows">
+{{range .Checks}}<li class="row">
+<span class="row__main"><span class="row__title">{{.Title}}</span><span class="row__meta">{{.Text}}</span></span>
+<span class="pill pill--{{if eq .Status "ok"}}ok{{else if eq .Status "warn"}}warn{{else}}off{{end}}">{{if eq .Status "ok"}}Ok{{else if eq .Status "warn"}}Atenção{{else}}Problema{{end}}</span>
+</li>{{end}}
+</ul>
 </div></section>
 
 {{if .Queues}}
@@ -794,6 +465,258 @@ and acts on. */}}
 <div class="actions"><a class="btn btn--ghost btn--small" href="/healthz">/healthz</a><a class="btn btn--ghost btn--small" href="/readyz">/readyz</a><a class="btn btn--ghost btn--small" href="/api/selected-instance">Instância selecionada</a></div>
 </div></section>
 {{template "foot"}}{{end}}
+
+{{define "documentacao"}}{{template "head" .}}{{template "nav" .}}
+<h1>O que o MCP sabe fazer</h1>
+<p class="lead">As {{.Count}} funções que a sua ferramenta de IA pode usar no seu WhatsApp, lidas do próprio servidor: esta página só fica errada se o servidor estiver.</p>
+<div class="tools">
+{{range .Tools}}
+<article class="tool">
+<div class="tool__head"><span class="tool__name">{{.Name}}</span></div>
+<p class="tool__desc">{{.Description}}</p>
+{{if .Arguments}}<ul class="tool__args">
+{{range .Arguments}}<li class="tool__arg"><span class="tool__argname">{{.Name}}</span><span class="tool__type">{{.Type}}</span>{{if .Required}}<span class="tool__req">obrigatório</span>{{end}}<span class="tool__argdesc">{{.Description}}{{if .Choices}} Valores: {{range $i, $c := .Choices}}{{if $i}}, {{end}}{{$c}}{{end}}.{{end}}</span></li>{{end}}
+</ul>{{else}}<p class="tool__args muted">Sem argumentos.</p>{{end}}
+</article>
+{{end}}
+</div>
+{{template "foot"}}{{end}}
+
+{{define "receitas"}}{{template "head" .}}{{template "nav" .}}
+<h1>Receitas</h1>
+<p class="lead">O WhatsApp MCP só responde pelo WhatsApp quando perguntado: esperar a hora, vigiar um termo e montar o relatório são trabalho da sua ferramenta de IA, escrito como instrução. Cada receita é um texto para colar.</p>
+<div class="recipes">
+{{range .Recipes}}
+<article class="recipe">
+<div class="recipe__head">
+<h2 class="recipe__title">{{.Title}}</h2>
+<p class="recipe__summary">{{.Summary}}</p>
+</div>
+<div class="recipe__meta">
+{{range .Uses}}<span class="recipe__tool">{{.}}</span>{{end}}
+{{with .Schedule}}<span class="recipe__tool recipe__tool--when">⏱ {{.}}</span>{{end}}
+</div>
+<div class="recipe__prompt">
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Prompt</span></div>
+<pre data-copy><code>{{.Prompt}}</code></pre></div>
+</div>
+{{with .Caveat}}<p class="recipe__caveat"><strong>Atenção:</strong> {{.}}</p>{{end}}
+</article>
+{{end}}
+</div>
+{{template "foot"}}{{end}}
+
+{{define "ajuda"}}{{template "head" .}}{{template "nav" .}}
+<h1>Ajuda</h1>
+<p class="lead">Respostas para as dúvidas mais comuns e exemplos para começar.</p>
+
+<section class="card" id="perguntas">
+<div class="card__head"><h2 class="card__title">{{icon "help"}}Perguntas frequentes</h2></div>
+<div class="card__body">
+<div class="faq">
+<details class="faq__item"><summary>Funciona no Claude pelo navegador ou pelo celular?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Ainda não. O Claude no navegador e no celular, e o ChatGPT na web, só aceitam conectores que entram com login próprio, e este servidor usa uma chave de acesso por conexão. Funciona nos programas que aceitam essa chave, como o Claude Desktop, o Claude Code, o Codex e o Cursor, em qualquer computador: o servidor fica na internet.</p></div></details>
+<details class="faq__item"><summary>A IA pode mandar mensagens sem eu pedir?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Não. Ler e procurar é seguro: mandar, reagir, encaminhar, editar ou apagar uma mensagem só acontece quando você pede. Apagar, sair de um grupo ou remover alguém pedem confirmação, e a IA pode mostrar um rascunho antes de enviar.</p></div></details>
+<details class="faq__item"><summary>Onde ficam as minhas mensagens?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>No banco de dados deste servidor, que é seu: nada passa por um serviço de terceiros além do próprio WhatsApp. Quando você pede algo à sua ferramenta de IA, ela lê as mensagens de que precisa para responder, e o que ela faz com elas segue as regras de privacidade dela. A transcrição de áudio, se você ativar com uma chave da OpenAI, manda o áudio para a OpenAI.</p></div></details>
+<details class="faq__item"><summary>O meu computador precisa ficar ligado?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Não. O servidor fica ligado o tempo todo e recebe as mensagens mesmo com o seu computador desligado. Se ele cair por um tempo, o WhatsApp entrega o que ficou pendente quando ele volta; se ainda faltar alguma coisa, peça o histórico ao celular na aba <a href="/whatsapp">WhatsApp</a>.</p></div></details>
+<details class="faq__item"><summary>Como trazer mensagens mais antigas?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Na aba <a href="/whatsapp">WhatsApp</a>, use "Buscar mensagens mais antigas", ou peça à sua ferramenta de IA para buscar o histórico de uma conversa. Cada pedido traz mais histórico do celular para este servidor, e ele fica disponível para a sua ferramenta de IA consultar. O celular precisa estar com internet.</p></div></details>
+<details class="faq__item"><summary>A IA consegue ouvir os meus áudios?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Sim. Com uma chave da OpenAI em <a href="/configuracoes#transcricao">Configurações › Transcrição de áudio</a>, o áudio vira texto com o Whisper quando você pede, e cada áudio é transcrito uma vez só. Se a sua ferramenta de IA roda comandos no seu computador, ela também pode baixar o áudio e transcrever ali mesmo, de graça, e guardar o texto aqui. Veja <a href="#transcrever">Transcrever áudios</a>, logo abaixo.</p></div></details>
+<details class="faq__item"><summary>Posso conectar mais de uma ferramenta de IA?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Pode. Cada uma tem a sua chave, todas usam o mesmo WhatsApp, e desconectar uma não mexe nas outras. Para adicionar outra, use <a href="/conectar">Conectar ferramenta de IA ao MCP</a>.</p></div></details>
+<details class="faq__item"><summary>A minha ferramenta não aparece conectada. E agora?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Feche a ferramenta e abra de novo, ou comece uma conversa nova: ela só carrega o WhatsApp ao iniciar. Confira se a chave foi colada inteira. Se continuar assim, crie uma conexão nova em <a href="/conectar">Conectar ferramenta de IA ao MCP</a> e confira a aba <a href="/status">Status</a>.</p></div></details>
+<details class="faq__item"><summary>O que a IA consegue fazer no meu WhatsApp?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Ler, procurar e resumir conversas, dizer quem está esperando a sua resposta, transcrever áudios, mandar mensagens (respondendo, mencionando ou com rascunho antes), fotos, figurinhas, enquetes e localização, encaminhar, reagir, editar e apagar mensagens, organizar conversas e administrar grupos. A lista completa está em <a href="/funcoes">Funções</a>.</p></div></details>
+<details class="faq__item"><summary>Como desconectar o WhatsApp deste servidor?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Na aba <a href="/whatsapp">WhatsApp</a>, em Zona de risco. O servidor sai dos dispositivos conectados do seu celular, e as mensagens já guardadas continuam aqui.</p></div></details>
+<details class="faq__item"><summary>Onde ficam os meus dados?{{icon "chevron"}}</summary>
+<div class="faq__answer"><p>Neste servidor, como aparece em <a href="/configuracoes#dados">Configurações › Dados</a>: as mensagens, as transcrições, as chaves e os webhooks no banco de dados, e os arquivos baixados numa pasta do servidor.</p></div></details>
+</div>
+</div></section>
+
+<section class="card" id="como-usar">
+<div class="card__head"><h2 class="card__title">{{icon "chat"}}Como usar</h2></div>
+<div class="card__body stack">
+<p class="muted">Escreva isso no chat da sua ferramenta de IA. Ler e procurar é seguro: mandar mensagem só acontece quando você pede.</p>
+<ul class="prompts">
+{{range .Prompts}}<li class="prompt"><div class="snippet"><pre data-copy><code>{{.}}</code></pre></div></li>{{end}}
+</ul>
+<div class="note"><p style="margin:0">Quer ir além? As <a href="/receitas">Receitas</a> trazem pedidos prontos para agendar mensagens, vigiar assuntos, resumir grupos e mais.</p></div>
+</div></section>
+
+<section class="card" id="transcrever">
+<div class="card__head"><h2 class="card__title">{{icon "mic"}}Transcrever áudios</h2></div>
+<div class="card__body stack">
+<p class="muted">Com uma <a href="/configuracoes#transcricao">chave da OpenAI</a> salva, os áudios viram texto com o Whisper, só quando você pede. O áudio vai para a OpenAI e é cobrado na conta dessa chave (<a href="{{.Pricing}}" rel="noopener noreferrer" target="_blank">US$ {{.PricePerMinute}} por minuto</a>).</p>
+<p class="muted">Se a sua ferramenta de IA roda comandos no seu computador e ele tem uma placa que o Whisper aproveite (um Mac com Apple Silicon, ou uma NVIDIA), ela pode baixar o áudio, transcrever ali mesmo, de graça e sem o áudio sair de lá, e guardar o texto aqui.</p>
+<p class="muted">Peça algo como a mensagem abaixo. Os áudios já transcritos vêm junto das mensagens; os outros ela transcreve na hora.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Exemplo</span></div>
+<pre class="plain" data-copy><code>Transcreva os áudios que recebi hoje no WhatsApp.</code></pre></div>
+<p class="muted" style="margin:0">Cada áudio é transcrito uma vez: pedir de novo devolve o texto guardado, sem nova cobrança.</p>
+</div></section>
+{{template "foot"}}{{end}}
+
+{{define "configuracoes"}}{{template "head" .}}{{template "nav" .}}
+<h1>Configurações</h1>
+<p class="lead">Como o WhatsApp MCP roda neste servidor.</p>
+{{with .OK}}<p class="alert alert--ok" role="status">{{.}}</p>{{end}}
+
+<section class="card" id="endereco">
+<div class="card__head"><h2 class="card__title">{{icon "link"}}Endereço do MCP</h2></div>
+<div class="card__body stack">
+<p class="muted">As ferramentas de IA falam com o WhatsApp MCP por este endereço, cada uma com a chave de acesso da sua conexão. Ele não é segredo: o segredo é a chave, que aparece uma única vez, quando a conexão é criada.</p>
+<div class="snippet"><div class="snippet__head"><span class="snippet__title">Endereço</span></div><pre data-copy><code>{{.Endpoint}}</code></pre></div>
+<p class="muted" style="margin:0">Ele vem da variável <code>PUBLIC_URL</code> do servidor. Trocar o domínio exige configurar as ferramentas de novo.</p>
+</div></section>
+
+<section class="card" id="conta">
+<div class="card__head"><h2 class="card__title">{{icon "user"}}Conta</h2></div>
+<div class="card__body stack">
+<p class="muted">Você entra neste painel como <strong>{{.Admin}}</strong>.</p>
+<div class="actions"><a class="btn btn--ghost btn--small" href="/senha">Trocar a senha</a>
+<form method="post" action="/logout"><button class="btn btn--quiet btn--small" type="submit">Sair</button></form></div>
+</div></section>
+
+<section class="card" id="webhooks" data-webhooks>
+<div class="card__head"><h2 class="card__title">{{icon "code"}}Webhooks</h2><a class="btn btn--ghost btn--small" href="/webhooks/documentacao">{{icon "book"}}Documentação</a></div>
+<div class="card__body stack">
+<p class="muted" data-webhooks-intro hidden>Avisam um programa seu a cada mensagem nova que chega, para ele agir sozinho: responder, registrar numa planilha, avisar em outro lugar. São para quem usa scripts ou automações. <span class="tip" tabindex="0" aria-describedby="tip-webhooks"><span aria-hidden="true">?</span><span class="tip__body" role="tooltip" id="tip-webhooks">A cada mensagem, este servidor faz um POST com JSON no endereço, assinado com a chave do webhook. Se o endereço não responder com sucesso, ele tenta de novo até 10 vezes em menos de um minuto; depois disso o webhook é desligado e os avisos que esperavam são descartados. O formato de cada aviso está em Documentação, no alto deste card.</span></span></p>
+<p class="note" data-webhooks-unavailable hidden>Os webhooks não estão disponíveis neste servidor.</p>
+<p class="busy" data-webhooks-loading role="status"><span class="spinner" aria-hidden="true"></span>Carregando…</p>
+<ul class="rows" data-webhooks-list hidden></ul>
+<div class="empty" data-webhooks-empty hidden><p class="empty__title">Nenhum webhook configurado</p><p class="muted" style="margin:6px 0 12px">Avisam um programa seu a cada mensagem nova, para quem usa scripts ou automações.</p><button class="btn btn--ghost btn--small" type="button" data-webhook-start>Configurar o primeiro webhook</button></div>
+<div class="secret" data-webhook-secret hidden>
+<p class="secret__title">Webhook adicionado. Guarde a chave dele</p>
+<p class="muted" style="margin:0">Ela não aparece de novo. Com ela, o seu programa confere que cada aviso veio mesmo do WhatsApp MCP.</p>
+<code class="secret__value" data-webhook-secret-value></code>
+<div class="actions"><button class="btn btn--ghost btn--small" type="button" data-webhook-secret-copy>Copiar a chave</button><button class="btn btn--quiet btn--small" type="button" data-webhook-secret-close>Já guardei</button></div>
+</div>
+<form class="stack" data-webhook-form hidden>
+<h3 class="card__sub">Adicionar um webhook</h3>
+<label class="field" for="webhook-url"><span class="field__label">Endereço</span><span class="field__hint">O endereço do seu programa, começando com http:// ou https://. Precisa ser alcançável a partir deste servidor.</span></label>
+<input id="webhook-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://exemplo.com/whatsapp" required data-webhook-url>
+<span class="field__label">Avisar quando</span>
+<label class="check"><input type="checkbox" value="message" checked data-webhook-event><span>Chegar uma mensagem</span></label>
+<label class="check"><input type="checkbox" value="reaction" data-webhook-event><span>Alguém reagir a uma mensagem</span></label>
+<label class="check"><input type="checkbox" value="receipt" data-webhook-event><span>Uma mensagem sua for entregue, lida ou ouvida</span></label>
+<label class="check"><input type="checkbox" data-webhook-own><span>Incluir as mensagens que você manda<span class="check__hint">Do celular ou pela sua ferramenta de IA.</span></span></label>
+<div class="actions"><button class="btn btn--small" type="submit">Adicionar webhook</button><button class="btn btn--quiet btn--small" type="button" data-webhook-cancel hidden>Cancelar</button></div>
+<p class="alert" role="alert" data-webhook-error hidden></p>
+</form>
+</div></section>
+
+<section class="card" id="transcricao">
+<div class="card__head"><h2 class="card__title">{{icon "mic"}}Transcrição de áudio</h2>{{if not .Transcription}}<span class="pill pill--off">Indisponível</span>{{else if .Status.Configured}}<span class="pill pill--ok">Ativa</span>{{else}}<span class="pill pill--off">Não configurada</span>{{end}}</div>
+<div class="card__body stack">
+{{if not .Transcription}}
+<p class="muted">A transcrição não está disponível neste servidor.</p>
+{{else if .Status.Configured}}
+<p class="muted">Os áudios viram texto com o Whisper da OpenAI, só quando você pede, e são cobrados na conta desta chave.</p>
+<dl class="facts">
+<div class="fact"><dt>Chave salva</dt><dd class="mono">{{.Status.Hint}}</dd></div>
+<div class="fact"><dt>Salva em</dt><dd>{{moment .Status.UpdatedAt}}</dd></div>
+</dl>
+<div class="actions">
+<a class="btn btn--ghost btn--small" href="{{.Links.Usage}}" rel="noopener noreferrer" target="_blank">Uso e custos ↗</a>
+<a class="btn btn--ghost btn--small" href="{{.Links.Billing}}" rel="noopener noreferrer" target="_blank">Créditos ↗</a>
+<a class="btn btn--ghost btn--small" href="{{.Links.Limits}}" rel="noopener noreferrer" target="_blank">Limite de gastos ↗</a>
+</div>
+<details class="disclose"><summary>Trocar ou remover a chave</summary>
+<div class="stack">
+{{template "transcricaoform" .}}
+<form method="post" action="/transcricao/remover">
+<div class="actions"><button class="btn btn--danger btn--small" type="submit">Remover chave</button></div>
+</form>
+</div></details>
+{{else}}
+<p class="muted">Com uma chave da sua conta na OpenAI, a sua ferramenta de IA transcreve os áudios que você recebe usando o Whisper. Os áudios são cobrados nela, e só nela: US$&nbsp;{{.PricePerMinute}} por minuto.</p>
+<details class="disclose"><summary>Como conseguir uma chave</summary>
+<ol class="guide">
+<li><strong>Crie uma conta na plataforma da OpenAI.</strong> É a plataforma de desenvolvedores, separada do ChatGPT: uma assinatura do ChatGPT Plus não inclui créditos para a API. <a href="{{.Links.Signup}}" rel="noopener noreferrer" target="_blank">Criar conta ↗</a></li>
+<li><strong>Adicione créditos.</strong> Em <em>Billing</em>, o mínimo é US$&nbsp;5, que dão para cerca de 800 minutos de áudio. <a href="{{.Links.Billing}}" rel="noopener noreferrer" target="_blank">Adicionar créditos ↗</a></li>
+<li><strong>Crie a chave de API.</strong> Em <em>API keys</em>, clique em <em>Create new secret key</em> e copie a chave na hora: a OpenAI só mostra ela uma vez. <a href="{{.Links.Keys}}" rel="noopener noreferrer" target="_blank">Criar chave ↗</a></li>
+<li><strong>Cole a chave aqui embaixo e salve.</strong> Ela é conferida com a OpenAI antes de ser guardada.</li>
+</ol>
+</details>
+{{template "transcricaoform" .}}
+{{end}}
+<p class="muted" style="margin:0"><a href="/ajuda#transcrever">Como usar</a>, e como transcrever de graça no seu computador.</p>
+</div></section>
+
+<section class="card" id="atualizacoes">
+<div class="card__head"><h2 class="card__title">{{icon "refresh"}}Versão e atualizações</h2></div>
+<div class="card__body stack">
+<dl class="facts"><div class="fact"><dt>Versão instalada</dt><dd>{{.Version}}</dd></div><div class="fact"><dt>Mais recente</dt><dd>{{with .Latest}}{{.}}{{else}}—{{end}}</dd></div></dl>
+{{if .Behind}}
+{{if .CanSelfUpdate}}{{if .UpdateBusy}}<p class="muted"><a href="/atualizacao">Atualização em andamento →</a></p>
+{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.Latest}}"><div class="actions"><button class="btn btn--small" type="submit">Atualizar para a {{.Latest}}</button><a class="btn btn--quiet btn--small" href="{{releaseURL .Latest}}" rel="noopener noreferrer" target="_blank">Ver o que mudou</a></div></form>
+<p class="muted">O servidor faz backup do banco antes de tudo e reinicia o painel no fim — você vai precisar entrar de novo.</p>{{end}}
+{{else}}<p class="muted">Rode na sua instância, por SSH. Os segredos, o pareamento e as mensagens indexadas são preservados.</p>
+<div class="snippet"><pre data-copy><code>{{updateCommand}}</code></pre></div>{{end}}
+{{else if .Latest}}<p class="muted">Você já tem a versão mais recente.</p>
+{{else}}<p class="muted">O servidor ainda não conferiu se há uma versão nova. Quando houver, o aviso aparece no topo de todas as páginas.</p>{{end}}
+</div></section>
+
+<section class="card" id="aparencia" hidden data-theme-switch>
+<div class="card__head"><h2 class="card__title">{{icon "palette"}}Aparência</h2></div>
+<div class="card__body">
+<fieldset class="themes"><legend class="sr-only">Tema</legend>
+<label class="theme-pick"><input type="radio" name="tema" value="light" data-theme-choice><span class="theme-pick__preview" aria-hidden="true"><span class="mini mini--light"><i></i><i></i><i></i></span></span><span class="theme-pick__label">{{icon "sun"}}Claro</span></label>
+<label class="theme-pick"><input type="radio" name="tema" value="dark" data-theme-choice><span class="theme-pick__preview" aria-hidden="true"><span class="mini mini--dark"><i></i><i></i><i></i></span></span><span class="theme-pick__label">{{icon "moon"}}Escuro</span></label>
+<label class="theme-pick"><input type="radio" name="tema" value="system" data-theme-choice><span class="theme-pick__preview" aria-hidden="true"><span class="mini mini--light"><i></i><i></i><i></i></span><span class="mini mini--dark mini--half"><i></i><i></i><i></i></span></span><span class="theme-pick__label">{{icon "monitor"}}Sistema</span></label>
+</fieldset>
+<p class="muted" style="margin:12px 0 0">Vale só para este navegador.</p>
+</div></section>
+
+<section class="card" id="arquivos" data-media>
+<div class="card__head"><h2 class="card__title">{{icon "folder"}}Arquivos baixados</h2></div>
+<div class="card__body stack">
+<p class="muted">Fotos, áudios e documentos que as suas ferramentas de IA abriram ficam guardados neste servidor, para não serem baixados de novo, e continuam legíveis mesmo depois que o WhatsApp os descarta. Apagar não perde nenhuma mensagem: se precisar, o arquivo é baixado outra vez, enquanto o WhatsApp ainda o tiver.</p>
+<dl class="facts">
+<div class="fact"><dt>Espaço usado</dt><dd data-media-bytes>…</dd></div>
+<div class="fact"><dt>Arquivos</dt><dd data-media-files>…</dd></div>
+<div class="fact"><dt>Exportações</dt><dd data-media-exports>…</dd></div>
+</dl>
+<p class="muted" data-media-types hidden></p>
+<div class="actions"><label class="check check--inline"><input type="checkbox" data-media-retention><span>Apagar sozinho os arquivos baixados há mais de</span></label><input class="input--short" type="number" min="1" max="3650" value="30" aria-label="dias" data-media-days disabled><span class="muted">dias</span></div>
+<p class="muted" style="margin:0">As exportações de conversas ficam até você apagar. <span class="tip" tabindex="0" aria-describedby="tip-exportacoes"><span aria-hidden="true">?</span><span class="tip__body" role="tooltip" id="tip-exportacoes">Quando você pede à sua ferramenta de IA para exportar conversas, o servidor grava um arquivo com as mensagens e entrega um link para ela baixar, para analisar sem carregar tudo na conversa.</span></span></p>
+<div class="actions"><button class="btn btn--ghost btn--small" type="button" data-media-clear hidden>Apagar os arquivos baixados</button><button class="btn btn--ghost btn--small" type="button" data-media-clear-exports hidden>Apagar as exportações</button></div>
+<p class="busy" data-media-note role="status" hidden></p>
+</div></section>
+<script src="/assets/settings.js" defer></script>
+
+<section class="card" id="dados">
+<div class="card__head"><h2 class="card__title">{{icon "database"}}Dados</h2></div>
+<div class="card__body stack">
+<p class="muted">Tudo fica neste servidor. As mensagens indexadas, as transcrições, as chaves das conexões e os webhooks ficam no banco de dados PostgreSQL do WhatsApp MCP; a sessão do WhatsApp, na Evolution; os arquivos baixados e as exportações, nas pastas abaixo, no volume de dados do servidor.</p>
+{{with .DataDir}}<div class="snippet"><div class="snippet__head"><span class="snippet__title">Arquivos baixados</span></div><pre data-copy><code>{{.}}</code></pre></div>{{end}}
+{{with .ExportsDir}}<div class="snippet"><div class="snippet__head"><span class="snippet__title">Exportações</span></div><pre data-copy><code>{{.}}</code></pre></div>{{end}}
+<p class="muted" style="margin:0">O banco é copiado antes de cada atualização. Para tirar o WhatsApp deste servidor, use a Zona de risco na aba <a href="/whatsapp">WhatsApp</a>.</p>
+</div></section>
+{{template "foot"}}{{end}}
+
+
+{{define "updatebanner"}}{{$page := .}}{{with rolledBackFrom}}
+<div class="update update--rollback" role="alert">
+<p class="update__line">Esta instância voltou para a versão {{version}}, mas o banco de dados já rodou a <span class="update__version">{{.}}</span>.</p>
+<p class="update__note">As migrações só andam para frente: uma versão mais antiga pode não entender o que a {{.}} gravou, e falhar em algum canto. Volte para a {{.}} ou uma mais nova.</p>
+{{if $page.CanSelfUpdate}}{{if $page.UpdateBusy}}<p class="update__note"><a href="/atualizacao">Atualização em andamento →</a></p>{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.}}"><div class="actions" style="margin-top:10px"><button class="btn btn--small" type="submit">Voltar para a {{.}}</button></div></form>{{end}}{{end}}
+</div>
+{{else}}{{with newRelease}}
+<div class="update">
+<p class="update__line">Versão <span class="update__version">{{.}}</span> disponível — esta instância roda a {{version}}.
+<a class="update__notes" href="{{releaseURL .}}" rel="noopener noreferrer" target="_blank">Ver o que mudou</a></p>
+{{if $page.CanSelfUpdate}}{{if $page.UpdateBusy}}<p class="update__note"><a href="/atualizacao">Atualização em andamento →</a></p>{{else}}<form method="post" action="/atualizar" data-busy="Pedindo…"><input type="hidden" name="version" value="{{.}}"><div class="actions"><button class="btn btn--small" type="submit">Atualizar para a {{.}}</button></div></form>
+<p class="update__note">O servidor faz backup do banco antes de tudo e reinicia o painel no fim — você vai precisar entrar de novo. Os segredos, o pareamento e as mensagens indexadas são preservados.</p>{{end}}
+{{else}}<div class="snippet"><pre data-copy><code>{{updateCommand}}</code></pre></div>
+<p class="update__note">Rode na sua instância, por SSH. Os segredos, o pareamento e as mensagens indexadas são preservados; o banco é copiado antes de qualquer migração.</p>{{end}}
+</div>
+{{end}}{{end}}{{end}}
 
 {{define "pair"}}{{template "head" .}}{{template "nav" .}}
 <h1>Conectar o WhatsApp</h1>
@@ -832,7 +755,7 @@ and acts on. */}}
 
 {{define "instalacao"}}{{template "head" .}}
 <header class="masthead"><a class="brand" href="/">{{template "brandmark"}}</a>
-<div class="masthead__tools">{{template "themeswitch"}}</div></header>
+<div class="masthead__tools">{{template "settingslink" .}}</div></header>
 <div class="wizard-shell"{{if and (eq .Step 1) .Sent}} data-onboarding="1"{{end}}>
 <ol class="wizard" aria-label="Etapas da instalação">
 {{range .Steps}}<li class="wizard__step wizard__step--{{.State}}"{{if eq .State "now"}} aria-current="step"{{end}}>
@@ -950,8 +873,9 @@ and acts on. */}}
 <section class="card card--accent">
 <div class="card__head"><h2>Tudo pronto</h2><span class="pill pill--ok">WhatsApp conectado</span></div>
 <div class="card__body">
-<p class="lead">Falta apontar um cliente para este MCP. O painel mostra a chave e o comando já preenchidos.</p>
-<div class="actions"><a class="btn btn--block" href="/">Ir para o painel</a></div>
+<p class="lead">Falta ligar uma ferramenta de IA a este MCP. O passo a passo de cada uma vem com a chave e o comando já preenchidos.</p>
+<div class="actions"><a class="btn btn--block" href="/conectar">Conectar ferramenta de IA ao MCP</a></div>
+<div class="wizard__escape"><a class="btn btn--quiet" href="/">Ir para o painel</a></div>
 </div></section>
 {{end}}
 
@@ -1044,61 +968,6 @@ and acts on. */}}
 </div></section>
 </div>
 {{template "foot"}}{{end}}
-{{define "transcricao"}}{{template "head" .}}{{template "nav" .}}
-<h1>Transcrição de áudios</h1>
-<p class="lead">Com uma chave da OpenAI, a sua ferramenta de IA transcreve os áudios que você recebe no WhatsApp usando o Whisper.</p>
-{{with .Saved}}<p class="alert alert--ok" role="status">{{.}}</p>{{end}}
-
-{{if not .Available}}
-<section class="card"><div class="card__body"><p class="muted">A transcrição não está disponível neste servidor.</p></div></section>
-{{else if not .Status.Configured}}
-<section class="card card--accent">
-<div class="card__head"><h2>Como ativar</h2><span class="pill pill--off">Não configurada</span></div>
-<div class="card__body stack">
-<p class="muted">Leva uns cinco minutos. A chave é da sua conta na OpenAI: os áudios são cobrados nela, e só nela.</p>
-<ol class="guide">
-<li><strong>Crie uma conta na plataforma da OpenAI.</strong> É a plataforma de desenvolvedores, separada do ChatGPT: uma assinatura do ChatGPT Plus não inclui créditos para a API.
-<div class="actions" style="margin-top:8px"><a class="btn btn--ghost btn--small" href="{{.Links.Signup}}" rel="noopener noreferrer" target="_blank">Criar conta na OpenAI ↗</a></div></li>
-<li><strong>Adicione créditos.</strong> Em <em>Billing</em>, cadastre um cartão e compre créditos: o mínimo é US$&nbsp;5. O Whisper custa US$&nbsp;{{.PricePerMinute}} por minuto de áudio, então US$&nbsp;5 dão para cerca de 800 minutos.
-<div class="actions" style="margin-top:8px"><a class="btn btn--ghost btn--small" href="{{.Links.Billing}}" rel="noopener noreferrer" target="_blank">Adicionar créditos ↗</a></div></li>
-<li><strong>Crie a chave de API.</strong> Em <em>API keys</em>, clique em <em>Create new secret key</em>, dê um nome como <code>WhatsApp MCP</code> e deixe as permissões em <em>All</em>. Copie a chave na hora: a OpenAI só mostra ela uma vez.
-<div class="actions" style="margin-top:8px"><a class="btn btn--ghost btn--small" href="{{.Links.Keys}}" rel="noopener noreferrer" target="_blank">Criar chave de API ↗</a></div></li>
-<li><strong>Cole a chave aqui embaixo e salve.</strong> Ela é conferida com a OpenAI antes de ser guardada.</li>
-</ol>
-{{template "transcricaoform" .}}
-</div></section>
-{{template "transcricaouso" .}}
-{{else}}
-<section class="card card--accent">
-<div class="card__head"><h2>Chave da OpenAI</h2><span class="pill pill--ok">Configurada</span></div>
-<div class="card__body stack">
-<dl class="facts">
-<div class="fact"><dt>Chave salva</dt><dd class="mono">{{.Status.Hint}}</dd></div>
-<div class="fact"><dt>Salva em</dt><dd>{{moment .Status.UpdatedAt}}</dd></div>
-</dl>
-<div>
-<p class="field__label">Na sua conta da OpenAI</p>
-<div class="actions" style="margin-top:8px">
-<a class="btn btn--ghost btn--small" href="{{.Links.Usage}}" rel="noopener noreferrer" target="_blank">Uso e custos ↗</a>
-<a class="btn btn--ghost btn--small" href="{{.Links.Billing}}" rel="noopener noreferrer" target="_blank">Créditos ↗</a>
-<a class="btn btn--ghost btn--small" href="{{.Links.Limits}}" rel="noopener noreferrer" target="_blank">Limite de gastos ↗</a>
-<a class="btn btn--ghost btn--small" href="{{.Links.Keys}}" rel="noopener noreferrer" target="_blank">Revisar chaves ↗</a>
-</div>
-<p class="muted" style="margin-top:8px">Um limite mensal de gastos em <em>Limits</em> evita surpresa na fatura. Se revogar a chave lá, cadastre uma nova aqui.</p>
-</div>
-<details class="step">
-<summary class="step__summary"><span class="step__title">Trocar ou remover a chave</span></summary>
-<div class="stack">
-{{template "transcricaoform" .}}
-<form method="post" action="/transcricao/remover">
-<div class="actions"><button class="btn btn--danger btn--small" type="submit">Remover chave</button></div>
-</form>
-</div>
-</details>
-</div></section>
-{{template "transcricaouso" .}}
-{{end}}
-{{template "foot"}}{{end}}
 
 {{define "transcricaoform"}}<form method="post" action="/transcricao" data-busy="Verificando…">
 <label class="field" for="api_key"><span class="field__label">{{if .Status.Configured}}Nova chave{{else}}Chave de API{{end}}</span>
@@ -1106,15 +975,6 @@ and acts on. */}}
 <input id="api_key" type="password" name="api_key" required placeholder="sk-…" autocomplete="off" spellcheck="false">
 <div class="actions"><button class="btn" type="submit">Salvar chave</button></div>
 </form>{{end}}
-
-{{define "transcricaouso"}}<section class="card">
-<div class="card__head"><h2>Como usar</h2></div>
-<div class="card__body">
-<p class="muted">Peça à sua ferramenta de IA algo como a mensagem abaixo. Ela encontra os áudios com as ferramentas de leitura e usa <code>transcribe_audio</code> em cada um.</p>
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Exemplo</span></div>
-<pre class="plain" data-copy><code>Transcreva os áudios que recebi hoje no WhatsApp.</code></pre></div>
-<p class="muted">O áudio é enviado para a OpenAI e cobrado na conta desta chave (<a href="{{.Links.Pricing}}" rel="noopener noreferrer" target="_blank">US$ {{.PricePerMinute}} por minuto</a>). Cada áudio é transcrito uma vez: pedir de novo devolve o texto guardado, sem nova cobrança. A chave também pode ser salva pela própria ferramenta de IA com <code>set_transcription_key</code>, mas por aqui ela não passa pela conversa.</p>
-</div></section>{{end}}
 
 {{define "atualizacao"}}{{template "head" .}}{{template "nav" .}}
 <h1>Atualização</h1>
@@ -1131,45 +991,4 @@ and acts on. */}}
 <div class="actions"><a class="btn btn--ghost" href="/">Voltar ao painel</a></div>
 </div></section>
 {{template "foot"}}{{end}}
-
-{{define "documentacao"}}{{template "head" .}}{{template "nav" .}}
-<h1>O que o MCP sabe fazer</h1>
-<p class="lead">{{.Count}} ferramentas, lidas do próprio servidor. Esta página não é uma cópia mantida à mão: ela descreve exatamente a superfície que o MCP publica, então só fica errada se o servidor estiver.</p>
-<div class="tools">
-{{range .Tools}}
-<article class="tool">
-<div class="tool__head"><span class="tool__name">{{.Name}}</span></div>
-<p class="tool__desc">{{.Description}}</p>
-{{if .Arguments}}<ul class="tool__args">
-{{range .Arguments}}<li class="tool__arg"><span class="tool__argname">{{.Name}}</span><span class="tool__type">{{.Type}}</span>{{if .Required}}<span class="tool__req">obrigatório</span>{{end}}<span class="tool__argdesc">{{.Description}}{{if .Choices}} Valores: {{range $i, $c := .Choices}}{{if $i}}, {{end}}{{$c}}{{end}}.{{end}}</span></li>{{end}}
-</ul>{{else}}<p class="tool__args muted">Sem argumentos.</p>{{end}}
-</article>
-{{end}}
-</div>
-</div>
-{{template "foot"}}{{end}}
-
-{{define "receitas"}}{{template "head" .}}{{template "nav" .}}
-<h1>Receitas</h1>
-<p class="lead">Nenhuma destas precisa de código novo. O gateway só responde pelo WhatsApp quando perguntado — esperar a hora, vigiar um termo, montar o relatório, tudo isso é trabalho do assistente, escrito como instrução. Cada receita é um prompt para colar.</p>
-<div class="recipes">
-{{range .Recipes}}
-<article class="recipe">
-<div class="recipe__head">
-<h2 class="recipe__title">{{.Title}}</h2>
-<p class="recipe__summary">{{.Summary}}</p>
-</div>
-<div class="recipe__meta">
-{{range .Uses}}<span class="recipe__tool">{{.}}</span>{{end}}
-{{with .Schedule}}<span class="recipe__tool recipe__tool--when">⏱ {{.}}</span>{{end}}
-</div>
-<div class="recipe__prompt">
-<div class="snippet"><div class="snippet__head"><span class="snippet__title">Prompt</span></div>
-<pre data-copy><code>{{.Prompt}}</code></pre></div>
-</div>
-{{with .Caveat}}<p class="recipe__caveat"><strong>Atenção:</strong> {{.}}</p>{{end}}
-</article>
-{{end}}
-</div>
-</div>
-{{template "foot"}}{{end}}`
+`

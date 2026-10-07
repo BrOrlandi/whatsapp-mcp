@@ -65,6 +65,34 @@
     }, 4000);
   }
 
+  // A tool's steps end by themselves: the page asks whether the key it just
+  // created has been used, and comes back as the "connected" page once it has.
+  var waitKey = document.querySelector("[data-wait-key]");
+  if (waitKey) {
+    var keyID = waitKey.getAttribute("data-wait-key");
+    var tool = waitKey.getAttribute("data-wait-tool");
+    var keyPolls = 0;
+    var keyWatch = window.setInterval(function () {
+      if (++keyPolls > 150) {
+        window.clearInterval(keyWatch);
+        return;
+      }
+      fetch("/api/progresso?id=" + encodeURIComponent(keyID), { headers: { Accept: "application/json" }, cache: "no-store" })
+        .then(function (response) {
+          return response.ok ? response.json() : null;
+        })
+        .then(function (state) {
+          if (state && state.used) {
+            window.clearInterval(keyWatch);
+            window.location.replace("/conectar/" + encodeURIComponent(tool) + "?conectado=" + encodeURIComponent(keyID));
+          }
+        })
+        .catch(function () {
+          /* A failed poll is not worth reporting: the next one may succeed. */
+        });
+    }, 4000);
+  }
+
   // The installation wizard waits on the one thing no automation can do: the
   // operator clicking a link in their own inbox. Asking the server which step
   // is open turns that wait into the page moving on by itself, instead of a

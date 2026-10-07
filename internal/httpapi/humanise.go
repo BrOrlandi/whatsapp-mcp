@@ -58,6 +58,8 @@ var knownClients = map[string]string{
 	"vscode":             "VS Code",
 	"visual studio code": "VS Code",
 	"mcp-inspector":      "MCP Inspector",
+	"codex":              "Codex",
+	"codex-mcp-client":   "Codex",
 	"chatgpt":            "ChatGPT",
 	"openai-mcp":         "ChatGPT",
 	"librechat":          "LibreChat",

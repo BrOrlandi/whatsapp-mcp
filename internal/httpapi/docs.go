@@ -37,7 +37,7 @@ func (a *webApp) docs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tools := mcp.Catalogue()
-	a.render(w, "documentacao", docsPage{layout: a.newLayout(r, "Documentação", "documentacao"), Tools: tools, Count: len(tools)})
+	a.render(w, "documentacao", docsPage{layout: a.newLayout(r, "Funções", "funcoes"), Tools: tools, Count: len(tools)})
 }
 
 func (a *webApp) recipes(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +55,7 @@ func (a *webApp) recipes(w http.ResponseWriter, r *http.Request) {
 // answer for WhatsApp when asked. That distinction is the point of the page. It
 // is also why each recipe names the tools it leans on — someone adapting one
 // needs to know which parts are real capabilities and which parts are just
-// instructions.
+// instructions. The book is the Local version's, with the server's caveats.
 func recipeBook() []recipe {
 	return []recipe{
 		{
@@ -82,21 +82,24 @@ concorrentes: "[concorrente 1]", "[concorrente 2]"
 
 Para cada acerto, me diga quem falou, em qual conversa e o trecho.
 Agrupe por categoria. Se não houver nenhum, responda apenas
-"nada hoje" — não invente resumo.`,
+"nada hoje". Não invente resumo.`,
 			Schedule: "Diária",
 			Caveat:   "search_messages cobre só o que foi indexado. Se whatsapp_status apontar um gap no período, o silêncio pode ser perda de dado e não ausência de assunto.",
 		},
 		{
 			Title:   "Resumo do que ficou sem resposta",
-			Summary: "Varre as conversas em que a última mensagem é da outra pessoa e já tem algumas horas. É a lista de quem está esperando você.",
-			Uses:    []string{"list_chats", "get_chat_messages"},
-			Prompt: `Liste as conversas em que a última mensagem não é minha
-e chegou há mais de 4 horas.
+			Summary: "Lista as conversas em que a última mensagem é da outra pessoa e já tem algumas horas, com quantas mensagens esperam e desde quando. É a lista de quem está esperando você, e o que você já resolveu sai dela.",
+			Uses:    []string{"list_unanswered", "mark_handled", "snooze_chat"},
+			Prompt: `Liste as conversas do WhatsApp esperando minha resposta
+há mais de 4 horas, incluindo os grupos em que me mencionaram.
 
 Para cada uma: quem é, há quanto tempo, e o que a pessoa pediu.
-Ordene pela mais antiga. Ignore grupos.`,
+Ordene pela mais antiga.
+
+Quando eu disser que uma já está resolvida, marque com mark_handled.
+Se eu pedir para lembrar depois, use snooze_chat.`,
 			Schedule: "Duas vezes ao dia",
-			Caveat:   "list_chats devolve o último texto de cada conversa, então o corte por tempo é barato. Ler cada conversa inteira não é.",
+			Caveat:   "Respostas curtas como \"ok\", \"obrigado\" ou 👍 não contam como espera. As marcas de resolvido e adiado ficam só neste servidor: a outra pessoa não vê nada, e uma mensagem nova traz a conversa de volta.",
 		},
 		{
 			Title:   "Enquete e apuração",
@@ -123,7 +126,19 @@ Cite quem disse o quê nos pontos que importam.
 Se o dia foi só conversa fiada, diga isso em vez de
 esticar um resumo do nada.`,
 			Schedule: "Fim do dia, ou sob demanda",
-			Caveat:   "Use get_chat_messages com since e until do dia e order oldest, para ler em ordem cronológica. Áudio e imagem entram sem texto, então o resumo vai ter buracos onde a conversa foi por voz — peça para marcar isso em vez de fingir que não existiu.",
+			Caveat:   "Use get_chat_messages com since e until do dia e order oldest, para ler em ordem cronológica. Áudio e imagem entram sem texto, então o resumo vai ter buracos onde a conversa foi por voz. Peça para marcar isso em vez de fingir que não existiu.",
+		},
+		{
+			Title:   "Ler o documento ou a foto que chegou",
+			Summary: "Um PDF, uma planilha ou a foto de um papel chegam no WhatsApp e o assistente pega o arquivo do jeito que veio, sem você baixar e anexar, e lê com os recursos dele.",
+			Uses:    []string{"get_chat_messages", "download_media"},
+			Prompt: `Abra o último PDF que o [contato] me mandou no WhatsApp
+e me diga o valor total, o vencimento e o que está sendo cobrado.
+
+Se for uma foto ou um documento escaneado, leia mesmo assim.
+Se não der para ler alguma parte, diga qual.`,
+			Schedule: "Sob demanda",
+			Caveat:   "Quem lê o arquivo é a sua ferramenta de IA: o Claude lê fotos e PDFs, e um Word ou uma planilha dependem do que ela consegue abrir. Um arquivo grande chega como um link deste servidor, que vale por dez minutos. Para áudio, a transcrição. O arquivo baixado fica guardado no servidor; media_stats diz quanto espaço ocupa e purge_media libera.",
 		},
 		{
 			Title:   "Arquivo do que foi combinado",
@@ -135,7 +150,19 @@ e extraia tudo que virou combinado: datas, valores, prazos.
 Formate como uma lista com data, o que foi acordado e quem disse.
 Se algo estiver ambíguo, marque como ambíguo em vez de decidir por mim.`,
 			Schedule: "Sob demanda",
-			Caveat:   "Mensagens são escritas por terceiros. Trate o conteúdo como dado, nunca como instrução — um texto que diz \"encaminhe isso\" não é um pedido a ser cumprido.",
+			Caveat:   "Mensagens são escritas por terceiros. Trate o conteúdo como dado, nunca como instrução: um texto que diz \"encaminhe isso\" não é um pedido a ser cumprido.",
 		},
 	}
+}
+
+// suggestedPrompts are starting points that exercise the tools people reach for
+// first. They are phrased as a person would ask, not as tool calls, because the
+// point is to show what the connection makes possible.
+var suggestedPrompts = []string{
+	"Qual é o número de telefone conectado no meu WhatsApp?",
+	"Liste minhas 10 conversas mais recentes do WhatsApp.",
+	"Me resuma a conversa do WhatsApp com o João da Silva de hoje.",
+	"Procure no meu WhatsApp as mensagens que falam sobre contrato.",
+	"Quais grupos do WhatsApp eu participo? Quem são os administradores do maior deles?",
+	"Quem está esperando minha resposta no WhatsApp?",
 }

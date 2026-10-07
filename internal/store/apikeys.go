@@ -160,3 +160,9 @@ func (s *Store) RevokeAPIKey(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE api_keys SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL`, id)
 	return err
 }
+
+// RenameAPIKey changes the name the panel shows for a connection.
+func (s *Store) RenameAPIKey(ctx context.Context, id int64, name string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE api_keys SET name=$2 WHERE id=$1 AND revoked_at IS NULL`, id, strings.TrimSpace(name))
+	return err
+}
