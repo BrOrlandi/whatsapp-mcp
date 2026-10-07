@@ -30,7 +30,13 @@ import (
 //	every live message landed without instance, chat, sender or timestamp.
 //
 // 2: reads whatsmeow's own structs, and walks history sync conversations.
-const DecoderVersion = 2
+//
+// 3: reads quotes, mentions, forwards, reactions, polls and the file of a
+// media message; applies edits and deletions to the message they change
+// instead of indexing them as empty messages; reads each conversation's
+// unread count and flags from a history sync, and the account's own read
+// receipts.
+const DecoderVersion = 3
 
 // Kind classifies a decoded event so the consumer knows what it changes: the
 // message index, the connection state, or neither.
@@ -40,8 +46,11 @@ const (
 	KindMessage    Kind = "message"
 	KindHistory    Kind = "history"
 	KindConnection Kind = "connection"
+	KindReceipt    Kind = "receipt"
 	KindOther      Kind = "other"
 )
+
+type storeMessage = store.Message
 
 // ConnectionState is the WhatsApp session state a connection event reports.
 type ConnectionState string
@@ -70,6 +79,26 @@ type Event struct {
 	Record     store.Event
 	Kind       Kind
 	Connection *Connection
+	// Live is a live message as it arrived, even when it is an edit or a
+	// deletion that changes another row instead of adding its own; Details
+	// are what it carries beyond its row. Both are for webhooks.
+	Live    *store.Message
+	Details *Details
+	// Receipt is a receipt event, for webhooks.
+	Receipt *Receipt
+}
+
+// Receipt says messages were delivered, read or played. Type is WhatsApp's:
+// "" (delivered), "read", "read-self" (the account read them on another
+// device), "played"…
+type Receipt struct {
+	ChatJID    string
+	SenderJID  string
+	FromMe     bool
+	IsGroup    bool
+	MessageIDs []string
+	Type       string
+	Timestamp  time.Time
 }
 
 // Decode turns one RabbitMQ payload into an event ready to persist. The raw
@@ -97,15 +126,41 @@ func Decode(raw []byte) (Event, error) {
 	switch {
 	case name == "Message" || name == "SendMessage":
 		decoded.Kind = KindMessage
-		if message, id, aliases := decodeLive(env.Data, instance); message != nil {
-			decoded.Record.Messages = []store.Message{*message}
+		if message, id, aliases, details := decodeLive(env.Data, instance); message != nil {
+			decoded.Details, decoded.Live = &details, message
 			decoded.Record.Aliases = aliases
 			decoded.Record.ID = eventID(instance, name, id, raw)
+			switch {
+			case details.RevokeOf != "":
+				decoded.Record.Edits = []store.Edit{{InstanceID: instance, ChatJID: message.ChatJID, MessageID: details.RevokeOf, Revoked: true,
+					SenderJID: message.SenderJID, FromMe: message.FromMe}}
+			case details.EditOf != "":
+				decoded.Record.Edits = []store.Edit{{InstanceID: instance, ChatJID: message.ChatJID, MessageID: details.EditOf, Text: details.EditText,
+					SenderJID: message.SenderJID, FromMe: message.FromMe}}
+			default:
+				decoded.Record.Messages = []store.Message{*message}
+			}
+			// Writing in a chat is reading it: whatever came before was seen.
+			if message.FromMe && !message.SentAt.IsZero() {
+				decoded.Record.Reads = []store.ChatRead{{InstanceID: instance, ChatJID: message.ChatJID, At: message.SentAt}}
+			}
 		}
 	case name == "HistorySync":
 		decoded.Kind = KindHistory
-		decoded.Record.Messages = decodeHistory(env.Data, instance)
+		var edits []store.Edit
+		decoded.Record.Messages, edits = decodeHistory(env.Data, instance)
+		decoded.Record.Edits = edits
 		decoded.Record.Aliases = historyAliases(env.Data, instance)
+		decoded.Record.Chats = historyChats(env.Data, instance)
+	case name == "Receipt":
+		decoded.Kind = KindReceipt
+		decoded.Record.Skip = true
+		if receipt := decodeReceipt(env.Data); receipt != nil {
+			decoded.Receipt = receipt
+			if receipt.Type == "read-self" && !receipt.Timestamp.IsZero() {
+				decoded.Record.Reads = []store.ChatRead{{InstanceID: instance, ChatJID: receipt.ChatJID, At: receipt.Timestamp}}
+			}
+		}
 	case connectionStates[name] != "":
 		decoded.Kind = KindConnection
 		decoded.Connection = decodeConnection(name, env.Data)
@@ -173,29 +228,30 @@ func bareJID(jid string) string {
 }
 
 func decodeLiveMessage(data json.RawMessage, instance string) (*store.Message, string) {
-	message, id, _ := decodeLive(data, instance)
+	message, id, _, _ := decodeLive(data, instance)
 	return message, id
 }
 
-func decodeLive(data json.RawMessage, instance string) (*store.Message, string, []store.Alias) {
+func decodeLive(data json.RawMessage, instance string) (*store.Message, string, []store.Alias, Details) {
 	if len(data) == 0 {
-		return nil, "", nil
+		return nil, "", nil, Details{}
 	}
 	var payload struct {
 		Info    messageInfo     `json:"Info"`
 		Message json.RawMessage `json:"Message"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, "", nil
+		return nil, "", nil, Details{}
 	}
 	if payload.Info.ID == "" {
-		return nil, "", nil
+		return nil, "", nil, Details{}
 	}
 	var aliases []store.Alias
 	if alias, ok := liveAlias(payload.Info, instance); ok {
 		aliases = append(aliases, alias)
 	}
-	return &store.Message{
+	details := ReadDetails(payload.Message)
+	message := &store.Message{
 		InstanceID: instance,
 		MessageID:  payload.Info.ID,
 		ChatJID:    payload.Info.Chat,
@@ -203,18 +259,19 @@ func decodeLive(data json.RawMessage, instance string) (*store.Message, string, 
 		SenderName: payload.Info.PushName,
 		FromMe:     payload.Info.IsFromMe,
 		IsGroup:    payload.Info.IsGroup,
-		Text:       messageText(payload.Message),
-		MediaType:  mediaType(payload.Message),
 		SentAt:     parseTimestamp(payload.Info.Timestamp),
-	}, payload.Info.ID, aliases
+	}
+	details.apply(message)
+	return message, payload.Info.ID, aliases, details
 }
 
 // decodeHistory walks the conversations WhatsApp delivers in a history sync.
 // Each entry is a WebMessageInfo, the protobuf shape, so its keys are the
-// lowercase protobuf names rather than whatsmeow's Go field names.
-func decodeHistory(data json.RawMessage, instance string) []store.Message {
+// lowercase protobuf names rather than whatsmeow's Go field names. Edits and
+// deletions are returned apart, to be applied to the messages they change.
+func decodeHistory(data json.RawMessage, instance string) ([]store.Message, []store.Edit) {
 	if len(data) == 0 {
-		return nil
+		return nil, nil
 	}
 	var payload struct {
 		Data struct {
@@ -237,9 +294,10 @@ func decodeHistory(data json.RawMessage, instance string) []store.Message {
 		} `json:"Data"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil
+		return nil, nil
 	}
 	var messages []store.Message
+	var edits []store.Edit
 	for _, conversation := range payload.Data.Conversations {
 		for _, entry := range conversation.Messages {
 			record := entry.Message
@@ -247,21 +305,117 @@ func decodeHistory(data json.RawMessage, instance string) []store.Message {
 				continue
 			}
 			chat := first(record.Key.RemoteJID, conversation.ID)
-			messages = append(messages, store.Message{
+			// The sender of a one-to-one message is the chat itself, unless the
+			// account sent it: the record does not name the account.
+			sender := record.Key.Participant
+			if sender == "" && !record.Key.FromMe {
+				sender = chat
+			}
+			details := ReadDetails(record.Message)
+			switch {
+			case details.RevokeOf != "":
+				edits = append(edits, store.Edit{InstanceID: instance, ChatJID: chat, MessageID: details.RevokeOf, Revoked: true, SenderJID: sender, FromMe: record.Key.FromMe})
+				continue
+			case details.EditOf != "":
+				edits = append(edits, store.Edit{InstanceID: instance, ChatJID: chat, MessageID: details.EditOf, Text: details.EditText, SenderJID: sender, FromMe: record.Key.FromMe})
+				continue
+			}
+			message := store.Message{
 				InstanceID: instance,
 				MessageID:  record.Key.ID,
 				ChatJID:    chat,
-				SenderJID:  first(record.Key.Participant, chat),
+				SenderJID:  sender,
 				SenderName: record.PushName,
 				FromMe:     record.Key.FromMe,
 				IsGroup:    strings.HasSuffix(chat, "@g.us"),
-				Text:       messageText(record.Message),
-				MediaType:  mediaType(record.Message),
 				SentAt:     parseNumericTimestamp(record.MessageTimestamp),
-			})
+			}
+			details.apply(&message)
+			messages = append(messages, message)
 		}
 	}
-	return messages
+	return messages, edits
+}
+
+// historyChats reads what a history sync says about each conversation: its
+// unread count, whether it is archived, pinned, muted or marked unread, and
+// its name, as of the conversation's timestamp.
+func historyChats(data json.RawMessage, instance string) []store.ChatState {
+	var payload struct {
+		Data struct {
+			Conversations []struct {
+				ID                    string          `json:"id"`
+				Name                  string          `json:"name"`
+				UnreadCount           *uint32         `json:"unreadCount"`
+				MarkedAsUnread        *bool           `json:"markedAsUnread"`
+				Archived              *bool           `json:"archived"`
+				Pinned                *flexUint       `json:"pinned"`
+				MuteEndTime           *flexUint       `json:"muteEndTime"`
+				ConversationTimestamp json.RawMessage `json:"conversationTimestamp"`
+			} `json:"conversations"`
+		} `json:"Data"`
+	}
+	if len(data) == 0 || json.Unmarshal(data, &payload) != nil {
+		return nil
+	}
+	var chats []store.ChatState
+	for _, c := range payload.Data.Conversations {
+		if c.ID == "" || strings.HasSuffix(c.ID, "@broadcast") || strings.HasSuffix(c.ID, "@newsletter") {
+			continue
+		}
+		// A field the sync leaves out says nothing, so it stays nil and the
+		// stored value stands.
+		state := store.ChatState{InstanceID: instance, ChatJID: c.ID, MarkedUnread: c.MarkedAsUnread, Archived: c.Archived,
+			Name: c.Name, SnapshotAt: parseNumericTimestamp(c.ConversationTimestamp)}
+		if c.Pinned != nil {
+			pinned := *c.Pinned > 0
+			state.Pinned = &pinned
+		}
+		if c.MuteEndTime != nil {
+			end := time.Time{}
+			if *c.MuteEndTime > 0 {
+				end = muteEnd(uint64(*c.MuteEndTime))
+			}
+			state.MutedUntil = &end
+		}
+		if c.UnreadCount != nil {
+			state.HasUnread, state.UnreadCount = true, int(*c.UnreadCount)
+		}
+		chats = append(chats, state)
+	}
+	return chats
+}
+
+// muteEnd reads a mute's end: -1 (all ones) is forever, otherwise epoch
+// seconds or milliseconds.
+func muteEnd(v uint64) time.Time {
+	if int64(v) < 0 {
+		return time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	if v > 1e12 {
+		return time.UnixMilli(int64(v)).UTC()
+	}
+	return time.Unix(int64(v), 0).UTC()
+}
+
+// decodeReceipt reads whatsmeow's events.Receipt, which Evolution publishes
+// with Go field names: the message source flattened, then the ids, the time
+// and the type.
+func decodeReceipt(data json.RawMessage) *Receipt {
+	var payload struct {
+		Chat       string   `json:"Chat"`
+		Sender     string   `json:"Sender"`
+		IsFromMe   bool     `json:"IsFromMe"`
+		IsGroup    bool     `json:"IsGroup"`
+		MessageIDs []string `json:"MessageIDs"`
+		Timestamp  string   `json:"Timestamp"`
+		Type       string   `json:"Type"`
+	}
+	if len(data) == 0 || json.Unmarshal(data, &payload) != nil || payload.Chat == "" || len(payload.MessageIDs) == 0 {
+		return nil
+	}
+	return &Receipt{ChatJID: bareJID(payload.Chat), SenderJID: bareJID(payload.Sender), FromMe: payload.IsFromMe, IsGroup: payload.IsGroup,
+		MessageIDs: payload.MessageIDs, Type: payload.Type, Timestamp: parseTimestamp(payload.Timestamp)}
 }
 
 // historyAliases pairs every LID conversation of a history sync with the
@@ -288,113 +442,13 @@ func historyAliases(data json.RawMessage, instance string) []store.Alias {
 	return aliases
 }
 
-// content mirrors the parts of WhatsApp's message protobuf this gateway reads.
-// Wrappers repeat the same shape, so unwrapping is recursive with a depth
-// bound: the payload is remote input and must not drive unbounded recursion.
-type content struct {
-	Conversation string `json:"conversation"`
-	ExtendedText *struct {
-		Text string `json:"text"`
-	} `json:"extendedTextMessage"`
-	Image *struct {
-		Caption string `json:"caption"`
-	} `json:"imageMessage"`
-	Video *struct {
-		Caption string `json:"caption"`
-	} `json:"videoMessage"`
-	Document *struct {
-		Caption  string `json:"caption"`
-		FileName string `json:"fileName"`
-	} `json:"documentMessage"`
-	Audio    *json.RawMessage `json:"audioMessage"`
-	Sticker  *json.RawMessage `json:"stickerMessage"`
-	Location *json.RawMessage `json:"locationMessage"`
-	Contact  *struct {
-		DisplayName string `json:"displayName"`
-	} `json:"contactMessage"`
-	Ephemeral *struct {
-		Message json.RawMessage `json:"message"`
-	} `json:"ephemeralMessage"`
-	ViewOnce *struct {
-		Message json.RawMessage `json:"message"`
-	} `json:"viewOnceMessage"`
-	ViewOnceV2 *struct {
-		Message json.RawMessage `json:"message"`
-	} `json:"viewOnceMessageV2"`
-	DocumentWithCaption *struct {
-		Message json.RawMessage `json:"message"`
-	} `json:"documentWithCaptionMessage"`
-}
-
-// unwrap returns the innermost message, following the wrappers WhatsApp uses
-// for disappearing, view-once and captioned-document messages.
-func unwrap(raw json.RawMessage, depth int) (content, json.RawMessage) {
-	var parsed content
-	if len(raw) == 0 || depth > 4 {
-		return parsed, raw
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return content{}, raw
-	}
-	for _, wrapper := range []*struct {
-		Message json.RawMessage `json:"message"`
-	}{parsed.Ephemeral, parsed.ViewOnce, parsed.ViewOnceV2, parsed.DocumentWithCaption} {
-		if wrapper != nil && len(wrapper.Message) > 0 {
-			return unwrap(wrapper.Message, depth+1)
-		}
-	}
-	return parsed, raw
-}
-
 // messageText extracts the searchable text of a message. Media without a
 // caption has none, which is expected and not an error.
-func messageText(raw json.RawMessage) string {
-	parsed, _ := unwrap(raw, 0)
-	if parsed.Conversation != "" {
-		return parsed.Conversation
-	}
-	if parsed.ExtendedText != nil && parsed.ExtendedText.Text != "" {
-		return parsed.ExtendedText.Text
-	}
-	if parsed.Image != nil && parsed.Image.Caption != "" {
-		return parsed.Image.Caption
-	}
-	if parsed.Video != nil && parsed.Video.Caption != "" {
-		return parsed.Video.Caption
-	}
-	if parsed.Document != nil {
-		return first(parsed.Document.Caption, parsed.Document.FileName)
-	}
-	if parsed.Contact != nil {
-		return parsed.Contact.DisplayName
-	}
-	return ""
-}
+func messageText(raw json.RawMessage) string { return ReadDetails(raw).Text }
 
 // mediaType records what kind of message arrived, so an audio message can be
 // found later without reparsing the raw payload.
-func mediaType(raw json.RawMessage) string {
-	parsed, _ := unwrap(raw, 0)
-	switch {
-	case parsed.Audio != nil:
-		return "audio"
-	case parsed.Image != nil:
-		return "image"
-	case parsed.Video != nil:
-		return "video"
-	case parsed.Document != nil:
-		return "document"
-	case parsed.Sticker != nil:
-		return "sticker"
-	case parsed.Location != nil:
-		return "location"
-	case parsed.Contact != nil:
-		return "contact"
-	case parsed.Conversation != "" || parsed.ExtendedText != nil:
-		return "text"
-	}
-	return ""
-}
+func mediaType(raw json.RawMessage) string { return ReadDetails(raw).MediaType }
 
 // connectionStates maps Evolution's connection event names to the session state
 // each one implies.

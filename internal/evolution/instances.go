@@ -16,7 +16,7 @@ import (
 // SEND_MESSAGE carry both sides of every conversation, HISTORY_SYNC carries the
 // on-demand backfill, and CONNECTION carries the instance state that would
 // otherwise have to be polled.
-var IngestedEvents = []string{"MESSAGE", "SEND_MESSAGE", "HISTORY_SYNC", "CONNECTION"}
+var IngestedEvents = []string{"MESSAGE", "SEND_MESSAGE", "HISTORY_SYNC", "READ_RECEIPT", "CONNECTION"}
 
 // ErrLoggedIn reports that the instance already has a paired WhatsApp session,
 // so there is no QR code to scan.

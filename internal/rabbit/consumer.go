@@ -21,11 +21,12 @@ import (
 
 // Queues are the queues Evolution creates for the events this gateway
 // subscribes to. The names come from Evolution's own global-queue mapping:
-// MESSAGE, SEND_MESSAGE, HISTORY_SYNC and CONNECTION.
+// MESSAGE, SEND_MESSAGE, HISTORY_SYNC, READ_RECEIPT and CONNECTION.
 var Queues = []string{
 	"message",
 	"sendmessage",
 	"historysync",
+	"receipt",
 	"connected",
 	"disconnected",
 	"loggedout",
@@ -176,6 +177,8 @@ func (c *Consumer) observe(queue string, decoded events.Event) {
 	switch decoded.Kind {
 	case events.KindMessage:
 		c.State.MarkMessage(at)
+	case events.KindReceipt:
+		return
 	case events.KindHistory:
 		c.State.MarkHistory(at)
 		c.Logger.Info("history sync ingested", "messages", len(decoded.Record.Messages))

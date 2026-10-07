@@ -12,6 +12,7 @@ package repair
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/BrOrlandi/whatsapp-mcp/internal/events"
 	"github.com/BrOrlandi/whatsapp-mcp/internal/store"
@@ -146,6 +147,11 @@ func RunIfStale(ctx context.Context, db *store.Store, progress func(Report, bool
 			"events", report.Events, "messages", report.Messages)
 		return
 	}
+	enriched, err := Enrich(ctx, db, logger)
+	if err != nil {
+		logger.Error("filling in message details failed; it will be retried on the next start", "error", err, "events", enriched)
+		return
+	}
 	if err := db.MarkReprojected(ctx, events.DecoderVersion, int64(report.Events), int64(report.Messages)); err != nil {
 		logger.Error("reprojection finished but could not be recorded", "error", err)
 		return
@@ -153,4 +159,37 @@ func RunIfStale(ctx context.Context, db *store.Store, progress func(Report, bool
 	logger.Info("message projection rebuilt",
 		"events", report.Events, "messages", report.Messages, "undecodable", report.Undecodable,
 		"orphans_before", report.OrphansBefore, "orphans_after", report.OrphansAfter)
+}
+
+// Enrich fills in, from the stored events, the details the rows written by an
+// older decoder lack: quotes, mentions, reactions, files, edits and
+// deletions, and the chat state a history sync carries. It works through the
+// events in the order they arrived and returns how many it read.
+func Enrich(ctx context.Context, db *store.Store, logger *slog.Logger) (int, error) {
+	done := 0
+	cursor := store.DetailsCursor{At: time.Unix(0, 0)}
+	for {
+		// Small pages: a history sync's payload can run to megabytes.
+		pending, next, err := db.DetailsPending(ctx, cursor, 25)
+		if err != nil {
+			return done, err
+		}
+		if len(pending) == 0 {
+			if done > 0 {
+				logger.Info("message details filled in", "events", done)
+			}
+			return done, nil
+		}
+		for _, event := range pending {
+			decoded, err := events.Decode(event.Payload)
+			if err != nil {
+				decoded = events.Event{}
+			}
+			if err := db.Enrich(ctx, event.ID, decoded.Record); err != nil {
+				return done, err
+			}
+			done++
+		}
+		cursor = next
+	}
 }

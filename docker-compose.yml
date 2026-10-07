@@ -73,7 +73,7 @@ services:
       DATABASE_SAVE_MESSAGES: "${EVOLUTION_SAVE_MESSAGES:-false}"
       AMQP_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-whatsapp}
       AMQP_GLOBAL_ENABLED: "true"
-      AMQP_GLOBAL_EVENTS: "MESSAGE,SEND_MESSAGE,HISTORY_SYNC,CONNECTION"
+      AMQP_GLOBAL_EVENTS: "MESSAGE,SEND_MESSAGE,HISTORY_SYNC,READ_RECEIPT,CONNECTION"
       # No object store. Evolution only writes media to one when WEBHOOK_FILES
       # is on, which this stack leaves off: the gateway fetches media from
       # WhatsApp on demand through /message/downloadmedia, from the raw message

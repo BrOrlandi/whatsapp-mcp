@@ -10,16 +10,26 @@ import (
 
 // Chat is one conversation as the index knows it. Evolution Go has no route to
 // list conversations, so this view is derived from the messages that were
-// ingested, and its coverage is exactly the coverage of the index.
+// ingested, and its coverage is exactly the coverage of the index. The flags
+// and the unread count come from chat_state: what history syncs, read
+// receipts and the tools have said about the chat.
 type Chat struct {
-	ChatJID       string    `json:"chat_jid"`
-	Name          string    `json:"name,omitempty"`
-	IsGroup       bool      `json:"is_group"`
-	Messages      int64     `json:"messages"`
-	LastMessageAt time.Time `json:"last_message_at,omitempty"`
-	LastText      string    `json:"last_text,omitempty"`
-	LastFromMe    bool      `json:"last_from_me"`
+	ChatJID       string     `json:"chat_jid"`
+	Name          string     `json:"name,omitempty"`
+	IsGroup       bool       `json:"is_group"`
+	Messages      int64      `json:"messages"`
+	LastMessageAt time.Time  `json:"last_message_at,omitempty"`
+	LastText      string     `json:"last_text,omitempty"`
+	LastFromMe    bool       `json:"last_from_me"`
+	UnreadCount   int64      `json:"unread_count"`
+	MarkedUnread  bool       `json:"marked_unread,omitempty"`
+	Archived      bool       `json:"archived,omitempty"`
+	Pinned        bool       `json:"pinned,omitempty"`
+	MutedUntil    *time.Time `json:"muted_until,omitempty"`
 }
+
+// Muted reports whether the chat is muted at now.
+func (c Chat) Muted(now time.Time) bool { return c.MutedUntil != nil && c.MutedUntil.After(now) }
 
 // MessageQuery bounds a read of the index. Every field is optional except the
 // instance, which is never taken from the caller.
@@ -45,10 +55,87 @@ func (q MessageQuery) limit() int {
 	return q.Limit
 }
 
-// ListChats returns the conversations of one instance, most recently active
-// first. The name is the push name most recently seen from the other side,
-// which is the only name the message stream carries; group names come from
-// Evolution and are filled in by the caller.
+// chatsQuery lists the conversations of one instance with their state:
+// one row per conversation (a LID chat under its phone number when the
+// pairing is known), the last visible message, the name (the group or
+// contact name a history sync gave, else the push name most recently seen
+// from the other side), the flags, and how many messages from others came
+// after the moment the account read up to. $1 is the instance; the caller
+// appends the filters, ordering and limit.
+const chatsQuery = `
+                WITH canonical AS (
+                    SELECT coalesce(a.pn, m.chat_jid) AS chat_jid, m.is_group, m.text, m.media_type, m.from_me, m.sender_name, m.sent_at,
+                           (` + visible + `) AS visible
+                    FROM messages m
+                    LEFT JOIN jid_aliases a ON a.instance_id = m.instance_id AND a.lid = m.chat_jid
+                    WHERE m.instance_id = $1 /*chat*/
+                ), states AS (
+                    SELECT coalesce(a.pn, s.chat_jid) AS chat_jid, max(s.read_until) AS read_until, bool_or(s.marked_unread) AS marked_unread,
+                           bool_or(s.archived) AS archived, bool_or(s.pinned) AS pinned, max(s.muted_until) AS muted_until,
+                           max(nullif(s.name, '')) AS name, max(s.flags_at) AS flags_at
+                    FROM chat_state s
+                    LEFT JOIN jid_aliases a ON a.instance_id = s.instance_id AND a.lid = s.chat_jid
+                    WHERE s.instance_id = $1
+                    GROUP BY 1
+                ), tracking AS (
+                    SELECT coalesce((SELECT value::timestamptz FROM gateway_settings WHERE key = 'unread_tracking_since'), '-infinity'::timestamptz) AS since
+                ), summary AS (
+                    SELECT c.chat_jid, bool_or(c.is_group) AS is_group, count(*) FILTER (WHERE c.visible) AS total,
+                           max(c.sent_at) FILTER (WHERE c.visible) AS last_at,
+                           max(c.sent_at) FILTER (WHERE c.from_me) AS last_own_at,
+                           max(c.sent_at) FILTER (WHERE c.visible AND NOT c.from_me) AS last_in_at,
+                           coalesce(max(c.sender_name) FILTER (WHERE c.sender_name <> '' AND NOT c.from_me), '') AS display_name
+                    FROM canonical c GROUP BY c.chat_jid
+                ), last AS (
+                    SELECT DISTINCT ON (c.chat_jid) c.chat_jid, c.text, c.from_me
+                    FROM canonical c WHERE c.visible
+                    ORDER BY c.chat_jid, c.sent_at DESC NULLS LAST
+                ), unread AS (
+                    SELECT c.chat_jid, count(*) AS n
+                    FROM canonical c
+                    JOIN summary s ON s.chat_jid = c.chat_jid
+                    LEFT JOIN states st ON st.chat_jid = c.chat_jid
+                    CROSS JOIN tracking t
+                    WHERE c.visible AND NOT c.from_me
+                      AND c.sent_at > GREATEST(coalesce(st.read_until, t.since), coalesce(s.last_own_at, '-infinity'::timestamptz))
+                    GROUP BY c.chat_jid
+                )
+                SELECT s.chat_jid, s.is_group, s.total, s.last_at, coalesce(l.text, '') AS last_text, coalesce(l.from_me, FALSE) AS last_from_me,
+                       CASE WHEN s.is_group THEN coalesce(st.name, '') ELSE coalesce(st.name, s.display_name) END AS name,
+                       coalesce(u.n, 0) AS unread,
+                       coalesce(st.marked_unread, FALSE) AS marked_unread,
+                       -- WhatsApp takes a chat out of the archive when a message arrives.
+                       (coalesce(st.archived, FALSE) AND (st.flags_at IS NULL OR s.last_in_at IS NULL OR s.last_in_at <= st.flags_at)) AS archived,
+                       coalesce(st.pinned, FALSE) AS pinned, st.muted_until
+                FROM summary s
+                LEFT JOIN last l ON l.chat_jid = s.chat_jid
+                LEFT JOIN states st ON st.chat_jid = s.chat_jid
+                LEFT JOIN unread u ON u.chat_jid = s.chat_jid
+                WHERE s.total > 0`
+
+func scanChats(rows *sql.Rows) ([]Chat, error) {
+	var chats []Chat
+	for rows.Next() {
+		var chat Chat
+		var lastAt, muted sql.NullTime
+		if err := rows.Scan(&chat.ChatJID, &chat.IsGroup, &chat.Messages, &lastAt, &chat.LastText, &chat.LastFromMe, &chat.Name,
+			&chat.UnreadCount, &chat.MarkedUnread, &chat.Archived, &chat.Pinned, &muted); err != nil {
+			return nil, err
+		}
+		if lastAt.Valid {
+			chat.LastMessageAt = lastAt.Time.UTC()
+		}
+		if muted.Valid {
+			t := muted.Time.UTC()
+			chat.MutedUntil = &t
+		}
+		chats = append(chats, chat)
+	}
+	return chats, rows.Err()
+}
+
+// ListChats returns the conversations of one instance, pinned first, then
+// most recently active. search matches the JID or the name.
 func (s *Store) ListChats(ctx context.Context, instanceID string, search string, limit int) ([]Chat, error) {
 	if instanceID == "" {
 		return nil, errors.New("instance is required")
@@ -56,44 +143,50 @@ func (s *Store) ListChats(ctx context.Context, instanceID string, search string,
 	if limit <= 0 || limit > maxPageSize {
 		limit = 100
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-                WITH canonical AS (
-                    -- A LID chat is listed under its phone number when the
-                    -- pairing is known, so one conversation is one row.
-                    SELECT coalesce(a.pn, m.chat_jid) AS chat_jid, m.is_group, m.text, m.from_me, m.sender_name, m.sent_at
-                    FROM messages m
-                    LEFT JOIN jid_aliases a ON a.instance_id = m.instance_id AND a.lid = m.chat_jid
-                    WHERE m.instance_id = $1
-                ), ranked AS (
-                    SELECT chat_jid, is_group, text, from_me, sender_name, sent_at,
-                           row_number() OVER (PARTITION BY chat_jid ORDER BY sent_at DESC NULLS LAST) AS position,
-                           count(*) OVER (PARTITION BY chat_jid) AS total,
-                           max(sent_at) OVER (PARTITION BY chat_jid) AS last_at
-                    FROM canonical
-                )
-                SELECT chat_jid, is_group, total, last_at, text, from_me,
-                       coalesce(max(sender_name) FILTER (WHERE sender_name <> '' AND NOT from_me) OVER (PARTITION BY chat_jid), '') AS display_name
-                FROM ranked
-                WHERE position = 1 AND ($2 = '' OR chat_jid ILIKE '%' || $2 || '%')
-                ORDER BY last_at DESC NULLS LAST
+	rows, err := s.DB.QueryContext(ctx, `SELECT * FROM (`+chatsQuery+`) c
+                WHERE ($2 = '' OR c.chat_jid ILIKE '%' || $2 || '%' OR c.name ILIKE '%' || $2 || '%')
+                ORDER BY c.pinned DESC, c.last_at DESC NULLS LAST
                 LIMIT $3`, instanceID, search, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var chats []Chat
-	for rows.Next() {
-		var chat Chat
-		var lastAt sql.NullTime
-		if err := rows.Scan(&chat.ChatJID, &chat.IsGroup, &chat.Messages, &lastAt, &chat.LastText, &chat.LastFromMe, &chat.Name); err != nil {
-			return nil, err
-		}
-		if lastAt.Valid {
-			chat.LastMessageAt = lastAt.Time.UTC()
-		}
-		chats = append(chats, chat)
+	return scanChats(rows)
+}
+
+// UnreadChats lists the conversations with unread messages, or marked unread
+// by hand, most recently active first.
+func (s *Store) UnreadChats(ctx context.Context, instanceID string, includeArchived bool, limit int) ([]Chat, error) {
+	if limit <= 0 || limit > maxPageSize {
+		limit = 20
 	}
-	return chats, rows.Err()
+	rows, err := s.DB.QueryContext(ctx, `SELECT * FROM (`+chatsQuery+`) c
+                WHERE (c.unread > 0 OR c.marked_unread) AND ($2 OR NOT c.archived)
+                  AND c.chat_jid NOT LIKE '%@broadcast' AND c.chat_jid NOT LIKE '%@newsletter'
+                ORDER BY c.last_at DESC NULLS LAST
+                LIMIT $3`, instanceID, includeArchived, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanChats(rows)
+}
+
+// ChatInfo is one conversation's row, found under any of its JIDs.
+func (s *Store) ChatInfo(ctx context.Context, instanceID, chatJID string) (Chat, bool) {
+	// Only this chat's messages are read, under any of its JIDs.
+	query := strings.Replace(chatsQuery, "/*chat*/", "AND "+strings.ReplaceAll(sameChat, "?", "$2"), 1)
+	rows, err := s.DB.QueryContext(ctx, `SELECT * FROM (`+query+`) c
+                WHERE c.chat_jid = $2 OR c.chat_jid = (SELECT pn FROM jid_aliases WHERE instance_id = $1 AND lid = $2) LIMIT 1`, instanceID, chatJID)
+	if err != nil {
+		return Chat{}, false
+	}
+	defer rows.Close()
+	chats, err := scanChats(rows)
+	if err != nil || len(chats) == 0 {
+		return Chat{}, false
+	}
+	return chats[0], true
 }
 
 // Messages reads the index for one instance under the given bounds. Ordering is
@@ -116,7 +209,7 @@ func (s *Store) Messages(ctx context.Context, instanceID string, query MessageQu
 	if query.ChatJID != "" {
 		// A conversation WhatsApp moved to a LID lives under two JIDs; asking
 		// for either one reads both.
-		add("(m.chat_jid = ? OR m.chat_jid IN (SELECT lid FROM jid_aliases WHERE instance_id = m.instance_id AND pn = ?) OR m.chat_jid IN (SELECT pn FROM jid_aliases WHERE instance_id = m.instance_id AND lid = ?))", query.ChatJID)
+		add(sameChat, query.ChatJID)
 	}
 	if query.Query != "" {
 		add("(m.search_vector @@ websearch_to_tsquery('simple', ?) OR to_tsvector('simple', coalesce(t.text, '')) @@ websearch_to_tsquery('simple', ?))", query.Query)
@@ -135,7 +228,10 @@ func (s *Store) Messages(ctx context.Context, instanceID string, query MessageQu
 		order = "ASC NULLS LAST"
 	}
 	args = append(args, query.limit())
-	statement := `SELECT m.instance_id,m.message_id,m.chat_jid,m.sender_jid,m.sender_name,m.from_me,m.is_group,m.media_type,m.text,m.sent_at,coalesce(t.text,'')
+	// A row with neither text, media nor a reaction is a protocol message
+	// indexed by an older decoder: there is nothing in it to read.
+	conditions = append(conditions, "(m.text <> '' OR m.media_type <> '' OR m.reaction_to <> '')")
+	statement := `SELECT ` + messageColumns + `,coalesce(t.text,'')
                 FROM messages m LEFT JOIN transcriptions t ON t.instance_id = m.instance_id AND t.message_id = m.message_id
                 WHERE ` + strings.Join(conditions, " AND ") +
 		` ORDER BY m.sent_at ` + order + ` LIMIT $` + itoa(len(args))
@@ -144,15 +240,39 @@ func (s *Store) Messages(ctx context.Context, instanceID string, query MessageQu
 		return nil, err
 	}
 	defer rows.Close()
+	return scanRows(rows, true)
+}
+
+// messageColumns are the columns every message read selects, in the order
+// scanRows reads them.
+const messageColumns = `m.instance_id,m.message_id,m.chat_jid,m.sender_jid,m.sender_name,m.from_me,m.is_group,m.media_type,m.text,m.sent_at,
+	m.quoted_id,m.mentions,m.forwarded,m.reaction_to,m.reaction,m.mime_type,m.filename,m.edited,m.revoked`
+
+// visible is what counts as a message someone wrote: not a reaction, not
+// deleted, and not an empty protocol row.
+const visible = `m.reaction_to = '' AND NOT m.revoked AND (m.text <> '' OR m.media_type <> '')`
+
+// scanRows reads rows selected with messageColumns, followed by the
+// transcript when withTranscript is set.
+func scanRows(rows *sql.Rows, withTranscript bool) ([]Message, error) {
 	var result []Message
 	for rows.Next() {
 		var m Message
 		var sent sql.NullTime
-		if err := rows.Scan(&m.InstanceID, &m.MessageID, &m.ChatJID, &m.SenderJID, &m.SenderName, &m.FromMe, &m.IsGroup, &m.MediaType, &m.Text, &sent, &m.Transcript); err != nil {
+		var mentions string
+		dest := []any{&m.InstanceID, &m.MessageID, &m.ChatJID, &m.SenderJID, &m.SenderName, &m.FromMe, &m.IsGroup, &m.MediaType, &m.Text, &sent,
+			&m.QuotedID, &mentions, &m.Forwarded, &m.ReactionTo, &m.Reaction, &m.MimeType, &m.Filename, &m.Edited, &m.Revoked}
+		if withTranscript {
+			dest = append(dest, &m.Transcript)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		if sent.Valid {
 			m.SentAt = sent.Time.UTC()
+		}
+		if mentions != "" {
+			m.Mentions = strings.Split(mentions, ",")
 		}
 		result = append(result, m)
 	}
@@ -167,8 +287,8 @@ func (s *Store) OldestMessage(ctx context.Context, instanceID, chatJID string) (
 	if chatJID != "" {
 		conditions, args = conditions+" AND chat_jid = $2", append(args, chatJID)
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at
-                FROM messages WHERE `+conditions+` AND sent_at IS NOT NULL ORDER BY sent_at ASC LIMIT 1`, args...)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+messageColumns+`
+                FROM messages m WHERE `+conditions+` AND sent_at IS NOT NULL ORDER BY sent_at ASC LIMIT 1`, args...)
 	if err != nil {
 		return Message{}, err
 	}
@@ -191,21 +311,7 @@ func (s *Store) RawMessage(ctx context.Context, instanceID, messageID string) ([
 	return payload, err
 }
 
-func scanMessages(rows *sql.Rows) ([]Message, error) {
-	var result []Message
-	for rows.Next() {
-		var m Message
-		var sent sql.NullTime
-		if err := rows.Scan(&m.InstanceID, &m.MessageID, &m.ChatJID, &m.SenderJID, &m.SenderName, &m.FromMe, &m.IsGroup, &m.MediaType, &m.Text, &sent); err != nil {
-			return nil, err
-		}
-		if sent.Valid {
-			m.SentAt = sent.Time.UTC()
-		}
-		result = append(result, m)
-	}
-	return result, rows.Err()
-}
+func scanMessages(rows *sql.Rows) ([]Message, error) { return scanRows(rows, false) }
 
 // pgTextArray renders a Go slice as a PostgreSQL text array literal, which is
 // what ANY() expects from the lib/pq-style driver.
@@ -304,13 +410,12 @@ func (s *Store) GapAnchors(ctx context.Context, instanceID, chatJID string, afte
 	}
 	rows, err := s.DB.QueryContext(ctx, `
                 WITH ranked AS (
-                    SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at,
-                           row_number() OVER (PARTITION BY chat_jid ORDER BY sent_at ASC) AS position
-                    FROM messages
+                    SELECT m.*, row_number() OVER (PARTITION BY chat_jid ORDER BY sent_at ASC) AS position
+                    FROM messages m
                     WHERE instance_id = $1 AND sent_at > $2 AND ($3 = '' OR chat_jid = $3)
                 )
-                SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at
-                FROM ranked WHERE position = 1
+                SELECT `+messageColumns+`
+                FROM ranked m WHERE position = 1
                 ORDER BY sent_at ASC
                 LIMIT $4`, instanceID, after, chatJID, limit)
 	if err != nil {
@@ -349,8 +454,8 @@ func (s *Store) MessageByID(ctx context.Context, instanceID, messageID string) (
 	if instanceID == "" || messageID == "" {
 		return Message{}, errors.New("an instance and a message are both required")
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT instance_id,message_id,chat_jid,sender_jid,sender_name,from_me,is_group,media_type,text,sent_at
-                FROM messages WHERE instance_id = $1 AND message_id = $2 LIMIT 1`, instanceID, messageID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+messageColumns+`
+                FROM messages m WHERE instance_id = $1 AND message_id = $2 LIMIT 1`, instanceID, messageID)
 	if err != nil {
 		return Message{}, err
 	}
