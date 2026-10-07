@@ -15,11 +15,16 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
-## 0.5.0-beta.1
+## 1.3.0-beta.1
 
 The server version catches up with WhatsApp MCP Local 1.3.0: the same 40 MCP
 tools as Local (plus `send_contact` and `set_transcription_key`), webhooks, and the
 same control panel.
+
+The version number jumps from 0.4 to 1.3 to match WhatsApp MCP Local: from
+here on, the same version on both means the same tools and the same panel.
+The `-beta` stays until this release has been run against a real WhatsApp
+session; the schema can still change before 1.3.0.
 
 ### New tools
 
