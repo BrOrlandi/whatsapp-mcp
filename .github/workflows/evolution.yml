@@ -21,7 +21,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  # Lowercase: an image reference cannot carry the owner's capitals.
+  IMAGE: ghcr.io/brorlandi/whatsapp-mcp
   # Raise the patch number whenever deploy/evolution/patches changes.
   TAG: evolution-0.7.2-patch.1
 
