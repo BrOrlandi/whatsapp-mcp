@@ -44,7 +44,12 @@ services:
   # reachable only by whatsapp-mcp. The control panel drives it from the inside,
   # so neither its API nor its manager needs to be exposed.
   evolution-go:
-    image: evoapicloud/evolution-go:0.7.2
+    # Evolution Go 0.7.2 with the fix for its reconnect loop applied, built by
+    # this repository until Evolution releases it: the official 0.7.2 drops the
+    # WhatsApp connection about every 50 minutes and leaks a Postgres pool each
+    # time. deploy/evolution/README.md says what changed and when to go back to
+    # evoapicloud/evolution-go.
+    image: ${EVOLUTION_IMAGE:-ghcr.io/brorlandi/whatsapp-mcp:evolution-0.7.2-patch.1}
     restart: unless-stopped
     expose:
       - "4000"
@@ -62,6 +67,10 @@ services:
       # This is what makes a rebuild or a new server come up already activated
       # instead of waiting for someone to click through a form again.
       EVOLUTION_OPERATOR_EMAIL: ${EVOLUTION_OPERATOR_EMAIL:-}
+      # Brings the paired session back when the container restarts. Evolution
+      # leaves it off by default, and then a restart leaves WhatsApp
+      # disconnected until someone reconnects it from the panel.
+      CONNECT_ON_STARTUP: "true"
       POSTGRES_AUTH_DB: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres-evolution:5432/${EVOLUTION_AUTH_DB_NAME:-evogo_auth}?sslmode=disable
       POSTGRES_USERS_DB: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres-evolution:5432/${EVOLUTION_USERS_DB_NAME:-evogo_users}?sslmode=disable
       # Evolution keeps its own copy of every message when this is on, which

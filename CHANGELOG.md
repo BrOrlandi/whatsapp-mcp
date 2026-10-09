@@ -15,6 +15,52 @@ To update:
 curl -fsSL https://raw.githubusercontent.com/BrOrlandi/whatsapp-mcp/main/update.sh | sudo bash
 ```
 
+## 1.3.0-beta.2
+
+Fixes the WhatsApp connection dropping about every 50 minutes, and the
+ingestion that stopped a few days later because of it. The tools and the panel
+are those of 1.3.0-beta.1.
+
+### Fixed
+
+- **The connection no longer drops every 50 minutes.** The official Evolution
+  Go 0.7.2 loses the acknowledgement of a media Status when it reconnects, and
+  WhatsApp then ends the connection about every 50 minutes (`Unknown stream
+  error: <stream:error><ack class="status" … type="media"/>` in Evolution's log),
+  delivering the same Status again each time. Messages arrived late but were not
+  lost.
+- **Ingestion no longer stops after a few days.** Every one of those reconnects
+  left a Postgres connection pool open in Evolution, and after about a hundred
+  of them its Postgres refused new connections: Evolution could no longer load
+  the session, and nothing new was indexed.
+- **The session comes back on its own after a restart.** Evolution now
+  reconnects the paired number when its container starts
+  (`CONNECT_ON_STARTUP`), instead of leaving WhatsApp disconnected until
+  someone reconnected it from the panel.
+
+The first two are bugs in Evolution Go 0.7.2
+([evolution-go#211](https://github.com/evolution-foundation/evolution-go/issues/211),
+[#185](https://github.com/evolution-foundation/evolution-go/issues/185)).
+Their fix, [evolution-go#190](https://github.com/evolution-foundation/evolution-go/pull/190),
+has not been released, so the stack now runs an unofficial build of 0.7.2 with
+it applied: `ghcr.io/brorlandi/whatsapp-mcp:evolution-0.7.2-patch.1`, built by
+this repository (see [`deploy/evolution`](deploy/evolution/README.md)). The
+stack goes back to the official image once Evolution publishes the fix
+([#6](https://github.com/BrOrlandi/whatsapp-mcp/issues/6)).
+
+### Updating
+
+`update.sh` and the panel's Atualizar button bring the new compose file and the
+new Evolution image. Evolution's container is recreated, which reconnects
+WhatsApp once; the pairing is kept, so no QR code is needed.
+
+- **If you copied the compose file**, take the new one. It changes the
+  `evolution-go` image and adds `CONNECT_ON_STARTUP: "true"`.
+- **If Evolution's Postgres already ran out of connections** (`pq: sorry, too
+  many clients already` in Evolution's log), recreating Evolution's container
+  releases them.
+- `EVOLUTION_IMAGE` selects another Evolution image; leave it unset.
+
 ## 1.3.0-beta.1
 
 The server version catches up with WhatsApp MCP Local 1.3.0: the same 40 MCP

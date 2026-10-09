@@ -97,4 +97,5 @@ database dump is as sensitive as the phone it came from. See issue #4.
 | Evolution reported unavailable | Evolution Go has not been activated, or its container is not healthy. |
 | Panel shows an instance it refuses to operate | The instance was created outside the panel, so there is no stored token for it. |
 | Messages stop being indexed | Check the per-queue counters in `/readyz` or `whatsapp_status`; an event queue that stops advancing points at the consumer, one that never fills points at the subscription. |
+| Evolution's log shows `Unknown stream error: <stream:error><ack class="status" …>` about every 50 minutes | The official Evolution Go 0.7.2's reconnect loop ([issue #6](https://github.com/BrOrlandi/whatsapp-mcp/issues/6)). The compose runs a build with the fix; check that `EVOLUTION_IMAGE` does not point back at `evoapicloud/evolution-go:0.7.2`. See [`deploy/evolution`](../deploy/evolution/README.md). |
 | Reads return an empty period | Check the coverage in the same snapshot before concluding nothing was said. |
